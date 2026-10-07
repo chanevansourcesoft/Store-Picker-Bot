@@ -1,0 +1,41 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ROS 2 / colcon build artifacts
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# Datasets and model weights live on the Hugging Face Hub, not in Git
+outputs/
+datasets/
+checkpoints/
+*.safetensors
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.engine
+
+# Recorded media
+*.mp4
+*.avi
+*.mkv
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
