@@ -1,0 +1,33 @@
+# Jetson only. Usage (from policy/): docker compose run --rm policy <command>
+services:
+  policy:
+    build: .
+    image: store-picker-bot/policy:latest
+    runtime: nvidia
+    network_mode: host
+    ipc: host
+    # Run as the host user so files written to the repo and data folder stay owned by you.
+    user: "${UID:-1000}:${GID:-1000}"
+    group_add:
+      - "20"  # dialout: SO-100 servo boards
+      - "44"  # video: cameras and GPU
+      - "104" # render
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      HOME: /data/home
+      HF_HOME: /data/hf
+      HF_LEROBOT_HOME: /data/lerobot
+      DISPLAY: ${DISPLAY:-}
+    volumes:
+      - .:/workspace/policy
+      - ${STORE_PICKER_DATA_DIR:-/mnt/nvme/store-picker-bot-data}:/data
+      # All of /dev so arm and cameras work after re-plugging; access is limited by the rules below.
+      - /dev:/dev
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+    device_cgroup_rules:
+      - "c 81:* rmw"  # /dev/video*
+      - "c 166:* rmw" # /dev/ttyACM*
+      - "c 188:* rmw" # /dev/ttyUSB*
+    working_dir: /workspace/policy

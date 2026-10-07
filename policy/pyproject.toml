@@ -1,0 +1,26 @@
+[project]
+name = "store-picker-policy"
+version = "0.1.0"
+description = "SO-100 arm control and GR00T N1.7 policy for store-picker-bot"
+requires-python = "==3.12.*"
+dependencies = [
+    "lerobot[feetech,groot,core-scripts]==0.6.1",
+    # Listed directly only so [tool.uv.sources] applies; versions come from lerobot's bounds.
+    "torch",
+    "torchvision",
+]
+
+[tool.uv]
+package = false
+required-version = ">=0.12"
+
+# x86_64 Linux (Nebius, dev PCs): CUDA 12.8 builds, same as upstream LeRobot.
+# The Jetson uses torch from its container image instead (see Dockerfile).
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }]
+torchvision = [{ index = "pytorch-cu128", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" }]
