@@ -7,8 +7,9 @@ FROM dustynv/pytorch:2.7-r36.4.0-cu128-24.04@sha256:4bb7f0a3852f86629ed271aaf6c4
 COPY --from=ghcr.io/astral-sh/uv:0.12.23 /uv /usr/local/bin/uv
 
 # libsndfile1: needed by soundfile, which transformers imports
+# v4l-utils: v4l2-ctl for checking camera formats and controls
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libsndfile1 \
+    && apt-get install -y --no-install-recommends libsndfile1 v4l-utils \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace/policy
