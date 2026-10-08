@@ -63,25 +63,14 @@ For each arm:
 Calibration files are saved to:
 
 ```
-/mnt/nvme/store-picker-bot-data/lerobot/calibration/robots/so100_follower/picker_follower.json
-/mnt/nvme/store-picker-bot-data/lerobot/calibration/teleoperators/so100_leader/picker_leader.json
+/mnt/nvme/store-picker-bot-data/lerobot/calibration/robots/so_follower/picker_follower.json
+/mnt/nvme/store-picker-bot-data/lerobot/calibration/teleoperators/so_leader/picker_leader.json
 ```
 
 Back them up once they are good. Recalibrate only if a servo is replaced, an arm is rebuilt, or teleoperation looks offset.
 
-## 4. Test with teleoperation
-
-```bash
-docker compose run --rm policy lerobot-teleoperate \
-  --robot.type=so100_follower --robot.port=FOLLOWER_PORT --robot.id=picker_follower \
-  --teleop.type=so100_leader --teleop.port=LEADER_PORT --teleop.id=picker_leader
-```
-
-The follower should mirror the leader. Stop with Ctrl+C.
-
 ## Notes
 
 - Always use the same IDs, `picker_follower` and `picker_leader`. LeRobot finds each arm's calibration by its ID, and recording and the pick service use the same names.
-- Keep hands clear of the follower during teleoperation; it follows the leader at full speed.
 
-Next: [CAMERA_SETUP.md](CAMERA_SETUP.md).
+Next: [TELEOP_TEST.md](TELEOP_TEST.md).

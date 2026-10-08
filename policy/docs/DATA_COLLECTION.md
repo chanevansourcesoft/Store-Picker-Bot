@@ -1,7 +1,7 @@
 # Data collection
 
 How to record teleoperated demonstrations for GR00T on the Jetson, using LeRobot's own scripts.
-Complete [ARM_SETUP.md](ARM_SETUP.md) and [CAMERA_SETUP.md](CAMERA_SETUP.md) first (container built, both arms calibrated, teleoperation working, cameras checked).
+Complete [ARM_SETUP.md](ARM_SETUP.md), [TELEOP_TEST.md](TELEOP_TEST.md) and [CAMERA_SETUP.md](CAMERA_SETUP.md) first (container built, both arms calibrated, teleoperation working, cameras checked).
 
 All commands run from the `policy/` folder. Recorded data is stored in
 `/mnt/nvme/store-picker-bot-data/lerobot/<hf-user>/<dataset-name>` and can be pushed to the Hugging Face Hub.

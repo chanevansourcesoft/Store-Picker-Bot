@@ -19,9 +19,10 @@ Kept out of the ROS 2 build by `COLCON_IGNORE`.
 ## Guides
 
 1. Getting started (below): Hugging Face access and the Jetson container
-2. [ARM_SETUP.md](docs/ARM_SETUP.md): ports, servo IDs, calibration, teleoperation
-3. [CAMERA_SETUP.md](docs/CAMERA_SETUP.md): mounting, device paths, formats, exposure
-4. [DATA_COLLECTION.md](docs/DATA_COLLECTION.md): recording demonstrations and uploading them
+2. [ARM_SETUP.md](docs/ARM_SETUP.md): ports, servo IDs, calibration
+3. [TELEOP_TEST.md](docs/TELEOP_TEST.md): checking that the follower mirrors the leader
+4. [CAMERA_SETUP.md](docs/CAMERA_SETUP.md): mounting, device paths, formats, exposure
+5. [DATA_COLLECTION.md](docs/DATA_COLLECTION.md): recording demonstrations and uploading them
 
 ## Getting started (Jetson)
 
