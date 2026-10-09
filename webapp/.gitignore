@@ -1,0 +1,8 @@
+venv/
+.env
+__pycache__/
+data/*.db
+data/*.db-wal
+data/*.db-shm
+.streamlit/secrets.toml
+CLAUDE.md

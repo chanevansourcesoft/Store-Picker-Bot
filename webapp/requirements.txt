@@ -1,0 +1,8 @@
+# Only what the app needs (Python 3.10+). Versions match our tested venv.
+streamlit==1.65.0
+openai==3.26.0
+python-dotenv==1.2.4
+requests==2.34.2
+# The simulated robot (demo mode) uses these:
+fastapi==0.142.2
+pydantic==2.13.5

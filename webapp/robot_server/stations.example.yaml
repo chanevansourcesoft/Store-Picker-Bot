@@ -1,0 +1,21 @@
+# Station positions for the real robot (jetson_server.py).
+#
+# How to use:
+#   cp stations.example.yaml stations.yaml
+#   then put the real positions from your Nav2 map in stations.yaml.
+#
+# - x, y: meters in the Nav2 "map" frame (read them in RViz).
+# - theta: direction the robot faces, in radians (0 = +x, 1.57 = +y, 3.14 = -x).
+#   theta is optional (default 0).
+# - All 5 stations are required. The names must not change (the app uses them).
+# - If this file is missing or has a mistake, the server prints a warning
+#   and uses STATION_MAP inside jetson_server.py instead.
+#
+# These example values are the same as STATION_MAP in jetson_server.py.
+
+stations:
+  home:     {x: 0.0, y: 0.0, theta: 0.0}
+  shelf_A:  {x: 1.5, y: 0.0, theta: 1.57}   # facing the shelf
+  shelf_B:  {x: 1.5, y: 1.0, theta: 1.57}
+  shelf_C:  {x: 1.5, y: 2.0, theta: 1.57}
+  customer: {x: 0.0, y: 2.0, theta: 3.14}   # facing the customer

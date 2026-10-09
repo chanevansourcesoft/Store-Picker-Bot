@@ -1,0 +1,26 @@
+{
+  "soup_can": {
+    "shelf": "shelf_A",
+    "bin": "A1",
+    "barcode": "8901000000011",
+    "price": 60,
+    "weight": "heavy",
+    "stock": 10
+  },
+  "chips_pack": {
+    "shelf": "shelf_B",
+    "bin": "B1",
+    "barcode": "8901000000028",
+    "price": 20,
+    "weight": "light",
+    "stock": 15
+  },
+  "juice_box": {
+    "shelf": "shelf_C",
+    "bin": "C1",
+    "barcode": "8901000000035",
+    "price": 35,
+    "weight": "medium",
+    "stock": 12
+  }
+}

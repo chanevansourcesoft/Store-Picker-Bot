@@ -1,0 +1,13 @@
+# QuickPick look. Colors must match app/ui_style.py.
+[theme]
+base = "light"
+primaryColor = "#14A85A"
+backgroundColor = "#F3F5F4"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#18231D"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+baseRadius = "12px"
+
+[client]
+toolbarMode = "minimal"
+showSidebarNavigation = false
