@@ -1,14 +1,14 @@
 # Camera setup
 
-Set up the wrist and scene cameras on the Jetson. Only the policy process opens the cameras.
+Set up the gripper and scene cameras on the Jetson. Only the policy process opens the cameras.
 Complete "Getting started" in [README.md](../README.md) first. All commands run from the `policy/` folder.
 
 ## 1. Mount the cameras
 
 | Camera | Name | Mounting |
 |---|---|---|
-| Wrist | `wrist` | On the follower's wrist, looking along the gripper so both fingers and the item being grasped are visible |
-| Scene | `scene` | High and behind the arm, rigidly fixed to the robot, seeing the bins, the gripper, and the tray |
+| Gripper | `gripper_cam` | On the follower's gripper, looking along it so both fingers and the item being grasped are visible |
+| Scene | `scene_cam` | Overhead, looking down on the work area, rigidly fixed to the robot, seeing the bins, the gripper, and the tray |
 
 Both cameras move with the robot, so their views are the same every time the robot docks.
 Once mounted, do not move them: a policy trained on one camera position degrades if the view changes.
@@ -30,19 +30,20 @@ Prefer the stable names, which do not change when cables are re-plugged:
 ls -l /dev/v4l/by-id/
 ```
 
-Use the `...-video-index0` entries wherever `WRIST_CAM` and `SCENE_CAM` appear in the other guides.
+Use the `...-video-index0` entries wherever `GRIPPER_CAM` and `SCENE_CAM` appear in the other guides,
+and put them in the repo root `.env` ([DATA_COLLECTION.md](DATA_COLLECTION.md), step 2).
 
 ## 3. Check supported formats
 
 Both cameras must support 640×480 at 30 FPS:
 
 ```bash
-docker compose run --rm policy v4l2-ctl -d WRIST_CAM --list-formats-ext
+docker compose run --rm policy v4l2-ctl -d GRIPPER_CAM --list-formats-ext
 docker compose run --rm policy v4l2-ctl -d SCENE_CAM --list-formats-ext
 ```
 
 Look for `640x480` with `30.000 fps`, ideally under `MJPG`, which uses less USB bandwidth when both cameras run together.
-If a camera only reaches 30 FPS with MJPG, add `fourcc: MJPG` to its entry in `--robot.cameras`.
+If a camera only reaches 30 FPS with MJPG, record with `--fourcc MJPG` ([DATA_COLLECTION.md](DATA_COLLECTION.md)).
 
 ## 4. Fix exposure and focus
 
@@ -74,13 +75,14 @@ docker compose run --rm policy lerobot-find-cameras opencv
 
 Check in `policy/outputs/captured_images` that:
 
-- the wrist image shows both gripper fingers,
+- the gripper image shows both gripper fingers,
 - the scene image shows every bin, the gripper, and the tray,
 - nothing is blurred, too dark, or washed out.
 
 ## Notes
 
-- Always use the camera names `wrist` and `scene`. They become feature names in the dataset, and training and the pick service rely on them.
+- Always use the camera names `gripper_cam` and `scene_cam` (`record.py` sets them). They become feature names in the dataset
+  (`observation.images.gripper_cam`, `observation.images.scene_cam`), and training and the pick service rely on them.
 - Keep lighting, the shelf, and the dock position the same across recording sessions.
 
 Next: [DATA_COLLECTION.md](DATA_COLLECTION.md).

@@ -1,0 +1,5 @@
+# Recorded datasets (moved between machines with rsync or the Hugging Face Hub, not Git)
+data_collection/dataset/
+
+# Training runs
+training/local/outputs/

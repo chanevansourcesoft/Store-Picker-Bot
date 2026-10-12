@@ -1,10 +1,19 @@
 # policy
 
-LeRobot project for the SO-100 arm and GR00T N1.7. Runs on the Jetson as its own process and is the only process that opens the arm and both cameras (wrist and scene).
+LeRobot project for the SO-100 arm and GR00T N1.7. Runs on the Jetson as its own process and is the only process that opens the arm and both cameras (`gripper_cam` and `scene_cam`).
 
 Current step: recording real teleoperated demonstrations.
 
 Kept out of the ROS 2 build by `COLCON_IGNORE`.
+
+## Folders
+
+| Folder | What is inside |
+|---|---|
+| `data_collection/` | `record.py` for recording demonstrations; recorded datasets in `data_collection/dataset/` |
+| `training/local/` | GR00T training scripts for the local PC (2× RTX 5090) |
+| `training/nebius_cloud_ai/` | Plan for training on Nebius AI Cloud |
+| `docs/` | Step-by-step guides |
 
 ## Versions
 
@@ -13,7 +22,7 @@ Kept out of the ROS 2 build by `COLCON_IGNORE`.
 | Machine | torch |
 |---|---|
 | Jetson AGX Orin (container) | 2.7.0 from the `dustynv/pytorch` base image, built for the Orin GPU |
-| x86_64 Linux (Nebius, dev PCs) | 2.11.0+cu128 |
+| x86_64 Linux (training PC, Nebius, dev PCs) | 2.11.0+cu128 |
 | Others | 2.11.0 from PyPI |
 
 ## Guides
@@ -22,7 +31,8 @@ Kept out of the ROS 2 build by `COLCON_IGNORE`.
 2. [ARM_SETUP.md](docs/ARM_SETUP.md): ports, servo IDs, calibration
 3. [TELEOP_TEST.md](docs/TELEOP_TEST.md): checking that the follower mirrors the leader
 4. [CAMERA_SETUP.md](docs/CAMERA_SETUP.md): mounting, device paths, formats, exposure
-5. [DATA_COLLECTION.md](docs/DATA_COLLECTION.md): recording demonstrations and uploading them
+5. [DATA_COLLECTION.md](docs/DATA_COLLECTION.md): recording demonstrations and moving them to the training machine
+6. [TRAINING_LOCAL.md](docs/TRAINING_LOCAL.md): training GR00T on the local PC
 
 ## Getting started (Jetson)
 
@@ -31,9 +41,9 @@ The Jetson runs the policy in Docker so it never touches the host Python or othe
 ### Prerequisites
 
 - Jetson AGX Orin with JetPack 6.2, Docker, and the NVIDIA container runtime.
-- Data folder on the NVMe (holds the Hugging Face cache, datasets, calibration, training outputs):
+- Data folder on the NVMe (holds the Hugging Face cache and the arm calibration files):
   ```bash
-  mkdir -p /mnt/nvme/store-picker-bot-data/{hf,lerobot,outputs,home}
+  mkdir -p /mnt/nvme/store-picker-bot-data/{hf,lerobot,home}
   ```
   It is mounted in the container at `/data`. To use another location, set `STORE_PICKER_DATA_DIR`.
 
@@ -68,9 +78,12 @@ Arm serial ports and cameras are available inside the container, including after
 
 ## Other machines: uv
 
+The training PC is set up with one script: see [TRAINING_LOCAL.md](docs/TRAINING_LOCAL.md).
+On other Linux machines, install the same environment with uv (needs a C compiler, e.g. `build-essential`):
+
 ```bash
 cd policy
-uv sync
+uv sync --managed-python
 uv run lerobot-record --help
 ```
 
