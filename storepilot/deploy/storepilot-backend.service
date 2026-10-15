@@ -1,0 +1,23 @@
+# systemd USER service for the StorePilot dashboard backend.
+# Installed by deploy/install.sh to ~/.config/systemd/user/ (no sudo).
+# Logs: ~/.local/state/storepilot/backend.log  (storepilotctl logs). Paths are quoted: the repo path has spaces.
+[Unit]
+Description=StorePilot AI dashboard backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@ROOT@/backend
+Environment=PYTHONUNBUFFERED=1
+# Settings come from @ROOT@/.env (mode, Jetson URL, safety switches, API key)
+ExecStart="@ROOT@/backend/.venv/bin/python" -m uvicorn storepilot.main:app --host 127.0.0.1 --port 8080 --no-access-log
+StandardOutput=append:%h/.local/state/storepilot/backend.log
+StandardError=append:%h/.local/state/storepilot/backend.log
+Restart=always
+RestartSec=3
+# Give the server 10 s to shut down cleanly before systemd kills it
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target

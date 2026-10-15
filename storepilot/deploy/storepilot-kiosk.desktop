@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=StorePilot AI kiosk
+Comment=Opens the StorePilot dashboard full screen on the robot LCD
+Exec="@ROOT@/deploy/kiosk.sh"
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
