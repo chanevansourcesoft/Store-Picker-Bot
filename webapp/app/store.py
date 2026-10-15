@@ -14,6 +14,10 @@ from typing import Optional
 
 from app.config import ensure_inventory, load_inventory
 
+# Order statuses: queued -> packing -> one of FINISHED_STATUSES
+FINISHED_STATUSES = ("done", "done_with_problems", "failed")
+CHARGED_STATUSES = ("done", "done_with_problems")  # the bill counts as revenue
+
 # Database file path
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "orders.db"
 
@@ -279,10 +283,15 @@ def append_step_log(order_id, step_entry):
             )
 
 
-def complete_order(order_id, bill, problems=None):
-    """Mark an order as done with the final bill."""
+def complete_order(order_id, bill, problems=None, status=None):
+    """Mark an order as finished with the final bill.
+
+    status: "done", "done_with_problems" or "failed".
+    If not given: "done" without problems, else "failed".
+    """
     init_db()
-    status = "done" if not problems else "failed"
+    if status not in FINISHED_STATUSES:
+        status = "done" if not problems else "failed"
     with _transaction() as conn:
         conn.execute(
             """
@@ -342,13 +351,14 @@ def get_stats_today():
 
     total = len(orders)
     done = sum(1 for o in orders if o["status"] == "done")
+    with_problems = sum(1 for o in orders if o["status"] == "done_with_problems")
     queued = sum(1 for o in orders if o["status"] == "queued")
     packing = sum(1 for o in orders if o["status"] == "packing")
 
-    # Calculate revenue from completed orders
+    # Revenue: what we charged (done orders, and partly packed orders)
     revenue = 0
     for o in orders:
-        if o["status"] == "done":
+        if o["status"] in CHARGED_STATUSES:
             bill = o.get("bill", {})
             if isinstance(bill, dict):
                 revenue += bill.get("total", 0)
@@ -356,6 +366,7 @@ def get_stats_today():
     return {
         "total": total,
         "done": done,
+        "done_with_problems": with_problems,
         "queued": queued,
         "packing": packing,
         "revenue": revenue,

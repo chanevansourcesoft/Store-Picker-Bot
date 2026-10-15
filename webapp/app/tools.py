@@ -5,6 +5,10 @@ Contract v2: multiple shelves, basket instead of bag.
 
 TOOLS     -> the list we send to Nemotron (name, what it does, inputs)
 run_tool  -> runs the tool Nemotron picked and returns the result as text
+
+With an OrderTracker, run_tool first checks the guards (no picking too many,
+no basket for a complete item, return only at the item's own shelf).
+A refused command is NOT sent to the robot: Nemotron gets "REFUSED: ..." back.
 """
 
 import json
@@ -84,9 +88,29 @@ def _product_for_barcode(barcode, inventory):
     return None
 
 
-def run_tool(name, args):
-    """Run one tool and return the result as a JSON string (for the model)."""
+def refused(message):
+    """Result for a command the code did not send to the robot."""
+    return {"success": False, "refused": True, "message": message}
+
+
+def run_tool(name, args, tracker=None):
+    """Run one tool and return the result as a JSON string (for the model).
+
+    tracker: optional OrderTracker. It can refuse the command, and it is
+    updated with the real robot result.
+    """
     inventory = load_inventory()
+
+    # Guards: stop mistakes before they reach the robot
+    if tracker is not None:
+        if name == "pick_item":
+            reason = tracker.check_pick(args.get("item", ""))
+        elif name == "place_item":
+            reason = tracker.check_place(args.get("target", ""))
+        else:
+            reason = None
+        if reason:
+            return json.dumps(refused(reason))
 
     if name == "get_inventory":
         result = inventory
@@ -115,6 +139,8 @@ def run_tool(name, args):
     else:
         result = {"success": False, "message": f"unknown tool {name}"}
 
+    if tracker is not None:
+        tracker.record(name, args, result)
     return json.dumps(result)
 
 

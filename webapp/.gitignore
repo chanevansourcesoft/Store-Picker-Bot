@@ -5,4 +5,8 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 .streamlit/secrets.toml
+
+# Claude Code files (local only, not for GitHub)
 CLAUDE.md
+CLAUDE.local.md
+.claude/

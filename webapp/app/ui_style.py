@@ -196,6 +196,7 @@ html, body, .stApp, button, input, [data-testid="stMarkdownContainer"] {{
 .qp-pill-green  {{ background: {BRAND_GREEN_LIGHT}; color: {BRAND_GREEN_DARK}; }}
 .qp-pill-yellow {{ background: {BRAND_YELLOW_LIGHT}; color: #8A5A00; }}
 .qp-pill-blue   {{ background: #E4EEFE; color: #1D4FB8; }}
+.qp-pill-orange {{ background: #FFEBD6; color: #A34E00; }}
 .qp-pill-red    {{ background: #FDE7E8; color: #B42328; }}
 .qp-pill-grey   {{ background: #EEF1EF; color: {BRAND_MUTED}; }}
 
@@ -367,6 +368,7 @@ CUSTOMER_CSS = f"""
     padding: 1rem 1.2rem; font-size: 1.2rem; font-weight: 700; text-align: center;
 }}
 .qp-track-msg-failed {{ background: #FDE7E8; color: #B42328; }}
+.qp-track-msg-warn {{ background: #FFEBD6; color: #A34E00; }}
 .qp-track-live {{ text-align: center; color: {BRAND_MUTED}; font-size: .8rem; margin-top: .7rem; }}
 .qp-problem {{
     background: #FFF6F6; border: 1px solid #F9CFD1; color: #B42328; border-radius: 12px;
@@ -467,6 +469,7 @@ OWNER_CSS = f"""
 .qp-tl-time {{ color: #A3AEA8; font-size: .72rem; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }}
 .qp-ok {{ color: {BRAND_GREEN_DARK}; font-weight: 800; }}
 .qp-bad {{ color: {STATUS_ERROR}; font-weight: 800; }}
+.qp-warn {{ color: {STATUS_WARNING}; font-weight: 800; }}
 .qp-empty {{ text-align: center; color: {BRAND_MUTED}; padding: 1.6rem .5rem; font-size: .9rem; }}
 .qp-empty div:first-child {{ font-size: 2rem; margin-bottom: .3rem; }}
 
@@ -560,6 +563,7 @@ ORDER_STATUS_PILLS = {
     "queued": ("Queued", "yellow"),
     "packing": ("Packing", "blue"),
     "done": ("Done", "green"),
+    "done_with_problems": ("Done with problems", "orange"),
     "failed": ("Failed", "red"),
 }
 
@@ -577,8 +581,9 @@ def format_time(iso_time):
         return "-"
 
 
-def receipt_html(bill_items, total, title="Receipt", note=""):
-    """Receipt card with item lines and total."""
+def receipt_html(bill_items, total, title="Receipt", note="", paid=None):
+    """Receipt card with item lines and total.
+    paid: what the customer paid. If more than total, show the refund line."""
     rows = ""
     for line in bill_items:
         item = line["item"]
@@ -589,6 +594,10 @@ def receipt_html(bill_items, total, title="Receipt", note=""):
             <span>Rs {line['price'] * qty}</span>
         </div>
         """
+    refund_html = ""
+    if paid and paid > total:
+        refund_html = (f'<div class="qp-row" style="color:#A34E00;font-weight:700;">'
+                       f'<span>Refund (items we could not pack)</span><span>Rs {paid - total}</span></div>')
     return f"""
     <div class="qp-receipt">
         <div class="qp-receipt-head">
@@ -598,6 +607,7 @@ def receipt_html(bill_items, total, title="Receipt", note=""):
         {rows}
         <div class="qp-row qp-row-free"><span>Robot delivery</span><span>FREE</span></div>
         <div class="qp-row qp-row-total"><span>Total</span><span>Rs {total}</span></div>
+        {refund_html}
         <div class="qp-receipt-foot">{esc(note)}</div>
     </div>
     """
@@ -845,10 +855,13 @@ TOOL_ICONS = {
 
 
 def timeline_html(entries):
-    """entries: list of dicts with icon, tint, title, sub, time, ok (True/False/None), quote."""
+    """entries: list of dicts with icon, tint, title, sub, time, quote,
+    and ok: True (green ✓), False (red ✕), "recovered" (yellow ↻) or None (no mark)."""
     rows = ""
     for e in entries:
-        if e.get("ok") is True:
+        if e.get("ok") == "recovered":
+            mark = '<span class="qp-warn">↻</span>'
+        elif e.get("ok") is True:
             mark = '<span class="qp-ok">✓</span>'
         elif e.get("ok") is False:
             mark = '<span class="qp-bad">✕</span>'

@@ -6,3 +6,5 @@ requests==2.34.2
 # The simulated robot (demo mode) uses these:
 fastapi==0.142.2
 pydantic==2.13.5
+# Only for robot_server/fake_rosbridge.py (testing the live map without the robot):
+websockets==16.1.1

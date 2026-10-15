@@ -244,7 +244,7 @@ def get_tracking_step(order):
 
     if status == "queued":
         return 0
-    if status == "done" or reached_customer(log):
+    if status in ("done", "done_with_problems") or reached_customer(log):
         return 5
     if needed and count_basket_places(log) >= needed:
         return 3
@@ -272,6 +272,8 @@ def get_status_message(order):
         return "⏳", "Your order is next. The robot is getting ready."
     if status == "done":
         return "🎉", "Delivered! Please take your basket. Enjoy!"
+    if status == "done_with_problems":
+        return "📦", "Delivered, but not everything could be packed. You only pay for what you got."
     if status == "failed":
         return "😕", "Sorry, the robot could not finish your order."
 
@@ -509,20 +511,21 @@ def show_tracking():
         """)
         html(progress_bar_html(step, failed=(status == "failed")))
 
-        msg_class = "qp-track-msg qp-track-msg-failed" if status == "failed" else "qp-track-msg"
+        msg_class = {"failed": "qp-track-msg qp-track-msg-failed",
+                     "done_with_problems": "qp-track-msg qp-track-msg-warn"}.get(status, "qp-track-msg")
         html(f'<div class="{msg_class}"><span style="font-size:1.6rem;">{icon}</span>{esc(message)}</div>')
 
         problems = order.get("problems") or []
         if problems:
             html(f'<div class="qp-problem"><b>What happened:</b> {esc(" · ".join(problems))}</div>')
 
-        if status in ("done", "failed"):
+        if status in store.FINISHED_STATUSES:
             bill = order.get("bill") or {}
             bill_items = bill.get("items", []) if isinstance(bill, dict) else []
             if bill_items:
-                title = "Receipt" if status == "done" else "Partial receipt"
+                title = "Partial receipt" if status == "failed" else "Receipt"
                 note = f"Order #{order_id} · Picked by robot · Bill written by NVIDIA Nemotron"
-                html(receipt_html(bill_items, bill.get("total", 0), title, note))
+                html(receipt_html(bill_items, bill.get("total", 0), title, note, paid=bill.get("paid")))
             st.write("")
             if st.button("🛒  New order", key="new_order", use_container_width=True, type="primary"):
                 reset_for_new_order()

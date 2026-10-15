@@ -167,6 +167,9 @@ class RobotState:
         self.nav_state = "idle"  # idle, navigating, arrived, failed
         self.obstacle = False
         self.last_error: Optional[str] = None
+        # GR00T pick tries for the current unit (reset after it is placed in the basket)
+        self.pick_item: Optional[str] = None
+        self.pick_try = 0
         self.stopped = False
         self.lock = threading.Lock()
 
@@ -186,6 +189,18 @@ class RobotState:
 
 
 robot_state = RobotState()
+
+
+def succeeded(result):
+    """A command worked, so the old error is not true any more: clear it."""
+    with robot_state.lock:
+        robot_state.last_error = None
+    return result
+
+
+def log_groot(text, attempt, message):
+    """One line per pick, e.g. [GR00T] pick up the soup can (try 2) -> picked"""
+    print(f"[GR00T] {text} (try {attempt}) -> {message}", flush=True)
 
 
 # -----------------------------------------------------------------------------
@@ -424,7 +439,7 @@ async def navigate(req: NavigateRequest):
             with robot_state.lock:
                 robot_state.station = station
                 robot_state.pose = STATIONS[station].copy()
-            return {"success": True, "message": f"Arrived at {station}"}
+            return succeeded({"success": True, "message": f"Arrived at {station}"})
         else:
             return {"success": False, "message": f"Navigation to {station} failed"}
     else:
@@ -442,7 +457,7 @@ async def navigate(req: NavigateRequest):
             robot_state.nav_state = "arrived"
             robot_state.battery = max(0, robot_state.battery - 1.0)
 
-        return {"success": True, "message": f"Arrived at {station} (stub mode)"}
+        return succeeded({"success": True, "message": f"Arrived at {station} (stub mode)"})
 
 
 @app.post("/pick")
@@ -468,6 +483,11 @@ async def pick_item(req: PickRequest):
             }
 
         robot_state.busy = True
+        if robot_state.pick_item != req.item:
+            robot_state.pick_item = req.item
+            robot_state.pick_try = 0
+        robot_state.pick_try += 1
+        attempt = robot_state.pick_try
 
     # TODO: Implement actual pick using GR00T policy or arm controller
     # Example integration point:
@@ -481,11 +501,9 @@ async def pick_item(req: PickRequest):
         robot_state.holding = req.item
         robot_state.battery = max(0, robot_state.battery - 0.5)
 
-    return {
-        "success": True,
-        "message": f"Picked {req.item} from {req.shelf}",
-        "item": req.item,
-    }
+    message = f"Picked {req.item} from {req.shelf}"
+    log_groot(req.instruction or f"pick {req.item}", attempt, message)
+    return succeeded({"success": True, "message": message, "item": req.item})
 
 
 @app.post("/scan")
@@ -518,11 +536,7 @@ async def scan_item():
 
     barcode = fake_barcodes.get(item, "0000000000000")
 
-    return {
-        "success": True,
-        "barcode": barcode,
-        "product": item,
-    }
+    return succeeded({"success": True, "barcode": barcode, "product": item})
 
 
 @app.post("/place")
@@ -562,9 +576,11 @@ async def place_item(req: PlaceRequest):
         robot_state.battery = max(0, robot_state.battery - 0.3)
 
     if target == "basket":
-        return {"success": True, "message": f"placed {item} in basket"}
+        with robot_state.lock:
+            robot_state.pick_item = None  # this unit is done, next pick is try 1 again
+        return succeeded({"success": True, "message": f"placed {item} in basket"})
     else:
-        return {"success": True, "message": f"returned {item} to shelf"}
+        return succeeded({"success": True, "message": f"returned {item} to shelf"})
 
 
 @app.post("/stop")

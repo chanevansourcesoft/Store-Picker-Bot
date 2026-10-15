@@ -3,13 +3,14 @@ QuickPick Store Control - Owner Dashboard (laptop browser).
 
 Control-room look:
 - KPI cards: orders today, done, in queue, revenue
-- 2D store map with the robot, and a robot card with STOP
+- Live ROS map (rosbridge, like RViz) or the 2D store map, and a robot card with STOP
 - Live step log: robot actions and Nemotron decisions side by side
 - Live camera, orders table, stock cards with Restock
 - AI summary using Nemotron Ultra
 
 The live parts are st.fragment(run_every=2): they refresh every 2 seconds
 without reloading the whole page (so the camera stream keeps playing).
+The live ROS map is NOT inside a fragment: it keeps its own websocket open.
 """
 
 import sys
@@ -20,9 +21,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 import streamlit as st
 
-from app import robot_client, store
+from app import live_map, robot_client, store
 from app.agent import group_items_by_shelf, plan_shelf_route, strip_think
-from app.config import ROBOT_URL, MODEL_ULTRA, get_client, load_inventory
+from app.config import LASER_OFFSET, MODEL_ULTRA, ROBOT_URL, ROSBRIDGE_URL, get_client, load_inventory
+from app.step_log import is_recovered, step_target
 from app.worker import init_worker
 from app.ui_style import (
     BASE_CSS,
@@ -84,6 +86,7 @@ DEFAULT_STATIONS = {
 }
 
 REFRESH_SEC = 2
+LIVE_MAP_HEIGHT = 430
 
 
 # ============ Data (logic unchanged) ============
@@ -270,6 +273,27 @@ def robot_action_entry(entry):
     return {"icon": icon, "tint": tint, "title": title, "sub": sub, "ok": ok, "time": format_time(entry.get("time"))}
 
 
+def robot_action_entries(log):
+    """All robot actions. A failure that a later retry fixed is shown as 'Recovered' (yellow)."""
+    entries = []
+    for index, step in enumerate(log):
+        if step.get("result", {}).get("refused"):
+            continue  # never reached the robot (shown in the Nemotron lane)
+        entry = robot_action_entry(step)
+        if not step.get("result", {}).get("success") and is_recovered(log, index):
+            target = step_target(log, index) or "?"
+            name = station_name(target) if step.get("tool") == "navigate_to" else product_name(target)
+            problem = step.get("result", {}).get("message") or "failed"
+            entry.update(
+                title=f"Recovered: {problem} on {name}, retry succeeded",
+                sub=entry["title"],
+                tint=BRAND_YELLOW_LIGHT,
+                ok="recovered",
+            )
+        entries.append(entry)
+    return entries
+
+
 def nemotron_entries(order, inventory):
     """What Nemotron decided: the plan, each tool call, GR00T instructions, retries, the bill."""
     brain = {"icon": "🧠", "tint": "#E9EFEB"}
@@ -294,7 +318,10 @@ def nemotron_entries(order, inventory):
             "sub": args,
             "time": format_time(entry.get("time")),
         }
-        if data.get("instruction"):
+        if entry.get("result", {}).get("refused"):
+            item.update(icon="🛡️", tint="#FFEBD6", title=f"Blocked by code: {tool}",
+                        sub=entry["result"].get("message", ""), ok=False)
+        elif data.get("instruction"):
             item["title"] = "Instruction for GR00T"
             item["quote"] = data["instruction"]
             item["tint"] = BRAND_YELLOW_LIGHT
@@ -304,9 +331,9 @@ def nemotron_entries(order, inventory):
         prev = entry
 
     bill = order.get("bill") or {}
-    if order["status"] == "done" and isinstance(bill, dict):
+    if order["status"] in ("done", "done_with_problems") and isinstance(bill, dict):
         entries.append(dict(brain, title="Wrote the bill", sub=f"Total Rs {bill.get('total', 0)}", ok=True))
-    elif order["status"] == "failed":
+    if order["status"] in ("done_with_problems", "failed"):
         entries.append(dict(brain, title="Reported a problem", sub=" · ".join(order.get("problems") or []), ok=False))
     return entries
 
@@ -317,22 +344,17 @@ inject_css(BASE_CSS, OWNER_CSS)
 
 
 @st.fragment(run_every=REFRESH_SEC)
-def live_overview():
-    """Header, KPIs, store map and robot card."""
+def live_header():
+    """Header and KPI cards."""
     stats = store.get_stats_today()
-    robot = get_robot_status()
-    stations = get_station_map()
-    current_order = store.get_current_packing_order()
-    inventory = load_inventory()
-    robot_state = get_robot_state(robot, current_order)
-
-    html(owner_header_html(robot["online"], demo=robot_client.is_demo_mode()))
+    robot_online = robot_client.health().get("status") == "ok"
+    html(owner_header_html(robot_online, demo=robot_client.is_demo_mode()))
 
     # KPI cards
     done_pct = round(100 * stats["done"] / stats["total"]) if stats["total"] else 0
     kpis = [
         ("📦", stats["total"], "Orders today", "since midnight", "#E4EEFE"),
-        ("✅", stats["done"], "Done", f"{done_pct}% of today's orders", BRAND_GREEN_LIGHT),
+        ("✅", stats["done"], "Done", f"{done_pct}% · +{stats['done_with_problems']} with problems", BRAND_GREEN_LIGHT),
         ("⏳", stats["queued"], "In queue", f"+{stats['packing']} packing now", BRAND_YELLOW_LIGHT),
         ("💰", f"Rs {stats['revenue']}", "Revenue", "from done orders", "#EEE8FD"),
     ]
@@ -340,31 +362,83 @@ def live_overview():
         with col:
             html(kpi_card_html(icon, value, label, sub, tint))
 
-    st.write("")
-    col_map, col_robot = st.columns([1.6, 1], gap="medium")
 
-    # Store map
-    with col_map, st.container(key="card_map"):
-        shelf_icons = {}
-        for name, info in inventory.items():
-            shelf_icons.setdefault(info.get("shelf"), []).append(product_emoji(name))
-        route = order_route(current_order, inventory)
-        route_note = (" → ".join(station_name(s) for s in route)) if route else "no active route"
-        html(f"""
-        <div class="qp-card-title" style="justify-content:space-between;margin-bottom:.6rem;">
-            <span>🗺️ Store map</span><span class="qp-card-sub">Route: {esc(route_note)}</span>
-        </div>
-        <div class="qp-map">{store_map_svg(stations, robot["pose"], robot_state, route, shelf_icons)}</div>
-        <div class="qp-legend">
-            <span><i style="background:{BRAND_GREEN};border-radius:50%;"></i>Robot</span>
-            <span><i style="background:#FFF8E6;border:2px solid #FFB627;"></i>Shelf in current order</span>
-            <span><i style="background:{BRAND_GREEN_LIGHT};border:2px dashed {BRAND_GREEN};"></i>Home</span>
-            <span><i style="background:#FFF4DA;border:2px solid #FFB627;"></i>Customer</span>
-        </div>
-        """)
+@st.cache_data(ttl=10, show_spinner=False)
+def rosbridge_reachable(url):
+    """Quick TCP check from this server (cached 10 s, so pages stay fast)."""
+    return live_map.rosbridge_reachable(url)
 
-    # Robot card
-    with col_robot, st.container(key="card_robot"):
+
+@st.cache_data(ttl=60, show_spinner=False)
+def live_map_page(url, laser_offset):
+    """HTML for the live map. Same text every time -> the iframe is not reloaded."""
+    return live_map.live_map_html(url, get_station_map(), laser_offset)
+
+
+def map_card():
+    """Live ROS map if rosbridge answers, else the 2D store map (fallback)."""
+    with st.container(key="card_map"):
+        reachable = rosbridge_reachable(ROSBRIDGE_URL)
+        c1, c2 = st.columns([3, 1.3], vertical_alignment="center")
+        with c1:
+            html('<div class="qp-card-title">🗺️ Store map</div>')
+        with c2:
+            use_live = st.toggle("Live ROS map", value=True, key="live_map_on", disabled=not reachable,
+                                 help=f"rosbridge at {ROSBRIDGE_URL}")
+        if reachable and use_live:
+            st.iframe(live_map_page(ROSBRIDGE_URL, LASER_OFFSET), height=LIVE_MAP_HEIGHT)
+            html('<div class="qp-legend"><span><i style="background:#16a34a;"></i>Robot / plan</span>'
+                 '<span><i style="background:#e11d48;"></i>Laser scan</span>'
+                 '<span><i style="background:#f59e0b;border-radius:50%;"></i>Station</span>'
+                 '<span class="qp-card-sub">Drag to move · wheel to zoom</span></div>')
+            return
+        if not reachable:
+            html(f'<div class="qp-card-sub">Live map off: rosbridge at {esc(ROSBRIDGE_URL)} '
+                 'is not reachable. Showing the static map (checking again every 10 s).</div>')
+            watch_rosbridge()
+        live_static_map()
+
+
+@st.fragment(run_every=10)
+def watch_rosbridge():
+    """When rosbridge comes back, reload the page so the live map shows."""
+    if live_map.rosbridge_reachable(ROSBRIDGE_URL):
+        rosbridge_reachable.clear()
+        st.rerun()
+
+
+@st.fragment(run_every=REFRESH_SEC)
+def live_static_map():
+    """2D store map from the robot API (no ROS needed)."""
+    robot = get_robot_status()
+    stations = get_station_map()
+    current_order = store.get_current_packing_order()
+    inventory = load_inventory()
+    robot_state = get_robot_state(robot, current_order)
+    shelf_icons = {}
+    for name, info in inventory.items():
+        shelf_icons.setdefault(info.get("shelf"), []).append(product_emoji(name))
+    route = order_route(current_order, inventory)
+    route_note = (" → ".join(station_name(s) for s in route)) if route else "no active route"
+    html(f"""
+    <div class="qp-card-sub" style="margin-bottom:.6rem;">Route: {esc(route_note)}</div>
+    <div class="qp-map">{store_map_svg(stations, robot["pose"], robot_state, route, shelf_icons)}</div>
+    <div class="qp-legend">
+        <span><i style="background:{BRAND_GREEN};border-radius:50%;"></i>Robot</span>
+        <span><i style="background:#FFF8E6;border:2px solid #FFB627;"></i>Shelf in current order</span>
+        <span><i style="background:{BRAND_GREEN_LIGHT};border:2px dashed {BRAND_GREEN};"></i>Home</span>
+        <span><i style="background:#FFF4DA;border:2px solid #FFB627;"></i>Customer</span>
+    </div>
+    """)
+
+
+@st.fragment(run_every=REFRESH_SEC)
+def live_robot_card():
+    """Robot state, battery, task, alerts, STOP and Resume."""
+    robot = get_robot_status()
+    current_order = store.get_current_packing_order()
+    robot_state = get_robot_state(robot, current_order)
+    with st.container(key="card_robot"):
         pills = {
             "idle": status_pill("Idle", "green", dot=True),
             "busy": status_pill("Busy", "yellow", dot=True),
@@ -453,7 +527,7 @@ def live_step_log():
             html('<div class="qp-lane-title">🤖 Robot actions</div>')
             with st.container(height=360, border=False, autoscroll=True):
                 if log:
-                    html(timeline_html([robot_action_entry(e) for e in log]))
+                    html(timeline_html(robot_action_entries(log)))
                 else:
                     html(empty_html("⏳", "Waiting for the first robot action..."))
         with lane_brain:
@@ -575,7 +649,13 @@ def ai_summary_card():
 
 # ============ Layout ============
 
-live_overview()
+live_header()
+st.write("")
+col_map, col_robot = st.columns([1.6, 1], gap="medium")
+with col_map:
+    map_card()
+with col_robot:
+    live_robot_card()
 st.write("")
 
 col_log, col_cam = st.columns([1.6, 1], gap="medium")

@@ -34,6 +34,10 @@ NEBIUS_API_KEY = get_setting("NEBIUS_API_KEY")
 ROBOT_URL = get_setting("ROBOT_URL", "http://localhost:8000")
 # DEMO_MODE=1 -> always use the simulated robot (no robot server needed)
 DEMO_MODE = get_setting("DEMO_MODE", "0").strip().lower() in ("1", "true", "yes")
+# rosbridge on the Jetson, for the live map on the owner dashboard (browser connects to it)
+ROSBRIDGE_URL = get_setting("ROSBRIDGE_URL", "ws://192.168.149.1:9090")
+# Laser position on the robot: "x,y,yaw" (meters, radians) from base_link. "0,0,0" = ignore.
+LASER_OFFSET = get_setting("LASER_OFFSET", "0,0,0")
 
 # Fast model for simple jobs (reading orders)
 MODEL_FAST = "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B"

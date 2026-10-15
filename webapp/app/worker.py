@@ -23,7 +23,8 @@ _worker_lock = threading.Lock()
 def process_single_order(order_id: int, on_step: Optional[Callable] = None):
     """
     Process one order. Updates the database with status, step_log, etc.
-    Reduces stock only after items are successfully placed in basket.
+    Reduces stock only after items are successfully placed in basket,
+    and never more than the ordered qty (an extra item is not sold).
     """
     order = store.get_order(order_id)
     if not order:
@@ -31,6 +32,12 @@ def process_single_order(order_id: int, on_step: Optional[Callable] = None):
 
     items = order["items"]
     inventory = load_inventory()
+
+    # Ordered qty per item, and how many we already took from stock
+    ordered = {}
+    for entry in items:
+        ordered[entry["item"]] = ordered.get(entry["item"], 0) + entry["qty"]
+    taken = {}
 
     # Mark as packing
     store.update_order_status(order_id, "packing", current_task="Starting", station="home")
@@ -43,6 +50,12 @@ def process_single_order(order_id: int, on_step: Optional[Callable] = None):
         # Update current task based on the tool
         tool = entry["tool"]
         result = entry["result"]
+
+        if result.get("refused"):
+            store.update_order_task(order_id, "Blocked a wrong command")
+            if on_step:
+                on_step(entry)
+            return
 
         if tool == "navigate_to":
             station = entry["input"].get("station", "")
@@ -75,8 +88,12 @@ def process_single_order(order_id: int, on_step: Optional[Callable] = None):
                     match = re.search(r"placed (\S+) in basket", msg)
                     if match:
                         item_name = match.group(1)
-                        store.reduce_stock(item_name, 1)
-                        store.update_order_task(order_id, f"Packed {item_name}")
+                        if taken.get(item_name, 0) < ordered.get(item_name, 0):
+                            taken[item_name] = taken.get(item_name, 0) + 1
+                            store.reduce_stock(item_name, 1)
+                            store.update_order_task(order_id, f"Packed {item_name}")
+                        else:
+                            store.update_order_task(order_id, f"Extra {item_name} (not charged)")
                 else:
                     store.update_order_task(order_id, "Returned item")
             else:
@@ -96,12 +113,8 @@ def process_single_order(order_id: int, on_step: Optional[Callable] = None):
         # Run the agent
         bill, log = run_agent(order_dict, on_step=step_callback)
 
-        # Complete the order
-        problems = bill.get("problems", [])
-        if problems:
-            store.complete_order(order_id, bill, problems)
-        else:
-            store.complete_order(order_id, bill)
+        # Complete the order (the agent decides done / done_with_problems / failed)
+        store.complete_order(order_id, bill, bill.get("problems", []), status=bill.get("status"))
 
     except Exception as e:
         # Mark as failed
@@ -204,7 +217,7 @@ if __name__ == "__main__":
             time.sleep(1)
             order = store.get_order(order_id)
             print(f"  Status: {order['status']}, Task: {order.get('current_task')}")
-            if order["status"] in ("done", "failed"):
+            if order["status"] in store.FINISHED_STATUSES:
                 print(f"\nFinal order: {json.dumps(order, indent=2)}")
                 break
     else:

@@ -5,8 +5,7 @@ Run:
     python -m app.test_agent
 """
 
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from app.agent import (
     build_bill_from_log,
@@ -15,6 +14,20 @@ from app.agent import (
     sort_items_by_weight,
     suggest_similar,
 )
+from app.config import DEFAULT_INVENTORY
+from app.testing_fakes import BASKET, SCAN, FakeRobot, ScriptedModel, nav, pick
+
+
+def run_with_fakes(order_items, script, **robot_failures):
+    """Run the real agent with a scripted model and a fake robot."""
+    robot = FakeRobot(DEFAULT_INVENTORY, **robot_failures)
+    model = ScriptedModel(script)
+    order = {"items": order_items, "unknown": []}
+    with patch("app.tools.robot_client", robot), patch("app.agent.robot_client", robot), \
+            patch("app.tools.load_inventory", return_value=DEFAULT_INVENTORY), \
+            patch("app.agent.load_inventory", return_value=DEFAULT_INVENTORY):
+        bill, log = run_agent(order, client=model)
+    return bill, log, robot, model
 
 
 def test_build_bill_from_log():
@@ -58,30 +71,44 @@ def test_build_bill_from_log():
     assert bill["items"] == [], "Returned items should not be billed"
     assert bill["total"] == 0
 
+    # 3 soups in the basket, but only 2 ordered: bill 2, report 1 extra
+    order_2 = {"items": [{"item": "soup_can", "qty": 2}], "unknown": []}
+    placed = {"tool": "place_item", "input": {"target": "basket"},
+              "result": {"success": True, "message": "placed soup_can in basket"}}
+    bill = build_bill_from_log([placed, placed, placed], order_2, inventory)
+    assert bill["items"] == [{"item": "soup_can", "qty": 2, "price": 60}]
+    assert bill["total"] == 120 and bill["paid"] == 120
+    assert bill["problems"] == ["1 extra soup_can, not charged"]
+
     print("PASS: test_build_bill_from_log")
 
 
 def test_check_order_complete():
-    """Check if order completion detection works."""
-    inventory = {"soup_can": {"price": 60}}
+    """Complete = packed equals ordered for every item, nothing extra, holding nothing."""
     order = {"items": [{"item": "soup_can", "qty": 2}], "unknown": []}
 
     # Nothing packed
-    is_complete, missing = check_order_complete(order, [], inventory)
+    is_complete, missing, extra = check_order_complete(order, [])
     assert not is_complete
-    assert missing == [{"item": "soup_can", "qty": 2}]
+    assert missing == [{"item": "soup_can", "qty": 2}] and extra == []
 
     # Partial
-    packed = [{"item": "soup_can", "qty": 1}]
-    is_complete, missing = check_order_complete(order, packed, inventory)
+    is_complete, missing, extra = check_order_complete(order, [{"item": "soup_can", "qty": 1}])
     assert not is_complete
     assert missing == [{"item": "soup_can", "qty": 1}]
 
     # Complete
-    packed = [{"item": "soup_can", "qty": 2}]
-    is_complete, missing = check_order_complete(order, packed, inventory)
-    assert is_complete
-    assert missing == []
+    is_complete, missing, extra = check_order_complete(order, [{"item": "soup_can", "qty": 2}])
+    assert is_complete and missing == [] and extra == []
+
+    # Too many: not complete
+    is_complete, missing, extra = check_order_complete(order, [{"item": "soup_can", "qty": 3}])
+    assert not is_complete and missing == []
+    assert extra == [{"item": "soup_can", "qty": 1}]
+
+    # Right count, but the robot still holds something: not complete
+    is_complete, _, _ = check_order_complete(order, [{"item": "soup_can", "qty": 2}], holding="chips_pack")
+    assert not is_complete
 
     print("PASS: test_check_order_complete")
 
@@ -133,93 +160,50 @@ def test_suggest_similar():
 
 
 def test_early_stop_detection():
-    """
-    Test that if the model stops early (robot still holding), the system
-    detects this and either continues or reports the problem.
-    """
-    # Create a fake client that makes the model stop after scan (no place_item)
-    call_count = [0]
+    """The model says DONE while the robot still holds an item: it is told, and it places it."""
+    script = [nav("shelf_A"), pick("soup_can"), SCAN, None,  # None = DONE too early
+              BASKET, nav("customer"), nav("home")]
+    bill, log, robot, model = run_with_fakes([{"item": "soup_can", "qty": 1}], script)
 
-    class FakeChoice:
-        def __init__(self, tool_calls=None, content=None):
-            self.message = MagicMock()
-            self.message.tool_calls = tool_calls
-            self.message.content = content
-            self.finish_reason = "stop" if not tool_calls else "tool_calls"
+    hints = [m["content"] for msgs in model.seen_messages for m in msgs if m["role"] == "user"]
+    assert any("still holding soup_can" in h for h in hints), "Model should be told it still holds the item"
+    assert robot.holding is None
+    assert bill["status"] == "done", bill
+    assert bill["total"] == 60
+    print("PASS: test_early_stop_detection")
 
-    class FakeResponse:
-        def __init__(self, tool_calls=None, content=None):
-            self.choices = [FakeChoice(tool_calls, content)]
 
-    class FakeToolCall:
-        def __init__(self, name, args):
-            self.id = f"call_{name}"
-            self.function = MagicMock()
-            self.function.name = name
-            self.function.arguments = json.dumps(args)
+def test_still_holding_at_end_is_put_back():
+    """The model never places the item: the CODE puts it back on its own shelf."""
+    script = [nav("shelf_A"), pick("soup_can"), nav("customer")]  # then only DONE
+    bill, log, robot, model = run_with_fakes([{"item": "soup_can", "qty": 1}], script)
 
-    def fake_create(**kwargs):
-        call_count[0] += 1
+    assert robot.holding is None, "Item must be back on the shelf"
+    assert robot.station == "shelf_A", "Code drove to the item's own shelf to return it"
+    assert any(e.get("by") == "code" for e in log)
+    assert bill["status"] == "failed" and bill["total"] == 0
+    assert any("still holding soup_can" in p for p in bill["problems"])
+    print("PASS: test_still_holding_at_end_is_put_back")
 
-        # First call: model calls get_inventory
-        if call_count[0] == 1:
-            return FakeResponse(tool_calls=[FakeToolCall("get_inventory", {})])
 
-        # Second call: model calls pick_item
-        if call_count[0] == 2:
-            return FakeResponse(tool_calls=[FakeToolCall("pick_item", {"item": "soup_can"})])
+def test_model_picks_too_many_is_refused():
+    """A model that tries to pick more than ordered is refused; the robot never gets it."""
+    script = [nav("shelf_A"), pick("soup_can"), SCAN, BASKET,
+              pick("soup_can"), pick("soup_can"),          # 2 more: too many
+              nav("customer"), nav("home")]
+    bill, log, robot, model = run_with_fakes([{"item": "soup_can", "qty": 1}], script)
 
-        # Third call: model calls scan_item
-        if call_count[0] == 3:
-            return FakeResponse(tool_calls=[FakeToolCall("scan_item", {})])
+    refused = [e for e in log if e["result"].get("refused")]
+    assert len(refused) == 2, refused
+    assert all("already complete (1/1 packed)" in e["result"]["message"] for e in refused)
+    assert robot.picks_sent("soup_can") == 1, "Robot must get only 1 pick"
 
-        # Fourth call: model says DONE without calling place_item (BUG!)
-        if call_count[0] == 4:
-            return FakeResponse(content="DONE")
+    # Nemotron got the progress line after the tool results
+    assert any("Progress: soup_can 1/1 packed" in t for t in model.tool_messages())
 
-        # Fifth call: after being told robot is holding, model places item
-        if call_count[0] == 5:
-            return FakeResponse(tool_calls=[FakeToolCall("place_item", {"target": "basket"})])
-
-        # Sixth call: model says DONE
-        return FakeResponse(content="DONE - all items packed")
-
-    fake_client = MagicMock()
-    fake_client.chat.completions.create = fake_create
-
-    order = {"items": [{"item": "soup_can", "qty": 1}], "unknown": []}
-
-    with patch("app.agent.robot_client") as mock_robot:
-        # Mock robot status to show it's holding something after first DONE
-        status_calls = [0]
-        def mock_status():
-            status_calls[0] += 1
-            if status_calls[0] == 1:
-                return {"holding": "soup_can"}  # Still holding!
-            return {"holding": None}  # After place_item
-
-        mock_robot.status = mock_status
-        mock_robot.place = MagicMock(return_value={"success": True, "message": "placed soup_can in basket"})
-
-        bill, log = run_agent(order, client=fake_client)
-
-    # The system should have detected the problem and either:
-    # 1. Continued the agent to place the item, OR
-    # 2. Reported the problem in the bill
-
-    # Check that place_item was eventually called
-    place_calls = [e for e in log if e["tool"] == "place_item"]
-
-    if place_calls:
-        # Agent was continued and placed the item
-        assert any(e["input"].get("target") == "basket" for e in place_calls), \
-            "Item should have been placed in basket"
-        print("PASS: test_early_stop_detection (agent continued and placed item)")
-    else:
-        # Problem was reported
-        assert "holding" in str(bill.get("problems", [])).lower() or bill["total"] == 0, \
-            "If item was not placed, bill should be 0 or have a problem reported"
-        print("PASS: test_early_stop_detection (problem was reported)")
+    assert bill["items"] == [{"item": "soup_can", "qty": 1, "price": 60}]
+    assert bill["status"] == "done", bill
+    print("PASS: test_model_picks_too_many_is_refused")
 
 
 def run_all_tests():
@@ -231,6 +215,8 @@ def run_all_tests():
     test_sort_items_by_weight()
     test_suggest_similar()
     test_early_stop_detection()
+    test_still_holding_at_end_is_put_back()
+    test_model_picks_too_many_is_refused()
 
     print("\nAll tests passed!")
 

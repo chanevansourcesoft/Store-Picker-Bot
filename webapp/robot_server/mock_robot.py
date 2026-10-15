@@ -1,7 +1,7 @@
 """
 Mock robot server (Contract v2).
 
-It follows the same API contract as the real robot server (see CLAUDE.md).
+It follows the same API contract as the real robot server (see robot_server/README.md).
 The app team uses this until the real mobile robot is ready.
 
 Run:
@@ -58,6 +58,9 @@ state = {
     "obstacle": False,
     "last_error": None,
     "stopped": False,
+    # GR00T pick tries for the current unit (reset after it is placed in the basket)
+    "pick_item": None,
+    "pick_try": 0,
 }
 
 
@@ -78,6 +81,27 @@ class PlaceRequest(BaseModel):
 def fail(message):
     state["last_error"] = message
     return {"success": False, "message": message}
+
+
+def succeeded(result):
+    """A command worked, so the old error is not true any more: clear it."""
+    state["last_error"] = None
+    return result
+
+
+def count_pick_try(item):
+    """Return the try number for this item (1, 2, ...)."""
+    if state["pick_item"] != item:
+        state["pick_item"] = item
+        state["pick_try"] = 0
+    state["pick_try"] += 1
+    return state["pick_try"]
+
+
+def log_groot(req, attempt, result):
+    """One line per pick, e.g. [GR00T] pick up the soup can (try 2) -> picked"""
+    text = req.instruction or f"pick {req.item}"
+    print(f"[GR00T] {text} (try {attempt}) -> {result['message']}", flush=True)
 
 
 def drain_battery(amount=0.1):
@@ -140,7 +164,7 @@ def navigate(req: NavigateRequest):
     if req.station not in VALID_STATIONS:
         return fail(f"unknown station '{req.station}', must be one of: {', '.join(sorted(VALID_STATIONS))}")
     if state["station"] == req.station:
-        return {"success": True, "message": f"already at {req.station}"}
+        return succeeded({"success": True, "message": f"already at {req.station}"})
 
     state["busy"] = True
     state["nav_state"] = "navigating"
@@ -162,7 +186,7 @@ def navigate(req: NavigateRequest):
     state["station"] = req.station
     move_to_station(req.station)
 
-    return {"success": True, "message": f"arrived at {req.station}"}
+    return succeeded({"success": True, "message": f"arrived at {req.station}"})
 
 
 @app.post("/pick")
@@ -183,9 +207,7 @@ def pick(req: PickRequest):
     if not state["station"].startswith("shelf"):
         return fail(f"not at a shelf, currently at {state['station']}")
 
-    # Log instruction if provided (for debugging)
-    if req.instruction:
-        print(f"[GR00T instruction]: {req.instruction}")
+    attempt = count_pick_try(req.item)
 
     state["busy"] = True
     time.sleep(FAKE_DELAY_SEC)
@@ -193,11 +215,14 @@ def pick(req: PickRequest):
     state["busy"] = False
 
     if random.random() < PICK_FAIL_RATE:
-        return fail("grasp failed")
+        result = fail("grasp failed")
+    else:
+        state["holding"] = req.item
+        state["from_shelf"] = req.shelf
+        result = succeeded({"success": True, "message": "picked"})
 
-    state["holding"] = req.item
-    state["from_shelf"] = req.shelf
-    return {"success": True, "message": "picked"}
+    log_groot(req, attempt, result)
+    return result
 
 
 @app.post("/scan")
@@ -214,11 +239,12 @@ def scan():
     drain_battery(0.1)
 
     if random.random() < SCAN_FAIL_RATE:
+        state["last_error"] = "barcode not readable"
         return {"success": False, "barcode": None, "message": "barcode not readable"}
 
     inventory = load_inventory()
     barcode = inventory[state["holding"]]["barcode"]
-    return {"success": True, "barcode": barcode}
+    return succeeded({"success": True, "barcode": barcode})
 
 
 @app.post("/place")
@@ -232,6 +258,12 @@ def place(req: PlaceRequest):
         return fail("not holding anything")
     if req.target not in ("basket", "return"):
         return fail("target must be 'basket' or 'return'")
+    if req.target == "return":
+        # Like a real store: an item goes back only on its own shelf
+        item_shelf = load_inventory().get(state["holding"], {}).get("shelf")
+        if state["station"] != item_shelf:
+            return fail(f"cannot return {state['holding']} here: it belongs on {item_shelf}, "
+                        f"robot is at {state['station']}")
 
     time.sleep(FAKE_DELAY_SEC)
     drain_battery(0.1)
@@ -241,8 +273,9 @@ def place(req: PlaceRequest):
     state["from_shelf"] = None
 
     if req.target == "basket":
-        return {"success": True, "message": f"placed {item} in basket"}
-    return {"success": True, "message": f"returned {item} to shelf"}
+        state["pick_item"] = None  # this unit is done, next pick is try 1 again
+        return succeeded({"success": True, "message": f"placed {item} in basket"})
+    return succeeded({"success": True, "message": f"returned {item} to shelf"})
 
 
 @app.post("/stop")

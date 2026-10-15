@@ -11,6 +11,11 @@ The agent:
 5. Returns a bill with items packed, total, and any problems.
 
 The bill is built by CODE from successful place_item(basket) calls, not by the model.
+The CODE keeps the order truth (OrderTracker): it refuses wrong robot commands and
+sends Nemotron a progress line after every tool call, so the model cannot lose count.
+
+Final status: "done" (exactly as ordered), "done_with_problems" (some items packed,
+but missing/extra items), or "failed" (nothing packed).
 
 Run:
     python -m app.agent "2 soup cans and one chips"
@@ -25,6 +30,7 @@ from datetime import datetime
 from app import robot_client
 from app.config import MODEL_AGENT, get_client, load_inventory
 from app.order_parser import parse_order
+from app.order_tracker import OrderTracker
 from app.tools import TOOLS, run_tool
 
 MAX_STEPS = 60  # Stop the loop after this many tool calls.
@@ -148,7 +154,11 @@ RULES:
 - ALWAYS call place_item (basket or return) before picking the next item or navigating.
 - If a tool fails, read the error message and decide what to do.
 - Pack heavy items first at each shelf, then medium, then light.
-- Always write a short instruction for pick_item so the GR00T policy knows what to do."""
+- Always write a short instruction for pick_item so the GR00T policy knows what to do.
+- After every tool result the system adds a "Progress:" line. It is the truth.
+  Trust it more than your memory: it says what is packed and what the robot holds.
+- If a command result says "REFUSED", the robot did NOT do it. Read why and follow the advice.
+- Return an item only at ITS OWN shelf (navigate there first)."""
 
     if packed_so_far:
         prompt += f"\n\nALREADY PACKED: {packed_so_far}"
@@ -159,8 +169,20 @@ RULES:
     return prompt
 
 
+def ordered_counts(order):
+    """{"soup_can": 2, ...} from the order items (duplicates added up)."""
+    counts = {}
+    for entry in order["items"]:
+        counts[entry["item"]] = counts.get(entry["item"], 0) + entry["qty"]
+    return counts
+
+
 def build_bill_from_log(log, order, inventory):
-    """Build the bill from the step log. Only count successful place_item(basket) calls."""
+    """Build the bill from the step log. Only count successful place_item(basket) calls.
+
+    Never charge more than the customer paid: each item is billed only up to the
+    ordered qty. Extra items are listed as problems ("1 extra soup_can, not charged").
+    """
     packed = {}  # item -> count
 
     for entry in log:
@@ -175,24 +197,32 @@ def build_bill_from_log(log, order, inventory):
                     item = match.group(1)
                     packed[item] = packed.get(item, 0) + 1
 
-    # Build bill items
+    ordered = ordered_counts(order)
     bill_items = []
+    problems = []
     total = 0
     for item, qty in packed.items():
+        charged = min(qty, ordered.get(item, 0))
+        extra = qty - charged
         price = inventory.get(item, {}).get("price", 0)
-        bill_items.append({"item": item, "qty": qty, "price": price})
-        total += price * qty
+        if charged:
+            bill_items.append({"item": item, "qty": charged, "price": price})
+            total += price * charged
+        if extra:
+            problems.append(f"{extra} extra {item}, not charged")
 
-    return {"items": bill_items, "total": total, "problems": []}
+    paid = sum(qty * inventory.get(item, {}).get("price", 0) for item, qty in ordered.items())
+    return {"items": bill_items, "total": total, "paid": paid, "problems": problems}
 
 
-def check_order_complete(order, packed_items, inventory):
-    """Check if the order is complete. Returns (is_complete, missing_items)."""
-    # Count what we need
-    needed = {}
-    for entry in order["items"]:
-        item = entry["item"]
-        needed[item] = needed.get(item, 0) + entry["qty"]
+def check_order_complete(order, packed_items, holding=None):
+    """Check the order against what is in the basket.
+
+    packed_items: [{"item", "qty"}] really in the basket (charged or not).
+    Returns (is_complete, missing, extra). Complete = packed equals ordered for
+    every item, nothing extra, and the robot holds nothing.
+    """
+    needed = ordered_counts(order)
 
     # Count what we packed
     packed = {}
@@ -200,20 +230,26 @@ def check_order_complete(order, packed_items, inventory):
         item = entry["item"]
         packed[item] = packed.get(item, 0) + entry["qty"]
 
-    # Find missing
     missing = []
     for item, qty in needed.items():
         packed_qty = packed.get(item, 0)
         if packed_qty < qty:
             missing.append({"item": item, "qty": qty - packed_qty})
 
-    return len(missing) == 0, missing
+    extra = []
+    for item, qty in packed.items():
+        if qty > needed.get(item, 0):
+            extra.append({"item": item, "qty": qty - needed.get(item, 0)})
+
+    is_complete = not missing and not extra and not holding
+    return is_complete, missing, extra
 
 
-def run_agent_loop(messages, inventory, log, step_offset=0, client=None, on_step=None):
+def run_agent_loop(messages, inventory, log, step_offset=0, client=None, on_step=None, tracker=None):
     """Run the agent loop. Returns (log, stopped_reason, step).
 
     on_step: optional callback(step_entry) called after each tool call.
+    tracker: optional OrderTracker (guards + progress line after every tool call).
     """
     if client is None:
         client = get_client()
@@ -251,7 +287,7 @@ def run_agent_loop(messages, inventory, log, step_offset=0, client=None, on_step
                 except json.JSONDecodeError:
                     tool_args = {}
 
-                tool_result = run_tool(tool_name, tool_args)
+                tool_result = run_tool(tool_name, tool_args, tracker)
 
                 step_entry = {
                     "step": step,
@@ -266,11 +302,14 @@ def run_agent_loop(messages, inventory, log, step_offset=0, client=None, on_step
                 if on_step:
                     on_step(step_entry)
 
-                # Add tool result to messages
+                # Add tool result to messages, with the progress line from the code
+                content = tool_result
+                if tracker is not None:
+                    content += "\n" + tracker.progress_line()
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
-                    "content": tool_result,
+                    "content": content,
                 })
 
         # If the model is done (no tool calls)
@@ -288,10 +327,36 @@ def run_agent_loop(messages, inventory, log, step_offset=0, client=None, on_step
     return log, "max_steps", step
 
 
+def run_code_step(tool, args, tracker, log, on_step=None):
+    """A robot command sent by the CODE (not the model), logged like the others."""
+    result = json.loads(run_tool(tool, args, tracker))
+    entry = {
+        "step": len(log) + 1,
+        "tool": tool,
+        "input": args,
+        "result": result,
+        "time": datetime.now().isoformat(),
+        "by": "code",
+    }
+    log.append(entry)
+    if on_step:
+        on_step(entry)
+    return result
+
+
+def final_status(tracker, problems):
+    """done = exactly as ordered and no problems; done_with_problems = something packed; else failed."""
+    if tracker.is_complete() and not problems:
+        return "done"
+    if tracker.packed_count() > 0:
+        return "done_with_problems"
+    return "failed"
+
+
 def run_agent(order, client=None, on_step=None):
     """
     Run the agent loop. Returns:
-    - bill: dict with items, total, problems
+    - bill: dict with items, total, paid, problems, status
     - log: list of steps [{tool, input, result}, ...]
 
     on_step: optional callback(step_entry) called after each tool call.
@@ -316,72 +381,60 @@ def run_agent(order, client=None, on_step=None):
         "unknown": order.get("unknown", []),
     }
 
+    # The code keeps the truth about this order (not the model)
+    tracker = OrderTracker(sorted_items, inventory)
+    tracker.sync_from_status(robot_client.status())
+
     # Build initial messages
     system_prompt = build_system_prompt(sorted_order, inventory, route)
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": "Start packing the order now. Follow the planned route, visiting each shelf once."},
+        {"role": "user", "content": "Start packing the order now. Follow the planned route, visiting each shelf once.\n"
+                                    + tracker.progress_line()},
     ]
 
     log = []
     problems = []
     continue_attempts = 0
     total_steps = 0
+    stopped_reason = None
 
-    while continue_attempts < MAX_CONTINUE_ATTEMPTS:
+    while True:
         log, stopped_reason, total_steps = run_agent_loop(
-            messages, inventory, log, step_offset=total_steps, client=client, on_step=on_step
+            messages, inventory, log, step_offset=total_steps, client=client, on_step=on_step, tracker=tracker
         )
+        tracker.sync_from_status(robot_client.status())
 
-        # Build bill from log
-        bill = build_bill_from_log(log, sorted_order, inventory)
+        if tracker.holding:
+            hint = f"The robot is still holding {tracker.holding}. You must call place_item before finishing."
+        elif tracker.missing():
+            hint = "Order is not complete. Still need: " + ", ".join(
+                f"{m['qty']}x {m['item']}" for m in tracker.missing()) + ". Continue packing."
+        else:
+            break  # everything packed (extra items cannot be taken back out of the basket)
 
-        # Check robot status
-        status = robot_client.status()
-        holding = status.get("holding")
+        continue_attempts += 1
+        if continue_attempts >= MAX_CONTINUE_ATTEMPTS or stopped_reason == "max_steps":
+            break
+        messages.append({"role": "user", "content": hint + "\n" + tracker.progress_line()})
 
-        # Check if order is complete
-        is_complete, missing = check_order_complete(sorted_order, bill["items"], inventory)
+    # Robot still holds something: the code puts it back on its own shelf
+    if tracker.holding:
+        item = tracker.holding
+        problems.append(f"Robot still holding {item} at end, put back on its shelf.")
+        run_code_step("navigate_to", {"station": tracker.shelf_of(item)}, tracker, log, on_step)
+        run_code_step("place_item", {"target": "return"}, tracker, log, on_step)
 
-        # If robot is still holding something, that's a problem
-        if holding:
-            continue_attempts += 1
-            if continue_attempts < MAX_CONTINUE_ATTEMPTS:
-                # Tell agent to place the item
-                messages.append({
-                    "role": "user",
-                    "content": f"The robot is still holding {holding}. You must call place_item before finishing. Place it in basket if it was scanned correctly, otherwise return it."
-                })
-                continue
-            else:
-                problems.append(f"Robot still holding {holding} at end.")
-                # Force return the item
-                robot_client.place("return")
-
-        # If order is not complete, try to continue
-        if not is_complete and continue_attempts < MAX_CONTINUE_ATTEMPTS:
-            continue_attempts += 1
-            missing_str = ", ".join(f"{m['qty']}x {m['item']}" for m in missing)
-            messages.append({
-                "role": "user",
-                "content": f"Order is not complete. Still need: {missing_str}. Continue packing."
-            })
-            continue
-
-        # Add missing items to problems
-        if not is_complete:
-            for m in missing:
-                problems.append(f"Could not pack {m['qty']}x {m['item']}.")
-
-        break
-
-    # Final bill
-    bill = build_bill_from_log(log, sorted_order, inventory)
-    bill["problems"] = problems
+    for m in tracker.missing():
+        problems.append(f"Could not pack {m['qty']}x {m['item']}.")
 
     if stopped_reason == "max_steps":
-        bill["problems"].append("Agent stopped: too many steps.")
+        problems.append("Agent stopped: too many steps.")
 
+    # Final bill (charged only up to the ordered qty; extras are listed as problems)
+    bill = build_bill_from_log(log, sorted_order, inventory)
+    bill["problems"] = bill["problems"] + problems
+    bill["status"] = final_status(tracker, bill["problems"])
     return bill, log
 
 
