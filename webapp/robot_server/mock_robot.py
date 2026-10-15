@@ -140,6 +140,7 @@ def status():
         "nav_state": state["nav_state"],
         "obstacle": state["obstacle"],
         "last_error": state["last_error"],
+        "stopped": state["stopped"],
     }
 
 

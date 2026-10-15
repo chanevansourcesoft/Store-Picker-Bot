@@ -72,9 +72,11 @@ Returns robot state:
   "speed": 0.0,
   "nav_state": "idle",
   "obstacle": false,
-  "last_error": null
+  "last_error": null,
+  "stopped": false
 }
 ```
+`stopped` is true after `POST /stop` until `POST /resume` (the dashboard shows "Stopped").
 
 ### GET /map
 Returns station positions:

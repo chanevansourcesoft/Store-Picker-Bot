@@ -14,8 +14,8 @@ from typing import Optional
 
 from app.config import ensure_inventory, load_inventory
 
-# Order statuses: queued -> packing -> one of FINISHED_STATUSES
-FINISHED_STATUSES = ("done", "done_with_problems", "failed")
+# Order statuses: queued -> packing -> one of FINISHED_STATUSES (or queued -> cancelled)
+FINISHED_STATUSES = ("done", "done_with_problems", "failed", "cancelled")
 CHARGED_STATUSES = ("done", "done_with_problems")  # the bill counts as revenue
 
 # Database file path
@@ -317,6 +317,19 @@ def fail_order(order_id, problems):
         )
 
 
+def cancel_order(order_id):
+    """Cancel an order that is still queued (the robot has not started it).
+    Returns True if it was cancelled. Stock is untouched: it only goes down when packed."""
+    init_db()
+    with _transaction() as conn:
+        cursor = conn.execute(
+            "UPDATE orders SET status = 'cancelled', current_task = NULL, problems = ? "
+            "WHERE id = ? AND status = 'queued'",
+            (json.dumps(["Cancelled by the store before packing."]), order_id)
+        )
+        return cursor.rowcount == 1
+
+
 def delete_order(order_id):
     """Delete an order (for testing)."""
     init_db()
@@ -354,6 +367,8 @@ def get_stats_today():
     with_problems = sum(1 for o in orders if o["status"] == "done_with_problems")
     queued = sum(1 for o in orders if o["status"] == "queued")
     packing = sum(1 for o in orders if o["status"] == "packing")
+    failed = sum(1 for o in orders if o["status"] == "failed")
+    cancelled = sum(1 for o in orders if o["status"] == "cancelled")
 
     # Revenue: what we charged (done orders, and partly packed orders)
     revenue = 0
@@ -369,6 +384,8 @@ def get_stats_today():
         "done_with_problems": with_problems,
         "queued": queued,
         "packing": packing,
+        "failed": failed,
+        "cancelled": cancelled,
         "revenue": revenue,
     }
 

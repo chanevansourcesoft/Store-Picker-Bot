@@ -263,6 +263,27 @@ def test_get_next_queued_order():
         reset_inventory()
 
 
+def test_cancel_order():
+    """Only a queued order can be cancelled; stock is not touched."""
+    db_path = setup_test_db()
+    try:
+        reset_inventory()
+        first, _ = store.create_order([{"item": "soup_can", "qty": 1}])
+        second, _ = store.create_order([{"item": "chips_pack", "qty": 1}])
+        store.update_order_status(first, "packing")
+
+        assert not store.cancel_order(first), "a packing order cannot be cancelled"
+        assert store.cancel_order(second)
+        assert store.get_order(second)["status"] == "cancelled"
+        assert store.get_next_queued_order() is None, "the worker must not pick a cancelled order"
+        assert store.get_stock()["chips_pack"] == 15
+        assert store.get_stats_today()["cancelled"] == 1
+        print("PASS: test_cancel_order")
+    finally:
+        teardown_test_db(db_path)
+        reset_inventory()
+
+
 def run_all_tests():
     """Run all store tests."""
     print("Running store tests...\n")
@@ -274,6 +295,7 @@ def run_all_tests():
     test_fail_order()
     test_get_orders()
     test_get_next_queued_order()
+    test_cancel_order()
 
     print("\nAll store tests passed!")
 
