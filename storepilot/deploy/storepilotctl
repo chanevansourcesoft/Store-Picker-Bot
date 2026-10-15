@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# StorePilot control: start | stop | restart | status | logs | kiosk-logs | kiosk-on | kiosk-off | build | test
+set -eu
+ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+export PATH="$HOME/.local/opt/node/bin:$PATH"
+UNIT=storepilot-backend
+case "${1:-help}" in
+  start)      systemctl --user start $UNIT ;;
+  stop)       systemctl --user stop $UNIT ;;
+  restart)    systemctl --user restart $UNIT ;;
+  status)     systemctl --user --no-pager status $UNIT || true
+              curl -s http://127.0.0.1:8080/api/health && echo ;;
+  logs)       tail -n 100 -f "$HOME/.local/state/storepilot/backend.log" ;;
+  kiosk-logs) tail -n 100 -f "$HOME/.local/state/storepilot/kiosk.log" ;;
+  kiosk-off)  mkdir -p "$HOME/.config/storepilot" && touch "$HOME/.config/storepilot/kiosk-disabled"
+              pkill -f -- "--user-data-dir=$HOME/.config/storepilot/chromium-kiosk" || true
+              echo "Kiosk off (stays off after reboot). Turn on again: storepilotctl kiosk-on" ;;
+  kiosk-on)   rm -f "$HOME/.config/storepilot/kiosk-disabled"
+              setsid "$ROOT/deploy/kiosk.sh" >/dev/null 2>&1 < /dev/null &
+              echo "Kiosk on." ;;
+  build)      (cd "$ROOT/frontend" && npm ci --no-audit --no-fund && npm run build)
+              systemctl --user restart $UNIT ;;
+  test)       (cd "$ROOT/backend" && .venv/bin/python -m tests.test_backend) ;;
+  *) echo "usage: storepilotctl start|stop|restart|status|logs|kiosk-logs|kiosk-on|kiosk-off|build|test" ;;
+esac
