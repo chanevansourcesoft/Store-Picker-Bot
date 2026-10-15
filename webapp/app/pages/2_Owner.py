@@ -2,11 +2,13 @@
 QuickPick Store Control - Owner Dashboard (laptop browser).
 
 Control-room look:
-- KPI cards: orders today, done, in queue, revenue
+- Needs-attention strip: robot, stock and order problems, most urgent first
+- KPI cards: orders, done, queue, revenue, pack time, pick success
 - Live ROS map (rosbridge, like RViz) or the 2D store map, and a robot card with STOP
 - Live step log: robot actions and Nemotron decisions side by side
-- Live camera, orders table, stock cards with Restock
-- AI summary using Nemotron Ultra
+- Order inspector: follow the live order or open any order of today
+- Live camera, orders per hour, orders table (filter, cancel, CSV), stock cards with Restock
+- AI summary using Nemotron Ultra (rule-based summary without an API key)
 
 The live parts are st.fragment(run_every=2): they refresh every 2 seconds
 without reloading the whole page (so the camera stream keeps playing).
@@ -21,9 +23,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 import streamlit as st
 
-from app import live_map, robot_client, store
+from app import live_map, metrics, robot_client, store
 from app.agent import group_items_by_shelf, plan_shelf_route, strip_think
-from app.config import LASER_OFFSET, MODEL_ULTRA, ROBOT_URL, ROSBRIDGE_URL, get_client, load_inventory
+from app.config import LASER_OFFSET, MODEL_ULTRA, ROBOT_URL, ROSBRIDGE_URL, get_client, has_llm, load_inventory
 from app.step_log import is_recovered, step_target
 from app.worker import init_worker
 from app.ui_style import (
@@ -48,11 +50,15 @@ from app.ui_style import (
     format_time,
     status_pill,
     order_status_pill,
+    ORDER_STATUS_PILLS,
     owner_header_html,
     kpi_card_html,
     store_map_svg,
     timeline_html,
     empty_html,
+    attention_html,
+    progress_html,
+    hourly_chart_svg,
 )
 
 # Page config
@@ -96,7 +102,7 @@ def get_robot_status():
     offline = {
         "online": False, "busy": False, "holding": None, "station": "unknown",
         "pose": {"x": 0, "y": 0, "theta": 0}, "battery": 0, "speed": 0,
-        "nav_state": "offline", "obstacle": False, "last_error": "Robot offline",
+        "nav_state": "offline", "obstacle": False, "last_error": "Robot offline", "stopped": False,
     }
     try:
         health = robot_client.health()
@@ -114,6 +120,8 @@ def get_robot_status():
             "nav_state": status.get("nav_state", "idle"),
             "obstacle": status.get("obstacle", False),
             "last_error": status.get("last_error"),
+            # Older robot servers have no "stopped" field: fall back to the error text
+            "stopped": bool(status.get("stopped")) or "stopped" in str(status.get("last_error") or "").lower(),
         }
     except Exception as e:
         return dict(offline, last_error=str(e))
@@ -144,8 +152,29 @@ def format_items(items):
     return ", ".join(parts)
 
 
+def offline_summary():
+    """Short rule-based summary for when Nemotron is not available (no API key)."""
+    stats = store.get_stats_today()
+    orders = store.get_orders_today()
+    stock = store.get_stock()
+    ok, tries = metrics.pick_stats(orders)
+    lines = [f"**Today:** {stats['total']} orders, {stats['done']} done cleanly, "
+             f"{stats['done_with_problems']} with problems, {stats['failed']} failed. Revenue Rs {stats['revenue']}."]
+    if tries:
+        lines.append(f"**Robot:** {ok} of {tries} GR00T picks worked ({round(100 * ok / tries)}%), "
+                     f"average pack time {metrics.format_duration(metrics.avg_pack_seconds(orders))}.")
+    problems = sorted({p for o in orders for p in (o.get("problems") or [])})
+    lines.append("**Problems:** " + ("; ".join(problems[:5]) if problems else "none."))
+    low = [f"{product_name(n)} ({q})" for n, q in stock.items() if q <= LOW_STOCK]
+    lines.append("**Restock:** " + (", ".join(low) if low else "nothing urgent."))
+    lines.append("_Rule-based summary: add NEBIUS_API_KEY for a Nemotron Ultra summary._")
+    return "\n\n".join(lines)
+
+
 def generate_ai_summary():
-    """Generate AI summary using Nemotron Ultra."""
+    """Generate AI summary using Nemotron Ultra (rule-based without an API key)."""
+    if not has_llm():
+        return offline_summary()
     try:
         client = get_client()
         stats = store.get_stats_today()
@@ -220,15 +249,23 @@ def get_robot_state(robot, current_order):
     """idle / busy / offline / stopped. Busy while an order is packing."""
     if not robot["online"]:
         return "offline"
-    if "stopped" in str(robot.get("last_error") or "").lower():
+    if robot.get("stopped"):
         return "stopped"
     if robot["busy"] or current_order:
         return "busy"
     return "idle"
 
 
-def get_log_order():
-    """Order to show in the step log: the one packing now, else the last one with steps."""
+LIVE_ORDER = "live"  # step log choice: follow the order the robot is packing
+
+
+def get_log_order(choice=LIVE_ORDER):
+    """Order to show in the step log: the chosen one, else the one packing now,
+    else the last one with steps."""
+    if choice != LIVE_ORDER:
+        order = store.get_order(choice)
+        if order:
+            return order
     current = store.get_current_packing_order()
     if current:
         return current
@@ -342,25 +379,49 @@ def nemotron_entries(order, inventory):
 
 inject_css(BASE_CSS, OWNER_CSS)
 
+# Orders table filter: label -> statuses (None = all)
+ORDER_FILTERS = {
+    "All": None,
+    "Active": ("queued", "packing"),
+    "Done": ("done",),
+    "Problems": ("done_with_problems", "failed"),
+    "Cancelled": ("cancelled",),
+}
+
+
+def decision_lane_title():
+    """Who plans the robot's steps: Nemotron, or the offline autopilot without an API key."""
+    if has_llm():
+        return f'<span style="color:{BRAND_DARK};">🧠</span> NVIDIA Nemotron decisions'
+    return '🧭 Autopilot decisions <span class="qp-pill qp-pill-grey">offline · no API key</span>'
+
 
 @st.fragment(run_every=REFRESH_SEC)
 def live_header():
-    """Header and KPI cards."""
+    """Header, needs-attention strip and KPI cards."""
     stats = store.get_stats_today()
-    robot_online = robot_client.health().get("status") == "ok"
-    html(owner_header_html(robot_online, demo=robot_client.is_demo_mode()))
+    orders = store.get_orders_today()
+    robot = get_robot_status()
+    html(owner_header_html(robot["online"], demo=robot_client.is_demo_mode()))
 
-    # KPI cards
+    stock = {product_name(name): qty for name, qty in store.get_stock().items()}
+    html(attention_html(metrics.attention_items(robot, stats, stock, LOW_STOCK, has_llm())))
+
+    finished = stats["done"] + stats["done_with_problems"]
     done_pct = round(100 * stats["done"] / stats["total"]) if stats["total"] else 0
+    avg_basket = round(stats["revenue"] / finished) if finished else 0
+    picks_ok, picks = metrics.pick_stats(orders)
+    pick_pct = f"{round(100 * picks_ok / picks)}%" if picks else "-"
     kpis = [
-        ("📦", stats["total"], "Orders today", "since midnight", "#E4EEFE"),
+        ("📦", stats["total"], "Orders today", f"{stats['cancelled']} cancelled" if stats["cancelled"] else "since midnight", "#E4EEFE"),
         ("✅", stats["done"], "Done", f"{done_pct}% · +{stats['done_with_problems']} with problems", BRAND_GREEN_LIGHT),
         ("⏳", stats["queued"], "In queue", f"+{stats['packing']} packing now", BRAND_YELLOW_LIGHT),
-        ("💰", f"Rs {stats['revenue']}", "Revenue", "from done orders", "#EEE8FD"),
+        ("💰", f"Rs {stats['revenue']}", "Revenue", f"avg basket Rs {avg_basket}" if finished else "from done orders", "#EEE8FD"),
+        ("⏱", metrics.format_duration(metrics.avg_pack_seconds(orders)), "Avg pack time", "first robot step → last", "#E6F4F8"),
+        ("🦾", pick_pct, "Pick success", f"{picks_ok} of {picks} GR00T picks" if picks else "no picks yet", "#FDEDE4"),
     ]
-    for col, (icon, value, label, sub, tint) in zip(st.columns(4), kpis):
-        with col:
-            html(kpi_card_html(icon, value, label, sub, tint))
+    # One CSS grid (not st.columns): 6 across on wide screens, 3 or 2 on smaller ones
+    html('<div class="qp-kpis">' + "".join(kpi_card_html(*kpi) for kpi in kpis) + "</div>")
 
 
 @st.cache_data(ttl=10, show_spinner=False)
@@ -434,7 +495,7 @@ def live_static_map():
 
 @st.fragment(run_every=REFRESH_SEC)
 def live_robot_card():
-    """Robot state, battery, task, alerts, STOP and Resume."""
+    """Robot state, battery, task, alerts, STOP (always) and Resume (only when stopped)."""
     robot = get_robot_status()
     current_order = store.get_current_packing_order()
     robot_state = get_robot_state(robot, current_order)
@@ -452,12 +513,14 @@ def live_robot_card():
             <div style="margin-top:.35rem;">{pills[robot_state]}</div>
             """)
         with top_right:
-            if st.button("■ STOP", key="stop_btn", use_container_width=True, help="Emergency stop"):
+            if st.button("■ STOP", key="stop_btn", use_container_width=True, help="Emergency stop",
+                         disabled=robot_state in ("offline", "stopped")):
                 result = robot_client.stop()
                 if result.get("success"):
                     st.toast("Robot stopped", icon="🛑")
                 else:
                     st.toast(result.get("message", "Error"), icon="⚠️")
+                st.rerun(scope="fragment")
 
         battery = robot.get("battery", 0) or 0
         batt_color = STATUS_ERROR if battery < 20 else STATUS_WARNING if battery < 50 else STATUS_SUCCESS
@@ -492,33 +555,65 @@ def live_robot_card():
         for icon, msg in alerts:
             html(f'<div class="qp-alert">{icon} {esc(msg)}</div>')
 
-        if st.button("▶ Resume after stop", key="resume_btn", use_container_width=True):
-            result = robot_client.resume()
-            if result.get("success"):
-                st.toast("Robot resumed", icon="▶️")
-            else:
-                st.toast(result.get("message", "Error"), icon="⚠️")
+        if robot_state == "stopped":
+            st.write("")
+            if st.button("▶ Resume after stop", key="resume_btn", use_container_width=True, type="primary"):
+                result = robot_client.resume()
+                if result.get("success"):
+                    st.toast("Robot resumed", icon="▶️")
+                else:
+                    st.toast(result.get("message", "Error"), icon="⚠️")
+                st.rerun(scope="fragment")
+
+
+def order_choice_label(choice):
+    if choice == LIVE_ORDER:
+        return "● Follow live order"
+    order = store.get_order(choice)
+    if not order:
+        return f"#{choice}"
+    label = ORDER_STATUS_PILLS.get(order["status"], (order["status"],))[0]
+    return f"#{choice} · {format_time(order.get('created_at'))} · {label}"
 
 
 @st.fragment(run_every=REFRESH_SEC)
 def live_step_log():
-    """Robot actions and Nemotron decisions for the current (or last) order."""
-    order = get_log_order()
+    """Robot actions and planner decisions for the live order, or any order picked from the list."""
     inventory = load_inventory()
+    order_ids = [o["id"] for o in store.get_orders_today()]
 
     with st.container(key="card_log"):
+        c1, c2 = st.columns([2.2, 1.3], vertical_alignment="center")
+        with c2:
+            choice = st.selectbox("Order", [LIVE_ORDER] + order_ids, key="log_order",
+                                  format_func=order_choice_label, label_visibility="collapsed")
+        order = get_log_order(choice)
+        with c1:
+            if order:
+                html(f"""
+                <div class="qp-card-title">
+                    <span>📋 Step log · <span style="color:{BRAND_GREEN};">#{order['id']}</span></span>
+                    <span>{order_status_pill(order['status'])}</span>
+                </div>
+                """)
+            else:
+                html('<div class="qp-card-title">📋 Step log</div>')
         if not order:
-            html('<div class="qp-card-title">📋 Live step log</div>')
             html(empty_html("📭", "No orders yet. Place one on the customer kiosk."))
             return
 
-        label = "Now packing" if order["status"] == "packing" else "Last order"
+        if choice != LIVE_ORDER:
+            label = "Order"
+        else:
+            label = "Now packing" if order["status"] == "packing" else "Last order"
+        done, total = metrics.order_progress(order)
+        wait, pack = metrics.order_times(order)
+        elapsed = ""
+        if pack is not None:
+            elapsed = f"packing {metrics.format_duration(pack)} · waited {metrics.format_duration(wait)}"
         html(f"""
-        <div class="qp-card-title" style="justify-content:space-between;">
-            <span>📋 Live step log · <span style="color:{BRAND_GREEN};">#{order['id']}</span></span>
-            <span>{order_status_pill(order['status'])}</span>
-        </div>
         <div class="qp-card-sub" style="margin-top:.2rem;">{label}: {esc(format_items(order.get('items', [])))}</div>
+        {progress_html(done, total, elapsed)}
         """)
 
         lane_robot, lane_brain = st.columns(2, gap="medium")
@@ -528,10 +623,12 @@ def live_step_log():
             with st.container(height=360, border=False, autoscroll=True):
                 if log:
                     html(timeline_html(robot_action_entries(log)))
+                elif order["status"] == "cancelled":
+                    html(empty_html("🚫", "Cancelled before the robot started."))
                 else:
                     html(empty_html("⏳", "Waiting for the first robot action..."))
         with lane_brain:
-            html(f'<div class="qp-lane-title"><span style="color:{BRAND_DARK};">🧠</span> NVIDIA Nemotron decisions</div>')
+            html(f'<div class="qp-lane-title">{decision_lane_title()}</div>')
             with st.container(height=360, border=False, autoscroll=True):
                 html(timeline_html(nemotron_entries(order, inventory)))
 
@@ -544,7 +641,7 @@ def camera_card():
             <div class="qp-card-title" style="justify-content:space-between;margin-bottom:.6rem;">
                 <span>📷 Live camera</span><span class="qp-demo-badge">🧪 Simulated robot</span>
             </div>
-            <div class="qp-cam"><span>No camera in demo mode</span></div>
+            <div class="qp-cam" style="aspect-ratio:16/7;"><span>No camera in demo mode</span></div>
             """)
             return
         html(f"""
@@ -559,46 +656,105 @@ def camera_card():
         """)
 
 
+@st.fragment(run_every=10)
+def live_hourly_chart():
+    """Orders per hour today (bar chart)."""
+    hours = metrics.orders_by_hour(store.get_orders_today())
+    peak_hour, peak = max(hours, key=lambda h: h[1]) if hours else (0, 0)
+    sub = f"busiest {peak_hour:02d}:00 · {peak} order{'s' if peak != 1 else ''}" if peak else "no orders yet today"
+    with st.container(key="card_hourly"):
+        html(f"""
+        <div class="qp-card-title" style="justify-content:space-between;margin-bottom:.5rem;">
+            <span>📈 Orders per hour</span><span class="qp-card-sub">{esc(sub)}</span>
+        </div>
+        <div class="qp-chart">{hourly_chart_svg(hours)}</div>
+        """)
+
+
 @st.fragment(run_every=REFRESH_SEC)
 def live_orders():
-    """Orders table with colored status pills."""
+    """Orders table: status filter, wait / pack times, cancel a queued order, CSV export."""
     orders = store.get_orders_today()
     with st.container(key="card_orders"):
-        html(f"""
-        <div class="qp-card-title" style="justify-content:space-between;margin-bottom:.4rem;">
-            <span>🧾 Orders today</span><span class="qp-card-sub">last {min(len(orders), 12)} of {len(orders)}</span>
-        </div>
-        """)
-        if not orders:
-            html(empty_html("📭", "No orders today"))
-            return
-        rows = ""
-        for order in orders[:12]:
-            bill = order.get("bill") or {}
-            total = bill.get("total", 0) if isinstance(bill, dict) else 0
-            rows += f"""
-            <tr>
-                <td class="id">#{order['id']}</td>
-                <td class="muted">{format_time(order.get('created_at'))}</td>
-                <td>{esc(format_items(order.get('items', [])))}</td>
-                <td>{order_status_pill(order['status'])}</td>
-                <td class="num">{'Rs ' + str(total) if total else '-'}</td>
-            </tr>
-            """
-        html(f"""
-        <table class="qp-table">
-            <thead><tr><th>Order</th><th>Time</th><th>Items</th><th>Status</th><th style="text-align:right;">Total</th></tr></thead>
-            <tbody>{rows}</tbody>
-        </table>
-        """)
+        c1, c2, c3 = st.columns([1.3, 2.6, 0.9], vertical_alignment="center")
+        with c1:
+            html('<div class="qp-card-title">🧾 Orders today</div>')
+        with c2:
+            choice = st.segmented_control("Filter", list(ORDER_FILTERS), default="All", key="orders_filter",
+                                          label_visibility="collapsed") or "All"
+        with c3, st.container(key="csv_btn"):
+            st.download_button("⬇ CSV", metrics.orders_csv(orders), file_name="quickpick_orders_today.csv",
+                               mime="text/csv", use_container_width=True, on_click="ignore",
+                               disabled=not orders, help="Download today's orders")
+
+        statuses = ORDER_FILTERS[choice]
+        shown = [o for o in orders if statuses is None or o["status"] in statuses]
+        if not shown:
+            html(empty_html("📭", "No orders today" if not orders else f"No {choice.lower()} orders"))
+        else:
+            rows = ""
+            for order in shown:
+                bill = order.get("bill") or {}
+                total = bill.get("total", 0) if isinstance(bill, dict) else 0
+                wait, pack = metrics.order_times(order)
+                problems = order.get("problems") or []
+                problem_line = (f'<div class="qp-card-sub" style="color:#A34E00;">{esc(" · ".join(problems))}</div>'
+                                if problems and order["status"] != "done" else "")
+                rows += f"""
+                <tr>
+                    <td class="id">#{order['id']}</td>
+                    <td class="muted">{format_time(order.get('created_at'))}</td>
+                    <td>{esc(format_items(order.get('items', [])))}{problem_line}</td>
+                    <td>{order_status_pill(order['status'])}</td>
+                    <td class="muted">{metrics.format_duration(pack)}</td>
+                    <td class="num">{'Rs ' + str(total) if total else '-'}</td>
+                </tr>
+                """
+            with st.container(height=min(60 + 46 * len(shown), 420), border=False):
+                html(f"""
+                <table class="qp-table">
+                    <thead><tr><th>Order</th><th>Time</th><th>Items</th><th>Status</th><th>Pack</th>
+                    <th style="text-align:right;">Total</th></tr></thead>
+                    <tbody>{rows}</tbody>
+                </table>
+                """)
+
+        queued = [o["id"] for o in orders if o["status"] == "queued"]
+        if queued:
+            q1, q2 = st.columns([2.6, 1], vertical_alignment="center")
+            with q1:
+                to_cancel = st.selectbox("Cancel order", queued, key="cancel_pick", label_visibility="collapsed",
+                                         format_func=lambda i: f"Queued #{i}: {format_items(store.get_order(i)['items'])}")
+            with q2, st.container(key="cancel_btn"):
+                if st.button("Cancel order", use_container_width=True, help="Only orders the robot has not started"):
+                    if store.cancel_order(to_cancel):
+                        st.toast(f"Order #{to_cancel} cancelled", icon="🚫")
+                    else:
+                        st.toast(f"Order #{to_cancel} already started, cannot cancel", icon="⚠️")
+                    st.rerun(scope="fragment")
 
 
 @st.fragment(run_every=REFRESH_SEC)
 def live_stock():
-    """Stock cards with low-stock badge and Restock button."""
+    """Stock cards with low-stock badge and Restock buttons."""
     inventory = load_inventory()
     stock = store.get_stock()
-    html('<div class="qp-card-title" style="margin:.2rem 0 .6rem;">📦 Stock</div>')
+    low_items = [name for name in inventory if stock.get(name, 0) <= LOW_STOCK]
+    total_units = sum(stock.get(name, 0) for name in inventory)
+    stock_value = sum(stock.get(name, 0) * info.get("price", 0) for name, info in inventory.items())
+    t1, t2 = st.columns([1.6, 1], vertical_alignment="center")
+    with t1:
+        html(f"""
+        <div class="qp-card-title" style="margin:.2rem 0 0;">📦 Stock</div>
+        <div class="qp-card-sub" style="margin-bottom:.5rem;">{total_units} units · worth Rs {stock_value}</div>
+        """)
+    with t2, st.container(key="restock_low"):
+        if st.button(f"Restock {len(low_items)} low" if low_items else "Stock OK", use_container_width=True,
+                     disabled=not low_items, help="Add 10 to every low or empty item"):
+            for name in low_items:
+                store.add_stock(name, 10)
+            st.toast(f"Restocked {len(low_items)} item(s) (+10 each)", icon="📦")
+            st.rerun(scope="fragment")
     for name, info in inventory.items():
         qty = stock.get(name, 0)
         is_low = qty <= LOW_STOCK
@@ -627,20 +783,21 @@ def live_stock():
 
 
 def ai_summary_card():
-    """AI summary using Nemotron Ultra (only when the owner presses the button)."""
+    """Shift summary: Nemotron Ultra, or rule-based without an API key (only when the owner presses the button)."""
     if "ai_summary" not in st.session_state:
         st.session_state.ai_summary = None
 
     with st.container(key="card_ai"):
         c1, c2 = st.columns([4, 1], vertical_alignment="center")
+        engine = status_pill("Nemotron Ultra", "grey") if has_llm() else status_pill("Offline · rule-based", "grey")
         with c1:
             html(f"""
-            <div class="qp-card-title">🧠 AI shift summary {status_pill('Nemotron Ultra', 'grey')}</div>
+            <div class="qp-card-title">🧠 Shift summary {engine}</div>
             <div class="qp-card-sub" style="margin-top:.2rem;">What went well, problems, and what to restock.</div>
             """)
         with c2:
             if st.button("Generate", key="ai_gen", type="primary", use_container_width=True):
-                with st.spinner("Nemotron Ultra is writing the summary..."):
+                with st.spinner("Writing the summary..."):
                     st.session_state.ai_summary = strip_think(generate_ai_summary())
         if st.session_state.ai_summary:
             with st.container(key="ai_text"):
@@ -648,28 +805,33 @@ def ai_summary_card():
 
 
 # ============ Layout ============
+# Each row is a keyed container: on narrow screens OWNER_CSS stacks its two columns.
 
 live_header()
 st.write("")
-col_map, col_robot = st.columns([1.6, 1], gap="medium")
-with col_map:
-    map_card()
-with col_robot:
-    live_robot_card()
+with st.container(key="row_map"):
+    col_map, col_robot = st.columns([1.6, 1], gap="medium")
+    with col_map:
+        map_card()
+    with col_robot:
+        live_robot_card()
 st.write("")
 
-col_log, col_cam = st.columns([1.6, 1], gap="medium")
-with col_log:
-    live_step_log()
-with col_cam:
-    camera_card()
+with st.container(key="row_log"):
+    col_log, col_side = st.columns([1.6, 1], gap="medium")
+    with col_log:
+        live_step_log()
+    with col_side, st.container(key="side_stack"):  # side by side on medium screens
+        camera_card()
+        live_hourly_chart()
 
 st.write("")
-col_orders, col_stock = st.columns([1.6, 1], gap="medium")
-with col_orders:
-    live_orders()
-with col_stock:
-    live_stock()
+with st.container(key="row_orders"):
+    col_orders, col_stock = st.columns([1.6, 1], gap="medium")
+    with col_orders:
+        live_orders()
+    with col_stock:
+        live_stock()
 
 st.write("")
 ai_summary_card()

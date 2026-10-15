@@ -75,6 +75,11 @@ def ensure_inventory():
     return True
 
 
+def has_llm():
+    """True if Nemotron can be called. Without a key the app uses the offline autopilot."""
+    return bool(NEBIUS_API_KEY)
+
+
 def get_client():
     if not NEBIUS_API_KEY:
         raise RuntimeError("NEBIUS_API_KEY is missing. Add it to .env or .streamlit/secrets.toml.")

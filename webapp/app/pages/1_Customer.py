@@ -276,6 +276,8 @@ def get_status_message(order):
         return "📦", "Delivered, but not everything could be packed. You only pay for what you got."
     if status == "failed":
         return "😕", "Sorry, the robot could not finish your order."
+    if status == "cancelled":
+        return "🚫", "This order was cancelled by the store before packing. You were not charged."
 
     if reached_customer(log):
         return "🎉", "Your basket is here! Robot will go home after."
@@ -509,9 +511,9 @@ def show_tracking():
             <div class="qp-track-meta">Placed at {placed_at} · {item_count} item{'s' if item_count != 1 else ''}</div>
         </div>
         """)
-        html(progress_bar_html(step, failed=(status == "failed")))
+        html(progress_bar_html(step, failed=(status in ("failed", "cancelled"))))
 
-        msg_class = {"failed": "qp-track-msg qp-track-msg-failed",
+        msg_class = {"failed": "qp-track-msg qp-track-msg-failed", "cancelled": "qp-track-msg qp-track-msg-failed",
                      "done_with_problems": "qp-track-msg qp-track-msg-warn"}.get(status, "qp-track-msg")
         html(f'<div class="{msg_class}"><span style="font-size:1.6rem;">{icon}</span>{esc(message)}</div>')
 
