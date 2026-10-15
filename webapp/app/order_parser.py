@@ -14,7 +14,7 @@ import json
 import re
 import sys
 
-from app.config import MODEL_FAST, get_client, load_inventory
+from app.config import MODEL_FAST, get_client, has_llm, load_inventory
 
 SYSTEM_PROMPT = """You read grocery orders for a small store.
 Products we sell (use these exact names): {products}
@@ -63,8 +63,44 @@ def clean_order(data, inventory):
     }
 
 
+NUMBER_WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+                "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "couple": 2, "pair": 2}
+FILLER_WORDS = {"please", "i", "want", "need", "would", "like", "some", "get", "me", "give", "of",
+                "the", "and", "also", "plus", "with", "can", "could", "you", "x", "pcs", "pieces"}
+
+
+def parse_order_offline(order_text, inventory):
+    """Keyword parser for when Nemotron is not available (no API key).
+
+    "2 soups, a juice and pizza" -> soup_can x2, juice_box x1, unknown ["pizza"].
+    A product matches on the first word of its name ("soup" for soup_can), plural or not.
+    """
+    keywords = {name.split("_")[0]: name for name in inventory}
+    data = {"items": [], "unknown": []}
+    for chunk in re.split(r",|;|\band\b|\bplus\b|&|\n", order_text.lower()):
+        words = re.findall(r"[a-z]+|\d+", chunk)
+        qty, item, rest = 1, None, []
+        for word in words:
+            if word.isdigit():
+                qty = int(word)
+            elif word in NUMBER_WORDS:
+                qty = NUMBER_WORDS[word]
+            elif item is None and (word in keywords or word.rstrip("s") in keywords
+                                   or word.removesuffix("es") in keywords):
+                item = keywords.get(word) or keywords.get(word.rstrip("s")) or keywords.get(word.removesuffix("es"))
+            elif word not in FILLER_WORDS:
+                rest.append(word)
+        if item:
+            data["items"].append({"item": item, "qty": qty})
+        elif rest:
+            data["unknown"].append(" ".join(rest))
+    return clean_order(data, inventory)
+
+
 def parse_order(order_text):
     inventory = load_inventory()
+    if not has_llm():
+        return parse_order_offline(order_text, inventory)
     client = get_client()
 
     response = client.chat.completions.create(
