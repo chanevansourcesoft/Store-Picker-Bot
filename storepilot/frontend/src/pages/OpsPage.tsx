@@ -93,18 +93,20 @@ export function MissionHero({ snap, goto }: { snap: Snapshot; goto: (t: Tab) => 
 export function Telemetry({ snap }: { snap: Snapshot }) {
   const r = snap.robot;
   const sim = snap.connections.telemetry.state === "simulated";
-  const hint = sim ? "simulated" : undefined;
+  const hintFor = (field: string) =>
+    sim ? "simulated" : r.unverified.includes(field) ? "not verified yet" : undefined;
   const heading = r.pose ? ((((r.pose.theta * 180) / Math.PI) % 360) + 360) % 360 : null;
   return (
     <div className="grid grid-cols-2 gap-2">
-      <Stat label="Battery" icon={<BatteryMedium size={13} />} value={r.battery === null ? null : r.battery.toFixed(0)} unit="%" hint={hint} />
-      <Stat label="Speed" icon={<Gauge size={13} />} value={r.speed === null ? null : r.speed.toFixed(2)} unit="m/s" hint={hint} />
+      <Stat label="Battery" icon={<BatteryMedium size={13} />} value={r.battery === null ? null : r.battery.toFixed(0)} unit="%" hint={hintFor("battery")} />
+      <Stat label="Speed" icon={<Gauge size={13} />} value={r.speed === null ? null : r.speed.toFixed(2)} unit="m/s" hint={hintFor("speed")} />
       <Stat label="Position" icon={<Crosshair size={13} />}
-        value={r.pose ? `${r.pose.x.toFixed(2)}, ${r.pose.y.toFixed(2)}` : null} unit="m" hint={hint} />
-      <Stat label="Heading" icon={<Compass size={13} />} value={heading === null ? null : heading.toFixed(0)} unit="°" hint={hint} />
+        value={r.pose ? `${r.pose.x.toFixed(2)}, ${r.pose.y.toFixed(2)}` : null} unit="m" hint={hintFor("pose")} />
+      <Stat label="Heading" icon={<Compass size={13} />} value={heading === null ? null : heading.toFixed(0)} unit="°" hint={hintFor("pose")} />
       <Stat label="Navigation" icon={<Radio size={13} />} value={r.nav_state}
         hint={r.station ? `at ${label(snap, r.station)}` : r.nav_state === "navigating" ? "moving" : undefined} />
-      <Stat label="Holding" icon={<Hand size={13} />} value={r.holding === null && r.nav_state !== null ? "Nothing" : r.holding} />
+      <Stat label="Holding" icon={<Hand size={13} />} hint={r.unverified.includes("holding") ? "pick not available" : undefined}
+        value={r.unverified.includes("holding") ? null : r.holding === null && r.nav_state !== null ? "Nothing" : r.holding} />
     </div>
   );
 }

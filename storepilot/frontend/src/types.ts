@@ -47,6 +47,7 @@ export interface Snapshot {
   safety: {
     motion_enabled: boolean;
     stop_connected: boolean;
+    manipulation: "simulated" | "verified" | "unavailable";
     needs_area_confirmation: boolean;
     can_start: boolean;
     cannot_start_reason: string;
@@ -72,6 +73,7 @@ export interface Snapshot {
     battery: number | null; speed: number | null; holding: string | null; obstacle: boolean | null;
     stopped: boolean | null; busy: boolean | null; last_error: string | null; target: string | null;
     stop_pending: boolean;
+    unverified: string[];
   };
   mission: Mission | null;
   map: { stations: Record<string, Pose> | null; source: "simulated" | "jetson" | null; labels: Record<string, string> };

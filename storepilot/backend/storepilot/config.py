@@ -30,6 +30,14 @@ JETSON_URL = os.environ.get("JETSON_URL", "").strip().rstrip("/")
 # Live-mode safety switches. Both are OFF unless the operator turns them on.
 ENABLE_MOTION = _flag("STOREPILOT_ENABLE_MOTION")
 JETSON_STOP_CONFIRMED = _flag("JETSON_STOP_CONFIRMED")
+# Pick / scan / place on the Jetson are timed stubs today. Until a real implementation returns
+# verified results, live missions cannot start and holding / pick results are not shown.
+MANIPULATION_VERIFIED = _flag("STOREPILOT_MANIPULATION_VERIFIED")
+# Live telemetry fields shown only after you checked them on the robot: pose, battery, speed.
+# jetson_server.py reports battery 100 by default and a constant speed, so none are trusted by default.
+TELEMETRY_FIELDS = ("pose", "battery", "speed")
+VERIFIED_TELEMETRY = {f.strip() for f in os.environ.get("STOREPILOT_VERIFIED_TELEMETRY", "").split(",")
+                      if f.strip() in TELEMETRY_FIELDS}
 
 HOST = os.environ.get("STOREPILOT_HOST", "127.0.0.1")
 PORT = int(os.environ.get("STOREPILOT_PORT", "8080"))
