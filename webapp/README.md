@@ -7,7 +7,8 @@ what to do and writes the bill. **NVIDIA GR00T** runs the pick skill on the robo
 Built for the Nebius x NVIDIA Global AI Hackathon 2026 (Physical AI track).
 
 - **Customer kiosk**: pick products or type an order ("2 soups and chips"), pay (fake), watch the robot pack it.
-- **Store control**: live robot map, Nemotron step log, orders, stock, emergency STOP.
+- **Store control**: needs-attention alerts, KPIs (pack time, pick success), live robot map,
+  step log for any order, orders per hour, orders (filter, cancel, CSV), stock, emergency STOP.
 
 No robot? The app runs in **demo mode** with a simulated robot inside the app.
 
@@ -38,6 +39,10 @@ Nemotron runs on Nebius Token Factory, so the app needs a key. Choose ONE way:
   ```
 
 Never commit the key. `.env` and `.streamlit/secrets.toml` are in `.gitignore`.
+
+**No key?** The app still works. Orders are planned by a built-in offline **autopilot**
+(same robot commands and code checks as Nemotron), typed orders use a simple keyword
+reader, and the shift summary is rule-based. The dashboard shows a note when this is on.
 
 ### Step 3: Start the app
 
@@ -127,6 +132,8 @@ python -m app.test_agent
 python -m app.test_worker
 python -m app.test_order_tracker
 python -m app.test_step_log
+python -m app.test_autopilot
+python -m app.test_metrics
 python -m robot_server.test_stations
 python -m robot_server.test_mock_robot
 python -m robot_server.test_fake_rosbridge

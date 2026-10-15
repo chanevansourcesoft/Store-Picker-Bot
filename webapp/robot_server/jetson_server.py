@@ -185,6 +185,7 @@ class RobotState:
                 "nav_state": self.nav_state,
                 "obstacle": self.obstacle,
                 "last_error": self.last_error,
+                "stopped": self.stopped,
             }
 
 

@@ -28,6 +28,7 @@ from collections import defaultdict
 from datetime import datetime
 
 from app import robot_client
+from app.autopilot import Autopilot
 from app.config import MODEL_AGENT, get_client, load_inventory
 from app.order_parser import parse_order
 from app.order_tracker import OrderTracker
@@ -362,7 +363,10 @@ def run_agent(order, client=None, on_step=None):
     on_step: optional callback(step_entry) called after each tool call.
     """
     if client is None:
-        client = get_client()
+        try:
+            client = get_client()
+        except RuntimeError:  # no NEBIUS_API_KEY: plan with the offline autopilot
+            client = Autopilot()
     inventory = load_inventory()
 
     # Group items by shelf and sort by weight within each shelf
@@ -384,6 +388,8 @@ def run_agent(order, client=None, on_step=None):
     # The code keeps the truth about this order (not the model)
     tracker = OrderTracker(sorted_items, inventory)
     tracker.sync_from_status(robot_client.status())
+    if hasattr(client, "attach"):  # offline autopilot reads the tracker
+        client.attach(tracker)
 
     # Build initial messages
     system_prompt = build_system_prompt(sorted_order, inventory, route)

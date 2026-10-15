@@ -406,16 +406,38 @@ OWNER_CSS = f"""
 
 /* KPI cards */
 .qp-kpi {{
-    background: #fff; border-radius: 16px; padding: 1rem 1.1rem; display: flex; align-items: center; gap: .9rem;
+    background: #fff; border-radius: 16px; padding: .85rem .9rem; display: flex; align-items: center; gap: .7rem;
+    min-height: 5.6rem; overflow: hidden;
     box-shadow: 0 1px 2px rgba(16,24,20,.04), 0 6px 20px rgba(16,24,20,.06);
 }}
 .qp-kpi-icon {{
-    width: 3rem; height: 3rem; border-radius: 12px; flex-shrink: 0;
-    display: flex; align-items: center; justify-content: center; font-size: 1.45rem;
+    width: 2.6rem; height: 2.6rem; border-radius: 12px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 1.25rem;
 }}
-.qp-kpi-value {{ font-size: 1.75rem; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }}
+.qp-kpi > div:last-child {{ min-width: 0; }}
+.qp-kpi-value {{ white-space: nowrap; font-size: 1.5rem; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }}
 .qp-kpi-label {{ color: {BRAND_MUTED}; font-size: .8rem; font-weight: 600; }}
-.qp-kpi-sub {{ color: {BRAND_MUTED}; font-size: .72rem; margin-top: .1rem; }}
+.qp-kpi-sub {{ color: {BRAND_MUTED}; font-size: .7rem; margin-top: .1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+
+.qp-kpis {{ display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: .75rem; }}
+
+/* Narrower screens: KPIs 3 across, page rows stacked (map above robot, etc.) */
+@media (max-width: 1250px) {{
+    .qp-kpis {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
+    [class*="st-key-row_"] > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"],
+    [class*="st-key-row_"] > [data-testid="stHorizontalBlock"] {{ flex-wrap: wrap; row-gap: 1rem; }}
+    [class*="st-key-row_"] > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+    [class*="st-key-row_"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{
+        flex: 1 1 100% !important; width: 100% !important; min-width: 100% !important;
+    }}
+    .st-key-side_stack {{ display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: start; }}
+    .st-key-side_stack .qp-cam {{ aspect-ratio: 16/9 !important; }}
+}}
+@media (max-width: 640px) {{
+    .st-key-side_stack {{ display: flex; }}
+    .qp-kpis {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+    .qp-dash-right {{ flex-wrap: wrap; gap: .5rem; }}
+}}
 
 /* Map */
 .qp-map svg {{ width: 100%; height: auto; display: block; border-radius: 12px; }}
@@ -515,6 +537,33 @@ OWNER_CSS = f"""
 .qp-stock-bar div {{ height: 100%; border-radius: 4px; }}
 [class*="st-key-restock_"] button {{ min-height: 2.2rem; font-size: .82rem; }}
 
+/* Needs-attention strip */
+.qp-attn {{ display: flex; flex-wrap: wrap; gap: .5rem; margin: -.25rem 0 1rem; }}
+.qp-attn-item {{
+    display: inline-flex; align-items: center; gap: .45rem; border-radius: 10px;
+    padding: .45rem .8rem; font-size: .83rem; font-weight: 600; border: 1px solid transparent;
+}}
+.qp-attn-critical {{ background: #FFF1F1; border-color: #F9CFD1; color: #B42328; }}
+.qp-attn-warning  {{ background: #FFF7E8; border-color: #FFE1A8; color: #8A5A00; }}
+.qp-attn-info     {{ background: #EEF3FD; border-color: #D3E0FA; color: #1D4FB8; }}
+.qp-attn-ok       {{ background: {BRAND_GREEN_LIGHT}; border-color: #BFE8D0; color: {BRAND_GREEN_DARK}; }}
+.qp-attn-tag {{ font-size: .66rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; opacity: .8; }}
+
+/* Order progress (step log) */
+.qp-prog {{ display: flex; align-items: center; gap: .7rem; margin: .65rem 0 .2rem; font-size: .8rem; color: {BRAND_MUTED}; font-weight: 600; }}
+.qp-prog-bar {{ flex: 1; height: 8px; background: #EEF1EF; border-radius: 6px; overflow: hidden; }}
+.qp-prog-bar div {{ height: 100%; background: {BRAND_GREEN}; border-radius: 6px; transition: width .4s ease; }}
+.qp-prog b {{ color: {BRAND_TEXT}; font-variant-numeric: tabular-nums; }}
+
+/* Orders-per-hour chart */
+.qp-chart svg {{ width: 100%; height: auto; display: block; }}
+.qp-chart .bar-hit:hover + .bar {{ fill: {BRAND_GREEN_DARK}; }}
+
+/* Small toolbar controls inside cards */
+[class*="st-key-card"] [data-testid="stSelectbox"] label,
+[class*="st-key-card"] [data-testid="stSegmentedControl"] label {{ display: none; }}
+.st-key-restock_low button, .st-key-cancel_btn button, .st-key-csv_btn button {{ min-height: 2.3rem; font-size: .82rem; }}
+
 /* AI summary */
 .st-key-ai_text {{
     background: {BRAND_GREEN_LIGHT}; border-radius: 12px; padding: .9rem 1.1rem; margin-top: .4rem;
@@ -565,6 +614,7 @@ ORDER_STATUS_PILLS = {
     "done": ("Done", "green"),
     "done_with_problems": ("Done with problems", "orange"),
     "failed": ("Failed", "red"),
+    "cancelled": ("Cancelled", "grey"),
 }
 
 
@@ -880,6 +930,68 @@ def timeline_html(entries):
         </div>
         """
     return f'<div class="qp-tl">{rows}</div>'
+
+
+def attention_html(items):
+    """Needs-attention strip. items: [(level, icon, text)] from metrics.attention_items."""
+    if not items:
+        return ('<div class="qp-attn"><span class="qp-attn-item qp-attn-ok">✅ All clear: robot, stock '
+                'and orders look fine.</span></div>')
+    tags = {"critical": "Act now", "warning": "Check", "info": "Note"}
+    chips = "".join(
+        f'<span class="qp-attn-item qp-attn-{level}"><span class="qp-attn-tag">{tags.get(level, "")}</span>'
+        f'{icon} {esc(text)}</span>'
+        for level, icon, text in items
+    )
+    return f'<div class="qp-attn">{chips}</div>'
+
+
+def progress_html(done, total, elapsed=""):
+    """'3 / 4 items in basket' bar for the order in the step log."""
+    pct = 100 * done / total if total else 0
+    time_part = f"<span>⏱ {esc(elapsed)}</span>" if elapsed else ""
+    return (f'<div class="qp-prog"><span><b>{done} / {total}</b> items in basket</span>'
+            f'<div class="qp-prog-bar"><div style="width:{pct:.0f}%;"></div></div>{time_part}</div>')
+
+
+def hourly_chart_svg(hours):
+    """Bar chart of orders per hour. hours: [(hour, count)]. Hover a column for its value."""
+    width, height = 520, 170
+    left, right, top, bottom = 30, 8, 12, 24
+    plot_w, plot_h = width - left - right, height - top - bottom
+    peak = max([c for _, c in hours] + [1])
+    step = 1 if peak <= 5 else 2 if peak <= 10 else 5 if peak <= 25 else 10
+    y_max = -(-peak // step) * step  # round up to a whole tick
+    col = plot_w / max(len(hours), 1)
+    bar_w = min(col - 6, 34)
+    parts = [f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" '
+             f'font-family="Inter, sans-serif" role="img" aria-label="Orders per hour today">']
+    for tick in range(0, y_max + 1, step):
+        y = top + plot_h - tick / y_max * plot_h
+        parts.append(f'<line x1="{left}" x2="{width - right}" y1="{y:.1f}" y2="{y:.1f}" '
+                     f'stroke="{"#D5DDD9" if tick == 0 else "#EEF1EF"}" stroke-width="1"/>')
+        parts.append(f'<text x="{left - 6}" y="{y + 3.5:.1f}" text-anchor="end" font-size="10" '
+                     f'fill="{BRAND_MUTED}">{tick}</text>')
+    label_every = 1 if len(hours) <= 12 else 2
+    for i, (hour, count) in enumerate(hours):
+        cx = left + col * i + col / 2
+        h = count / y_max * plot_h
+        base = top + plot_h
+        tip = f"{hour:02d}:00–{hour:02d}:59 · {count} order{'s' if count != 1 else ''}"
+        parts.append(f'<rect class="bar-hit" x="{cx - col / 2:.1f}" y="{top}" width="{col:.1f}" height="{plot_h}" '
+                     f'fill="transparent"><title>{tip}</title></rect>')
+        if count:
+            r = min(4, h, bar_w / 2)
+            x0, x1, y0 = cx - bar_w / 2, cx + bar_w / 2, base - h
+            parts.append(
+                f'<path class="bar" pointer-events="none" fill="{BRAND_GREEN}" d="M{x0:.1f},{base:.1f} V{y0 + r:.1f} '
+                f'Q{x0:.1f},{y0:.1f} {x0 + r:.1f},{y0:.1f} H{x1 - r:.1f} Q{x1:.1f},{y0:.1f} {x1:.1f},{y0 + r:.1f} '
+                f'V{base:.1f} Z"/>')
+        if i % label_every == 0:
+            parts.append(f'<text x="{cx:.1f}" y="{height - 7}" text-anchor="middle" font-size="10" '
+                         f'fill="{BRAND_MUTED}">{hour:02d}h</text>')
+    parts.append("</svg>")
+    return "".join(parts)
 
 
 def empty_html(icon, text):
