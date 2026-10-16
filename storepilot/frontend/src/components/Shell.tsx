@@ -48,6 +48,15 @@ export function TopBar({ snap, link, toast }: { snap: Snapshot | null; link: Lin
   }
 
   const stopped = robot?.stopped === true;
+
+  async function resume() {
+    try {
+      const r = await api<{ success: boolean; message: string }>("/api/robot/resume", {});
+      toast(r.success ? `Resumed: ${r.message}` : r.message, r.success ? "ok" : "err");
+    } catch (e) {
+      toast((e as Error).message, "err");
+    }
+  }
   const stopLabel = stopped ? "STOPPED" : robot?.stop_pending || busy ? "STOPPING…" : "STOP";
 
   return (
@@ -65,7 +74,7 @@ export function TopBar({ snap, link, toast }: { snap: Snapshot | null; link: Lin
 
       <div className="ml-auto flex items-center gap-3">
         {snap && (
-          <span className={`rounded-md px-2 py-1 text-[11px] font-bold uppercase tracking-[0.12em] ring-1 ${
+          <span className={`whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-bold uppercase tracking-[0.1em] ring-1 ${
             snap.mode === "mock" ? "bg-warn/15 text-warn ring-warn/40" : "bg-ok/10 text-ok ring-ok/40"}`}>
             {snap.mode === "mock" ? "Simulation" : "Live robot"}
           </span>
@@ -79,14 +88,21 @@ export function TopBar({ snap, link, toast }: { snap: Snapshot | null; link: Lin
           <span className="flex items-center gap-1.5"><Dot color={c ? linkColor(c.ai.state) : "var(--color-dim)"} />AI</span>
         </div>
         <Clock />
+        {stopped && (
+          <button onClick={resume} className="h-[52px] rounded-lg border border-line-strong bg-raised px-3 text-[14px] font-bold text-ink active:bg-line">
+            Resume
+          </button>
+        )}
         <button onClick={stop} disabled={!snap || link !== "live" || busy}
           className={`flex h-[52px] min-w-[118px] flex-col items-center justify-center rounded-lg border-2 px-3 font-extrabold tracking-[0.1em] transition-colors disabled:opacity-50 ${
             stopped ? "border-err bg-err/15 text-err" : "border-[#ff8a87] bg-err text-white active:bg-[#c93633]"}`}
           aria-label="Stop the robot">
           <span className="flex items-center gap-1.5 text-[16px]"><OctagonX size={20} aria-hidden />{stopLabel}</span>
-          {snap && !snap.safety.stop_connected && (
+          {snap && !snap.safety.stop_connected ? (
             <span className="text-[9px] font-bold tracking-wider opacity-90">PLANNER ONLY</span>
-          )}
+          ) : snap && !snap.safety.stop_verified ? (
+            <span className="text-[9px] font-bold tracking-wider opacity-90">NOT VERIFIED</span>
+          ) : null}
         </button>
       </div>
     </header>

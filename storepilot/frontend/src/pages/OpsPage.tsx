@@ -3,6 +3,7 @@ import { fmtDuration, missionDuration } from "../api";
 import { EventRow } from "../components/EventRow";
 import type { Tab } from "../components/Shell";
 import { StoreMap } from "../components/StoreMap";
+import { RosMap } from "../components/RosMap";
 import { Button, LevelIcon, MissionStatusTag, Panel, ProgressBar, STATE_META, Stat, StateBadge, Tag } from "../components/ui";
 import type { Snapshot } from "../types";
 
@@ -98,7 +99,12 @@ export function Telemetry({ snap }: { snap: Snapshot }) {
   const heading = r.pose ? ((((r.pose.theta * 180) / Math.PI) % 360) + 360) % 360 : null;
   return (
     <div className="grid grid-cols-2 gap-2">
-      <Stat label="Battery" icon={<BatteryMedium size={13} />} value={r.battery === null ? null : r.battery.toFixed(0)} unit="%" hint={hintFor("battery")} />
+      {r.battery === null && r.battery_v != null ? (
+        <Stat label="Battery" icon={<BatteryMedium size={13} />} value={r.battery_v.toFixed(2)} unit="V"
+          hint={r.battery_v < 11.1 ? "low: charge (3S pack)" : "board voltage"} />
+      ) : (
+        <Stat label="Battery" icon={<BatteryMedium size={13} />} value={r.battery === null ? null : r.battery.toFixed(0)} unit="%" hint={hintFor("battery")} />
+      )}
       <Stat label="Speed" icon={<Gauge size={13} />} value={r.speed === null ? null : r.speed.toFixed(2)} unit="m/s" hint={hintFor("speed")} />
       <Stat label="Position" icon={<Crosshair size={13} />}
         value={r.pose ? `${r.pose.x.toFixed(2)}, ${r.pose.y.toFixed(2)}` : null} unit="m" hint={hintFor("pose")} />
@@ -135,7 +141,7 @@ export function OpsPage({ snap, goto }: { snap: Snapshot; goto: (t: Tab) => void
       <div className="grid grid-cols-[1.15fr_1fr] gap-3">
         <Panel title="Live map" bodyClass="p-2">
           <button className="block w-full" onClick={() => goto("map")} aria-label="Open the full map">
-            <StoreMap snap={snap} compact />
+            {snap.ros?.map ? <RosMap snap={snap} compact /> : <StoreMap snap={snap} compact />}
           </button>
         </Panel>
         <Panel title="Telemetry" bodyClass="p-2">
