@@ -7,3 +7,5 @@ requests==2.34.2
 # Used by the shared Nemotron agent in ../webapp/app (order parsing and planning)
 openai==3.26.0
 python-dotenv==1.2.4
+# Localization assist (scan-to-map matching on the Pi)
+numpy==2.3.3

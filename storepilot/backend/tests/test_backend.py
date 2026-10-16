@@ -5,11 +5,18 @@ Run (from storepilot/backend):
     .venv/bin/python -m tests.test_backend
 """
 
+import math
+import os
 import tempfile
 import threading
 import time
 from pathlib import Path
 from unittest.mock import patch
+
+# Tests never depend on this Pi's storepilot/.env (which may be in live mode):
+# load_dotenv() does not override variables that are already set.
+os.environ.update(STOREPILOT_MODE="mock", JETSON_LINK="http", STOREPILOT_ENABLE_MOTION="0",
+                  JETSON_STOP_CONFIRMED="0", STOREPILOT_MANIPULATION_VERIFIED="0", STOREPILOT_VERIFIED_TELEMETRY="")
 
 from storepilot import config
 from storepilot.adapters.base import AdapterError
@@ -306,7 +313,8 @@ def test_rosbridge_drive():
     time.sleep(0.5)
 
     stations = StationStore(Path(tempfile.mkdtemp()) / "stations.json")
-    robot = RosbridgeRobot(f"ws://127.0.0.1:{port}", stations, fake.MAPS_DIR, ["conf3", "office_map"])
+    robot = RosbridgeRobot(f"ws://127.0.0.1:{port}", stations, fake.MAPS_DIR, ["conf3", "office_map"],
+                           map_origins={"conf3": (-4.4, -2.16), "office_map": (-1.36, -12.2)})
 
     def wait(cond, timeout=10):
         end = time.time() + timeout
@@ -325,7 +333,18 @@ def test_rosbridge_drive():
 
     assert robot.start_nav2()["success"]
     wait(lambda: robot.nav_active is True)
-    assert robot.set_initial_pose(-2.0, -1.0, 0.0)["success"]
+
+    # Localization assist: the robot really is at (-2.0, -1.0, 0); the operator's tap is 30 cm / 7 deg off.
+    fake.ROBOT.truth = (-2.0, -1.0, 0.0)
+    time.sleep(0.6)   # let a scan taken at the new spot arrive
+    wait(lambda: robot._scan_in_base() is not None and robot._field() is not None)
+    result = robot.set_initial_pose(-1.75, -1.15, 0.12)
+    p = result["pose"]
+    assert result["success"] and "auto-aligned" in result["message"], result
+    assert abs(p["x"] + 2.0) < 0.05 and abs(p["y"] + 1.0) < 0.05 and abs(p["theta"]) < math.radians(3), p
+    wait(lambda: fake.ROBOT.nomotion_calls >= 3)
+    wait(lambda: (robot.localization_quality() or 0) > 0.8)
+    assert robot.auto_align()["success"]
     wait(lambda: robot.fetch_status()["pose"] is not None)
     stations.save(robot.map_name, "home", robot.pose())
 
@@ -339,6 +358,30 @@ def test_rosbridge_drive():
 
     assert robot.navigate("home")["success"], "blocking drive to a saved station"
     assert robot.fetch_status()["station"] == "home"
+
+    # Multi-waypoint route with auto-align at each stop, then STOP aborts a running route.
+    from storepilot.drive import DriveController
+    events = []
+    drive = DriveController(robot, stations, lambda src, lvl, txt: events.append(txt),
+                            Path(tempfile.mkdtemp()) / "drive.json")
+    drive.start([{"x": -1.4, "y": -0.6, "theta": 0.8}, {"station": "home"}])
+    wait(lambda: not drive.busy(), timeout=40)
+    route = drive.snapshot()["route"]
+    assert route["state"] == "done", route
+    assert sum("Arrived at" in t for t in events) == 2, events
+    assert sum(t.startswith("Auto-align (at ") for t in events) == 2, events
+    try:
+        drive.start([{"station": "shelf_A"}])
+        raise AssertionError("unsaved station must be refused")
+    except ValueError:
+        pass
+    drive.start([{"x": 0.5, "y": 1.5, "theta": 0.0}])
+    wait(lambda: robot.goal_status == "executing")
+    drive.abort.set()
+    assert robot.stop()["success"]
+    wait(lambda: not drive.busy())
+    assert drive.snapshot()["route"]["state"] == "canceled"
+    assert robot.resume()["success"]
 
     assert not robot.load_map("../../etc/passwd")["success"]
     assert robot.load_map("office_map")["success"]

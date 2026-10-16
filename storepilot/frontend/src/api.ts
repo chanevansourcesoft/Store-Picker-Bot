@@ -3,13 +3,23 @@ import type { Snapshot } from "./types";
 
 /** POST/GET helper. Throws Error(detail) when the backend refuses. */
 export async function api<T = unknown>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method: body === undefined ? "GET" : "POST",
-    headers: body === undefined ? undefined : { "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error((data as { detail?: string }).detail || `Request failed (${res.status})`);
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: body === undefined ? "GET" : "POST",
+      headers: body === undefined ? undefined : { "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(30000),
+    });
+  } catch (e) {
+    const timeout = (e as Error).name === "TimeoutError";
+    throw new Error(timeout ? `No answer from the dashboard backend in 30 s (${path})`
+      : "Dashboard backend not reachable. It may be restarting: try again in a few seconds.");
+  }
+  const text = await res.text();
+  let data: { detail?: string } = {};
+  try { data = text ? JSON.parse(text) : {}; } catch { /* not JSON */ }
+  if (!res.ok) throw new Error(data.detail || `${path} failed (HTTP ${res.status})`);
   return data as T;
 }
 

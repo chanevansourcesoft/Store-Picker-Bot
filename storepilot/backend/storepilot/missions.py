@@ -463,6 +463,8 @@ class MissionManager:
             where = config.station_label(status.get("goal_station")) if status.get("goal_station") else \
                 f"point ({goal.get('x', 0):.2f}, {goal.get('y', 0):.2f})"
             return "navigating", f"Driving to {where}"
+        if "nav2_active" in status and status.get("nav2_active") is None:
+            return "idle", "Nav2 is not running on the Jetson: start navigation.launch.py"
         if status.get("nav2_active") is False:
             return "idle", "Nav2 is paused: press Start Nav2"
         if "localized" in status and not status.get("localized"):

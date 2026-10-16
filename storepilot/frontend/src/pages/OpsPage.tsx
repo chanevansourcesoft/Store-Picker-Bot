@@ -40,7 +40,9 @@ export function MissionHero({ snap, goto }: { snap: Snapshot; goto: (t: Tab) => 
         </div>
 
         <div className="mt-4 border-t border-line pt-3">
-          {m ? (
+          {snap.drive.available && !(m && m.status === "running") ? (
+            <LiveRouteSummary snap={snap} goto={goto} />
+          ) : m ? (
             <>
               <div className="flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
@@ -88,6 +90,38 @@ export function MissionHero({ snap, goto }: { snap: Snapshot; goto: (t: Tab) => 
         </div>
       </div>
     </section>
+  );
+}
+
+function LiveRouteSummary({ snap, goto }: { snap: Snapshot; goto: (t: Tab) => void }) {
+  const route = snap.route?.route;
+  const busy = !!snap.route?.busy;
+  const total = route?.waypoints.length ?? 0;
+  const done = route ? (route.state === "done" ? total : route.index) : 0;
+  return (
+    <>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-[15px] font-bold text-ink">{route ? (busy ? "Route running" : "Last route") : "No route yet"}</span>
+        {route && <span className="text-[12px] font-bold uppercase tracking-wider text-muted">{route.state}</span>}
+      </div>
+      {route ? (
+        <>
+          <p className="mt-1 text-[14px] text-muted">{route.message}</p>
+          <div className="mt-3">
+            <div className="mb-1.5 text-[15px] font-semibold">
+              <span className="num text-2xl font-bold">{done}</span><span className="text-muted"> of </span>
+              <span className="num text-2xl font-bold">{total}</span><span className="text-muted"> stops reached</span>
+            </div>
+            <ProgressBar value={done} total={total} color={busy ? "var(--color-info)" : "var(--color-ok)"} />
+          </div>
+        </>
+      ) : (
+        <p className="mt-1 text-[14px] text-muted">Send a goal or a route from the Map page.</p>
+      )}
+      <Button tone={busy ? "default" : "primary"} className="mt-3 w-full" onClick={() => goto("map")}>
+        <MapPin size={18} aria-hidden /> {busy ? "Watch on the map" : "Open map to drive"}
+      </Button>
+    </>
   );
 }
 
