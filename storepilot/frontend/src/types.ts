@@ -76,6 +76,7 @@ export interface Snapshot {
     stop_pending: boolean;
     unverified: string[];
     battery_v?: number | null;
+    loc_quality?: number | null;
     localized?: boolean | null;
     needs_initial_pose?: boolean | null;
     nav2_active?: boolean | null;
@@ -90,6 +91,14 @@ export interface Snapshot {
     plan: [number, number][];
   } | null;
   drive: { available: boolean; motion_enabled: boolean; stop_verified: boolean };
+  route: {
+    busy: boolean;
+    settings: { auto_align: boolean; guard: boolean };
+    route: {
+      waypoints: { x: number; y: number; theta: number; label: string; station: string | null }[];
+      index: number; state: string; message: string; realigns: number; finished: boolean;
+    } | null;
+  } | null;
   mission: Mission | null;
   map: { stations: Record<string, Pose> | null; source: "simulated" | "jetson" | null; labels: Record<string, string> };
   alerts: { level: Level; text: string }[];

@@ -140,11 +140,16 @@ It never publishes `/cmd_vel`; rosbridge is started with an allow-list so it can
 
 ```bash
 source ~/ros2_ws/.robotrc
+# The glob values are STRINGS that rosbridge splits itself: keep the '"[...]"' quoting exactly.
 ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:=9090 \
-  topics_glob:="[/map, /tf, /tf_static, /odom, /scan, /plan, /ros_robot_controller/battery, /navigate_to_pose/_action/status, /goal_pose, /initialpose]" \
-  services_glob:="[/lifecycle_manager_navigation/*, /lifecycle_manager_localization/*, /navigate_to_pose/_action/cancel_goal, /map_server/load_map, /rosapi/get_param]" \
-  params_glob:="[*map_server*]"
+  topics_glob:='"[/map, /amcl_pose, /tf_static, /odom, /scan, /plan, /ros_robot_controller/battery, /navigate_to_pose/_action/status, /goal_pose, /initialpose]"' \
+  services_glob:='"[/lifecycle_manager_navigation/*, /lifecycle_manager_localization/*, /navigate_to_pose/_action/cancel_goal, /map_server/load_map, /request_nomotion_update]"' \
+  params_glob:='"[]"'
 ```
+
+The same command is in `deploy/jetson_start_rosbridge.sh`; copy it to the Jetson and run it there
+(or from the Pi: `scp deploy/jetson_start_rosbridge.sh ubuntu@192.168.149.1:` then
+`ssh ubuntu@192.168.149.1 'setsid nohup ./jetson_start_rosbridge.sh > rosbridge.log 2>&1 &'`).
 
 **2. On the Pi** (`storepilot/.env`), then `storepilotctl restart`:
 
@@ -159,6 +164,18 @@ JETSON_STOP_CONFIRMED=0         # 1 only after the physical STOP test below
 **3. On the dashboard → Map:** *Start Nav2* → *Set position* (press where the robot is, drag toward
 its heading, release) → *Save stations* per map → *Send goal* or a station button (confirm the path
 is clear). *Environment* switches maps with `load_map`; set the position again afterwards.
+
+**Routes and localization (all on the Pi):**
+- Every goal (a tap, a station, or a *Route* of up to 20 stops) is driven by the Pi one stop at a time.
+  At each stop the Pi waits until the robot really stands still; if Nav2 keeps correcting inside the
+  goal tolerance (15 cm / ~11°) for 3 s, the Pi closes the goal so the robot stops.
+- *Set position* and *Auto-align to walls* fit the live LiDAR scan to the map within ±50 cm / ±16°
+  and send the result to AMCL on `/initialpose`, then ask AMCL for no-motion updates.
+- *Auto-align at stops* (option) re-fits at every stop and whenever the robot stands still with a weak fit.
+- *Localization guard* (option): if fewer than 35 % of LiDAR points lie on walls twice in a row while
+  driving, the Pi stops the robot, re-aligns and re-sends the same stop (at most 3 times).
+- Pose comes from `/amcl_pose` + `/odom`, matched to each scan by timestamp (no `/tf` subscription:
+  it made rosbridge too busy and mixed old poses with new scans).
 
 STOP over rosbridge = cancel all NavigateToPose goals + pause Nav2 (controller and recovery
 behaviours deactivate); the base's 0.5 s `cmd_vel` watchdog then stops the wheels. It is shown as

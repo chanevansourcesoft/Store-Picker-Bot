@@ -26,6 +26,7 @@ class Telemetry:
         self.last_error = None
         self.connected = None             # None = not known yet
         self.ever_connected = False
+        self.started_at = time.monotonic()
         self._stop = threading.Event()
         self.thread = threading.Thread(target=self._run, name="telemetry", daemon=True)
 
@@ -76,8 +77,11 @@ class Telemetry:
             text = f"{name} connected" if not self.ever_connected else f"{name} connection restored"
             self.ever_connected = True
             self.on_event("system", "success", text)
-        elif previous is not None or not self.ever_connected:
+        elif previous is not None or (not self.ever_connected and
+                                      time.monotonic() - self.started_at > config.DISCONNECTED_AFTER_SEC):
             self.on_event("system", "error", f"{name} disconnected: {self.last_error or 'no answer'}")
+        else:
+            self.connected = previous   # still in the start-up grace period: not "disconnected" yet
 
     # ---------- reading ----------
 

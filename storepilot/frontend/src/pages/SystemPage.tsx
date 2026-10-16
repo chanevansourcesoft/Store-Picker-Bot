@@ -71,7 +71,7 @@ export function SystemPage({ snap }: { snap: Snapshot }) {
         ]} />
         <Health title="Robot telemetry" icon={<Radio size={16} aria-hidden />} state={c.telemetry.state} rows={[
           ["Last update", c.telemetry.age_sec === null ? "never" : `${c.telemetry.age_sec}s ago`],
-          ["Source", snap.mode === "mock" ? "simulator" : "Jetson /status"],
+          ["Source", snap.mode === "mock" ? "simulator" : snap.drive.available ? "rosbridge: /amcl_pose /odom /scan" : "Jetson /status"],
           ["Robot stopped", snap.robot.stopped === null ? null : snap.robot.stopped ? "yes" : "no"],
           ["Pick / scan / place", { simulated: "simulated", verified: "verified", unavailable: "unavailable" }[snap.safety.manipulation]],
           ["Not verified", snap.robot.unverified.length ? snap.robot.unverified.join(", ") : "—"],

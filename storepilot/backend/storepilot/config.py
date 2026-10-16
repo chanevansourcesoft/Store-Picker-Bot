@@ -36,7 +36,18 @@ JETSON_MAPS_DIR = os.environ.get("JETSON_MAPS_DIR", "/home/ubuntu/ros2_ws/src/sl
 JETSON_MAPS = [m.strip() for m in os.environ.get(
     "JETSON_MAPS", "conf3,conf2,conf_mecanum,map_confrence,map_reception,map_test_new,office_map,map_01,"
     "map_100,map_main,map_09,map_garden,map_outside,map_office,map_02").split(",") if m.strip()]
+# Map origins (x, y) from the Jetson's map .yaml files, to recognise which map Nav2 has loaded.
+# (Asking rosapi for map_server's yaml_filename crashes rosapi on Humble when map_server is down.)
+JETSON_MAP_ORIGINS = {
+    "conf3": (-4.4, -2.16), "conf2": (-4.73, -1.65), "conf_mecanum": (-3.97, -3.26),
+    "map_confrence": (-3.54, -0.981), "map_reception": (-1.43, -1.54), "map_test_new": (-1.18, -2.98),
+    "office_map": (-1.36, -12.2), "map_01": (-6.41, -2.57), "map_100": (-10.9, -4.14),
+    "map_main": (-0.607, -7.23), "map_09": (-5.3, -4.04), "map_garden": (-14.2, -7.02),
+    "map_outside": (-5.67, -28.7), "map_office": (-9.91, -6.66), "map_02": (-20.7, -7.92),
+}
 ROS_BASE_FRAME = os.environ.get("ROS_BASE_FRAME", "base_footprint")
+# Drive commands are refused when fewer LiDAR points than this lie on map walls (bad localization).
+MIN_LOC_QUALITY = float(os.environ.get("STOREPILOT_MIN_LOC_QUALITY", "0.30"))
 ROS_BATTERY_TOPIC = os.environ.get("ROS_BATTERY_TOPIC", "/ros_robot_controller/battery")
 # Live-mode safety switches. Both are OFF unless the operator turns them on.
 ENABLE_MOTION = _flag("STOREPILOT_ENABLE_MOTION")

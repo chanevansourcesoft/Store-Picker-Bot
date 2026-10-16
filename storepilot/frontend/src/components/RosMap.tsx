@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { Crosshair, LocateFixed, Minus, Plus } from "lucide-react";
 import type { Pose, Snapshot } from "../types";
 
-export type PickMode = "view" | "goal" | "pose";
+export type PickMode = "view" | "goal" | "pose" | "route";
 export type Picked = { x: number; y: number; theta: number };
 
 const S = 100; // SVG units per meter
@@ -12,8 +12,8 @@ const S = 100; // SVG units per meter
  * robot pose, goal and saved stations. In "goal" / "pose" mode, press where the robot should be
  * and drag toward the heading (like RViz Nav2 Goal / 2D Pose Estimate), then release.
  */
-export function RosMap({ snap, mode = "view", onPick, compact = false }: {
-  snap: Snapshot; mode?: PickMode; onPick?: (p: Picked) => void; compact?: boolean;
+export function RosMap({ snap, mode = "view", onPick, compact = false, draft = [] }: {
+  snap: Snapshot; mode?: PickMode; onPick?: (p: Picked) => void; compact?: boolean; draft?: Picked[];
 }) {
   const ros = snap.ros;
   const m = ros?.map;
@@ -85,13 +85,20 @@ export function RosMap({ snap, mode = "view", onPick, compact = false }: {
   }
   function up() {
     pan.current = null;
-    if (drag && mode !== "view") onPick?.(drag);
+    if (drag && mode !== "view") {
+      onPick?.(drag);
+      if (mode === "route") setDrag(null);
+    }
   }
   const goal = snap.robot.goal;
   const goalActive = goal && (goal.status === "accepted" || goal.status === "executing");
   const plan = ros.plan.map(([x, y]) => `${X(x).toFixed(1)},${Y(y).toFixed(1)}`).join(" ");
   const stations = snap.map.stations ?? {};
-  const pickColor = mode === "pose" ? "var(--color-plan)" : "var(--color-ok)";
+  const pickColor = mode === "pose" ? "var(--color-plan)" : mode === "route" ? "var(--color-warn)" : "var(--color-ok)";
+  const active = snap.route?.busy ? snap.route.route : null;
+  const routePts = active ? active.waypoints : draft;
+  const routeLine = [...(pose && routePts.length ? [pose] : []), ...routePts]
+    .map((p) => `${X(p.x).toFixed(1)},${Y(p.y).toFixed(1)}`).join(" ");
 
   return (
     <div className="relative">
@@ -120,6 +127,24 @@ export function RosMap({ snap, mode = "view", onPick, compact = false }: {
             </text>
           </g>
         ))}
+
+        {/* route: draft waypoints, or the running route (done = dim, current = blue) */}
+        {routePts.length > 0 && (
+          <polyline points={routeLine} fill="none" stroke="var(--color-warn)" strokeWidth={3 * k}
+            strokeDasharray={`${10 * k} ${8 * k}`} opacity={0.7} />
+        )}
+        {routePts.map((p, i) => {
+          const done = active && i < active.index;
+          const current = active && i === active.index;
+          const color = current ? "var(--color-info)" : done ? "#3a4757" : "var(--color-warn)";
+          return (
+            <g key={`wp${i}`} transform={`translate(${X(p.x)} ${Y(p.y)})`}>
+              <path d={`M 0 0 L ${30 * k * Math.cos(p.theta)} ${-30 * k * Math.sin(p.theta)}`} stroke={color} strokeWidth={4 * k} />
+              <circle r={14 * k} fill="#0d131a" stroke={color} strokeWidth={4 * k} />
+              <text y={5 * k} textAnchor="middle" fontSize={15 * k} fontWeight={800} fill={color}>{i + 1}</text>
+            </g>
+          );
+        })}
 
         {/* goal */}
         {goal && goalActive && (

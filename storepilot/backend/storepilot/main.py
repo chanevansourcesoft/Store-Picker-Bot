@@ -32,6 +32,7 @@ from pydantic import BaseModel
 from . import config
 from .db import Store
 from .health import AIStatus, pi_health
+from .drive import DriveController
 from .missions import MissionError, MissionManager
 from .stations import StationStore
 from .telemetry import Telemetry
@@ -51,7 +52,8 @@ def make_adapter(stations):
         if not config.ROSBRIDGE_URL:
             raise SystemExit("JETSON_LINK=rosbridge needs ROSBRIDGE_URL, e.g. ws://192.168.20.185:9090")
         return RosbridgeRobot(config.ROSBRIDGE_URL, stations, config.JETSON_MAPS_DIR, config.JETSON_MAPS,
-                              base_frame=config.ROS_BASE_FRAME, battery_topic=config.ROS_BATTERY_TOPIC)
+                              base_frame=config.ROS_BASE_FRAME, battery_topic=config.ROS_BATTERY_TOPIC,
+                              map_origins=config.JETSON_MAP_ORIGINS)
     from .adapters.jetson import JetsonAdapter
     if not config.JETSON_URL:
         from .adapters.base import AdapterError, RobotAdapter
@@ -76,6 +78,10 @@ class Services:
         self.stations = StationStore(config.STATIONS_PATH)
         self.adapter = make_adapter(self.stations)
         self.rosbridge = getattr(self.adapter, "link_kind", "") == "rosbridge"
+        self.drive = DriveController(
+            self.adapter, self.stations,
+            lambda source, level, text: self.store.add_event(source, level, text, simulated=False),
+            config.STATIONS_PATH.with_name("drive_settings.json")) if self.rosbridge else None
         simulated = self.adapter.source == "simulated"
         add = lambda source, level, text: self.store.add_event(source, level, text, simulated=simulated)  # noqa: E731
         self.ai = AIStatus(add)
@@ -126,10 +132,15 @@ def alerts(tel, robot, ai):
         out.append(("warning", "STOP cancels the goal and pauses Nav2, but is not physically verified yet. "
                                "Keep the hardware E-stop at hand."))
     if rosbridge and tel["connected"]:
-        if status.get("nav2_active") is False:
+        if status.get("nav2_active") is None:
+            out.append(("warning", "Nav2 is not running on the Jetson: start `ros2 launch mecanum_nav navigation.launch.py`."))
+        elif status.get("nav2_active") is False:
             out.append(("warning", "Nav2 is paused on the Jetson: press Start Nav2 on the Map page."))
         elif status.get("localized") is False:
             out.append(("warning", "Robot is not localized: set its position on the Map page (like 2D Pose Estimate)."))
+        elif status.get("loc_quality") is not None and status["loc_quality"] < config.MIN_LOC_QUALITY:
+            out.append(("warning", f"Localization looks poor: only {status['loc_quality']:.0%} of LiDAR points are on map "
+                                   "walls. Use Auto-align or Set position; driving is blocked until it improves."))
         if status.get("battery_v") is not None and status["battery_v"] < 11.1:
             out.append(("warning", f"Battery {status['battery_v']:.2f} V: charge before driving (3S pack)."))
     if config.MODE == "live" and not config.MANIPULATION_VERIFIED:
@@ -186,6 +197,7 @@ def build_snapshot():
         "stop_pending": s.missions.stop_pending,
         "unverified": unverified,
         "battery_v": status.get("battery_v") if tel["connected"] else None,
+        "loc_quality": status.get("loc_quality") if tel["connected"] else None,
         "localized": status.get("localized") if tel["connected"] else None,
         "needs_initial_pose": status.get("needs_initial_pose") if tel["connected"] else None,
         "nav2_active": status.get("nav2_active") if tel["connected"] else None,
@@ -253,6 +265,7 @@ def build_snapshot():
             "labels": config.STATION_LABELS,
         },
         "ros": ros,
+        "route": s.drive.snapshot() if s.drive else None,
         "drive": {
             "available": s.rosbridge,
             "motion_enabled": config.ENABLE_MOTION,
@@ -275,6 +288,14 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="StorePilot AI", lifespan=lifespan)
+
+
+@app.exception_handler(Exception)
+async def unexpected_error(request, exc):
+    """Any bug becomes a readable message for the operator (and a traceback in the log)."""
+    log.exception("Unhandled error on %s", request.url.path)
+    return JSONResponse({"detail": f"Dashboard error on {request.url.path}: {exc.__class__.__name__}: {exc}"},
+                        status_code=500)
 
 
 class OrderIn(BaseModel):
@@ -341,6 +362,8 @@ def api_events(limit: int = Query(100, ge=1, le=1000), mission_id: int | None = 
 
 @app.post("/api/robot/stop")
 def api_stop():
+    if services.drive:
+        services.drive.abort.set()     # the route must not send another goal after STOP
     return services.missions.stop()
 
 
@@ -365,6 +388,7 @@ class PoseIn(BaseModel):
     x: float
     y: float
     theta: float = 0.0
+    refine: bool = True
 
 
 class ConfirmOnly(BaseModel):
@@ -373,6 +397,16 @@ class ConfirmOnly(BaseModel):
 
 class NameIn(BaseModel):
     name: str
+
+
+class RouteIn(BaseModel):
+    waypoints: list[dict]
+    area_clear: bool = False
+
+
+class DriveSettingsIn(BaseModel):
+    auto_align: bool | None = None
+    guard: bool | None = None
 
 
 def _ros():
@@ -389,8 +423,22 @@ def _check_motion(area_clear):
         raise HTTPException(409, "Physical motion is disabled (STOREPILOT_ENABLE_MOTION=0).")
     if services.missions.current_id is not None:
         raise HTTPException(409, "A mission is running.")
+    if services.drive and services.drive.busy():
+        raise HTTPException(409, "A route is running: cancel it first.")
+    if services.rosbridge:
+        robot = services.adapter
+        if robot.stopped:
+            raise HTTPException(409, "Robot is stopped: press Resume first.")
+        if robot.nav_active is not True:
+            raise HTTPException(409, "Nav2 is not active: press Start Nav2 first.")
+        if not robot.localized():
+            raise HTTPException(409, "Robot is not localized: use Set position or Auto-align first.")
     if not area_clear:
         raise HTTPException(409, "Confirm that the robot's path is clear first.")
+    q = services.adapter.localization_quality() if services.rosbridge else None
+    if q is not None and q < config.MIN_LOC_QUALITY:
+        raise HTTPException(409, f"Localization looks poor ({q:.0%} of LiDAR points on walls): "
+                                 "use Auto-align or Set position first.")
 
 
 def _event(source, level, text):
@@ -405,33 +453,70 @@ def _result(result, ok_text, fail_text):
     raise HTTPException(409, result.get("message") or fail_text)
 
 
+def _start_route(waypoints, text):
+    _ros()
+    try:
+        route = services.drive.start(waypoints)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    _event("operator", "info", text + " — operator confirmed path clear")
+    return route
+
+
 @app.post("/api/drive/goal")
 def api_drive_goal(body: GoalIn):
-    robot = _ros()
+    _ros()
     _check_motion(body.area_clear)
-    return _result(robot.send_goal(body.x, body.y, body.theta),
-                   f"Drive goal sent to ({body.x:.2f}, {body.y:.2f}) — operator confirmed path clear",
-                   "Drive goal refused")
+    return _start_route([{"x": body.x, "y": body.y, "theta": body.theta, "label": "goal"}],
+                        f"Drive goal ({body.x:.2f}, {body.y:.2f})")
+
+
+@app.post("/api/drive/route")
+def api_drive_route(body: RouteIn):
+    _ros()
+    _check_motion(body.area_clear)
+    return _start_route(body.waypoints, f"Route with {len(body.waypoints)} waypoint(s) started")
+
+
+@app.post("/api/drive/route/cancel")
+def api_cancel_route():
+    _ros()
+    if not services.drive.cancel():
+        raise HTTPException(409, "No route is running.")
+    _event("operator", "warning", "Route cancelled by operator (goal canceled, Nav2 stays active)")
+    return {"ok": True}
+
+
+@app.post("/api/drive/settings")
+def api_drive_settings(body: DriveSettingsIn):
+    _ros()
+    settings = services.drive.set_settings(auto_align=body.auto_align, guard=body.guard)
+    _event("operator", "info", f"Drive options: auto-align at stops {'on' if settings['auto_align'] else 'off'}, "
+                               f"localization guard {'on' if settings['guard'] else 'off'}")
+    return settings
 
 
 @app.post("/api/drive/station/{name}")
 def api_drive_station(name: str, body: ConfirmOnly):
-    robot = _ros()
+    _ros()
     _check_motion(body.area_clear)
-    target = services.stations.get(robot.map_name).get(name)
-    if not target:
-        raise HTTPException(409, f"No {config.station_label(name)} saved for map {robot.map_name or '(unknown)'}.")
-    return _result(robot.send_goal(target["x"], target["y"], target["theta"], station=name),
-                   f"Driving to {config.station_label(name)} — operator confirmed path clear",
-                   f"Drive to {config.station_label(name)} refused")
+    return _start_route([{"station": name}], f"Drive to {config.station_label(name)}")
 
 
 @app.post("/api/drive/initial_pose")
 def api_initial_pose(body: PoseIn):
     robot = _ros()
-    return _result(robot.set_initial_pose(body.x, body.y, body.theta),
-                   f"Robot position set to ({body.x:.2f}, {body.y:.2f}) — like 2D Pose Estimate",
-                   "Setting the position failed")
+    if services.drive and services.drive.busy():
+        raise HTTPException(409, "A route is running: cancel it first.")
+    result = robot.set_initial_pose(body.x, body.y, body.theta, refine=body.refine)
+    return _result(result, f"Robot position set — {result.get('message', '')}", "Setting the position failed")
+
+
+@app.post("/api/drive/align")
+def api_auto_align():
+    robot = _ros()
+    result = robot.auto_align()
+    return _result(result, f"Auto-align — {result.get('message', '')}", "Auto-align failed")
 
 
 @app.post("/api/nav2/start")
@@ -443,7 +528,7 @@ def api_nav2_start():
 @app.post("/api/maps/load")
 def api_load_map(body: NameIn):
     robot = _ros()
-    if (robot.goal_status or "") in ("accepted", "executing"):
+    if (robot.goal_status or "") in ("accepted", "executing") or (services.drive and services.drive.busy()):
         raise HTTPException(409, "The robot is driving: stop it before switching maps.")
     return _result(robot.load_map(body.name), f"Map {body.name} loaded on the Jetson — set the robot position",
                    f"Loading map {body.name} failed")

@@ -24,7 +24,7 @@ MAPS_DIR = "/home/ubuntu/ros2_ws/src/slam/maps"
 MAPS = {
     # name: (origin_x, origin_y, width_m, height_m, obstacle boxes)
     "conf3": (-4.4, -2.16, 6.6, 5.5, [(-1.0, -0.4, -0.4, 1.2), (0.8, 1.2, 1.4, 1.6)]),
-    "office_map": (-1.36, -6.0, 7.8, 9.0, [(1.0, -2.0, 1.5, 1.5), (3.5, -4.0, 4.2, -1.0), (2.0, 2.0, 5.5, 2.4)]),
+    "office_map": (-1.36, -12.2, 7.8, 13.0, [(1.0, -2.0, 1.5, 1.5), (3.5, -4.0, 4.2, -1.0), (2.0, 2.0, 5.5, 2.4)]),
 }
 MAP_ODOM = (0.15, -0.1, 0.04)
 SPEED, TURN = 0.3, 1.2
@@ -44,6 +44,11 @@ def inverse(a):
     return (-(a[0] * c + a[1] * s), a[0] * s - a[1] * c, -a[2])
 
 
+def now_stamp():
+    t = time.time()
+    return {"sec": int(t), "nanosec": int((t % 1) * 1e9)}
+
+
 def tf(parent, child, p):
     return {"header": {"frame_id": parent, "stamp": {"sec": 0, "nanosec": 0}}, "child_frame_id": child,
             "transform": {"translation": {"x": p[0], "y": p[1], "z": 0.0}, "rotation": quat(p[2])}}
@@ -60,8 +65,10 @@ class Robot:
         self.goal = None
         self.status = None
         self.goal_stamp = 0
+        self.goal_count = 0
         self.speed = 0.0
         self.cmd_vel_published = 0     # must stay 0: StorePilot never drives the wheels directly
+        self.nomotion_calls = 0
 
     def make_grid(self):
         ox, oy, w, h, boxes = MAPS[self.map]
@@ -130,13 +137,23 @@ class Robot:
             while r < 8.0 and not self.occupied(lx + r * math.cos(a), ly + r * math.sin(a)):
                 r += 0.04
             ranges.append(round(r, 3) if r < 8.0 else None)
-        return {"header": {"frame_id": "laser", "stamp": {"sec": 0, "nanosec": 0}}, "angle_min": -math.pi,
+        return {"header": {"frame_id": "laser", "stamp": now_stamp()}, "angle_min": -math.pi,
                 "angle_max": math.pi, "angle_increment": 2 * math.pi / rays, "range_min": 0.05, "range_max": 8.0,
                 "ranges": ranges}
 
     def msg_odom(self):
-        return {"header": {"frame_id": "odom"}, "twist": {"twist": {"linear": {"x": self.speed, "y": 0.0, "z": 0.0},
-                                                                     "angular": {"x": 0.0, "y": 0.0, "z": 0.0}}}}
+        ob = compose(inverse(MAP_ODOM), self.truth)
+        return {"header": {"frame_id": "odom", "stamp": now_stamp()}, "child_frame_id": "base_footprint",
+                "pose": {"pose": {"position": {"x": ob[0], "y": ob[1], "z": 0.0}, "orientation": quat(ob[2])}},
+                "twist": {"twist": {"linear": {"x": self.speed, "y": 0.0, "z": 0.0},
+                                    "angular": {"x": 0.0, "y": 0.0, "z": 0.0}}}}
+
+    def msg_amcl(self):
+        if not (self.loc_active and self.localized):
+            return None
+        return {"header": {"frame_id": "map", "stamp": now_stamp()},
+                "pose": {"pose": {"position": {"x": self.truth[0], "y": self.truth[1], "z": 0.0},
+                                  "orientation": quat(self.truth[2])}, "covariance": [0.0] * 36}}
 
     def msg_plan(self):
         if not (self.goal and self.status == 2):
@@ -149,7 +166,7 @@ class Robot:
     def msg_status(self):
         if self.status is None:
             return {"status_list": []}
-        return {"status_list": [{"goal_info": {"goal_id": {"uuid": [1] * 16},
+        return {"status_list": [{"goal_info": {"goal_id": {"uuid": [self.goal_count % 256] * 16},
                                                "stamp": {"sec": self.goal_stamp, "nanosec": 0}}, "status": self.status}]}
 
     # ---------- requests ----------
@@ -166,7 +183,8 @@ class Robot:
             p = msg["pose"]
             q = p["orientation"]
             self.goal = (p["position"]["x"], p["position"]["y"], math.atan2(2 * q["w"] * q["z"], 1 - 2 * q["z"] ** 2))
-            self.goal_stamp = int(time.time())
+            self.goal_stamp = int(time.time() * 1000) % 2_000_000_000
+            self.goal_count += 1
             self.status = 2 if (self.nav_active and self.localized) else 6
 
     def on_service(self, name, args):
@@ -182,6 +200,9 @@ class Robot:
             else:
                 self.loc_active = on
             return {"success": True}
+        if name == "/request_nomotion_update":
+            self.nomotion_calls += 1
+            return {}
         if name == "/navigate_to_pose/_action/cancel_goal":
             if self.status == 2:
                 self.status = 5
@@ -193,8 +214,6 @@ class Robot:
             self.map = mname
             self.grid, self.localized = self.make_grid(), False
             return {"result": 0}
-        if name == "/rosapi/get_param":
-            return {"value": json.dumps(f"{MAPS_DIR}/{self.map}.yaml")}
         return None
 
 
@@ -262,6 +281,8 @@ async def loop():
         if tick % 2 == 0:
             await publish("/scan", ROBOT.msg_scan())
             await publish("/navigate_to_pose/_action/status", ROBOT.msg_status())
+        if tick % 4 == 0 and ROBOT.msg_amcl():
+            await publish("/amcl_pose", ROBOT.msg_amcl())
         if tick % 10 == 0:
             await publish("/plan", ROBOT.msg_plan())
             await publish("/ros_robot_controller/battery", {"data": 11286})
