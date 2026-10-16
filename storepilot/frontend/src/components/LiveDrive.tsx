@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { AlertTriangle, BatteryMedium, CheckSquare, Flag, Hand, Layers, LocateFixed, MapPin, Navigation, Play, Route, Save, Square, Trash2, X } from "lucide-react";
+import { useRef, useState } from "react";
+import { AlertTriangle, BatteryMedium, CheckSquare, Download, Flag, Hand, Layers, LocateFixed, MapPin, Navigation, Play, Route, Save, Square, Trash2, Upload, X } from "lucide-react";
 import { api } from "../api";
 import type { Snapshot } from "../types";
 import { RosMap, type Picked, type PickMode } from "./RosMap";
@@ -12,7 +12,17 @@ type Pending =
   | { kind: "station"; name: string }
   | { kind: "route" }
   | { kind: "map"; name: string };
-type Draft = { x: number; y: number; theta: number; station?: string; label: string };
+type Check = { level: "ok" | "warn" | "bad"; reason: string; clearance: number | null };
+type Draft = { x: number; y: number; theta: number; station?: string; label: string; check?: Check };
+
+async function checkPoint(x: number, y: number): Promise<Check | undefined> {
+  try {
+    const [c] = await api<Check[]>("/api/drive/check", { points: [{ x, y }] });
+    return c;
+  } catch {
+    return undefined;
+  }
+}
 
 const STATIONS = ["home", "shelf_A", "shelf_B", "shelf_C", "customer"];
 const deg = (t: number) => Math.round(((t * 180) / Math.PI + 360) % 360);
@@ -25,6 +35,39 @@ export function LiveDrive({ snap, toast }: { snap: Snapshot; toast: Toast }) {
   const [busy, setBusy] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [draft, setDraft] = useState<Draft[]>([]);
+  const [showCostmap, setShowCostmap] = useState(true);
+  const [pendingCheck, setPendingCheck] = useState<Check | undefined>();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const badStops = draft.map((d, i) => (d.check?.level === "bad" ? i : -1)).filter((i) => i >= 0);
+
+  function addStop(d: Draft) {
+    setDraft((list) => [...list, d]);
+    checkPoint(d.x, d.y).then((check) => setDraft((list) => list.map((x) => (x === d ? { ...x, check } : x))));
+  }
+
+  function pickGoal(p: Picked) {
+    setPendingCheck(undefined);
+    setPending({ kind: "goal", p });
+    checkPoint(p.x, p.y).then(setPendingCheck);
+  }
+
+  async function exportStations() {
+    const data = await api("/api/stations/export");
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
+    const a = Object.assign(document.createElement("a"), { href: url, download: "storepilot-stations.json" });
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function importStations(file: File) {
+    try {
+      const data = JSON.parse(await file.text());
+      const r = await api<{ imported: number }>("/api/stations/import", { data });
+      toast(`Imported ${r.imported} station(s)`, "ok");
+    } catch (e) {
+      toast(`Import failed: ${(e as Error).message}`, "err");
+    }
+  }
   const route = snap.route;
   const running = !!route?.busy;
   const connected = snap.connections.jetson.state === "connected";
@@ -33,6 +76,8 @@ export function LiveDrive({ snap, toast }: { snap: Snapshot; toast: Toast }) {
   const driving = running || r.goal?.status === "accepted" || r.goal?.status === "executing";
 
   const blocker = !connected ? "Robot disconnected"
+    : snap.alerts.some((a) => a.text.includes("LiDAR scan")) ? "No LiDAR scan: check the LiDAR (power / battery)"
+    : r.odom_bad ? `Odometry broken (${r.odom_bad}): restart navigation on the System page`
     : r.stopped ? "Robot stopped: press Resume in the top bar first"
       : r.nav2_active == null ? "Nav2 is not running on the Jetson (start navigation.launch.py)"
       : r.nav2_active !== true ? "Nav2 is paused: press Start Nav2"
@@ -71,10 +116,16 @@ export function LiveDrive({ snap, toast }: { snap: Snapshot; toast: Toast }) {
       </div>
 
       <Panel title={<>Live map · {r.map_name ?? "unknown map"}</>} right={<StateBadge state={r.state} />} bodyClass="p-2">
-        <RosMap snap={snap} mode={mode} draft={draft}
+        <RosMap snap={snap} mode={mode} draft={draft} showCostmap={showCostmap} badPoints={badStops}
           onPick={(p) => mode === "route"
-            ? setDraft((d) => [...d, { ...p, label: `point ${d.length + 1}` }])
-            : setPending(mode === "pose" ? { kind: "pose", p } : { kind: "goal", p })} />
+            ? addStop({ ...p, label: `point ${draft.length + 1}` })
+            : mode === "pose" ? setPending({ kind: "pose", p }) : pickGoal(p)} />
+        {snap.ros?.costmap && (
+          <label className="flex min-h-10 items-center gap-2 px-1 pt-1 text-[13px] text-muted">
+            <input type="checkbox" checked={showCostmap} onChange={(e) => setShowCostmap(e.target.checked)} className="h-5 w-5 accent-[#a78bfa]" />
+            Show Nav2 costmap (purple = inflation, red = lethal) and robot footprint (teal)
+          </label>
+        )}
         <div className="mt-2 grid grid-cols-4 gap-2 px-1">
           {([
             ["view", "View", Hand],
@@ -127,8 +178,11 @@ export function LiveDrive({ snap, toast }: { snap: Snapshot; toast: Toast }) {
           ) : (
             <ol className="flex flex-wrap gap-2">
               {draft.map((d, i) => (
-                <li key={i} className="flex min-h-10 items-center gap-2 rounded-lg border border-warn/40 bg-warn/10 pl-3 pr-1 text-[14px] font-semibold text-[#ffd59a]">
+                <li key={i} title={d.check?.reason}
+                  className={`flex min-h-10 items-center gap-2 rounded-lg border pl-3 pr-1 text-[14px] font-semibold ${
+                    d.check?.level === "bad" ? "border-err/60 bg-err/10 text-[#ffb4b2]" : "border-warn/40 bg-warn/10 text-[#ffd59a]"}`}>
                   <span className="num">{i + 1}.</span>{d.station ? label(d.station) : `(${d.x.toFixed(2)}, ${d.y.toFixed(2)})`}
+                  {d.check?.level === "bad" && <AlertTriangle size={14} aria-label={d.check.reason} />}
                   <button aria-label={`Remove stop ${i + 1}`} onClick={() => setDraft(draft.filter((_, j) => j !== i))}
                     className="flex h-8 w-8 items-center justify-center rounded-md text-muted active:bg-raised"><X size={16} /></button>
                 </li>
@@ -137,13 +191,18 @@ export function LiveDrive({ snap, toast }: { snap: Snapshot; toast: Toast }) {
           )}
           <div className="mt-3 flex flex-wrap gap-2">
             {STATIONS.filter((s) => stations[s]).map((s) => (
-              <button key={s} onClick={() => setDraft([...draft, { ...stations[s], station: s, label: label(s) }])}
+              <button key={s} onClick={() => addStop({ ...stations[s], station: s, label: label(s) })}
                 className="min-h-10 rounded-lg border border-line-strong px-3 text-[13px] font-semibold text-muted active:bg-raised">
                 + {label(s)}
               </button>
             ))}
           </div>
-          <Button tone="primary" className="mt-3 w-full" disabled={draft.length === 0 || !!blocker}
+          {badStops.length > 0 && (
+            <p className="mt-2 text-[13px] text-[#ffb4b2]">
+              Stop {badStops.map((i) => i + 1).join(", ")}: {draft[badStops[0]].check?.reason} Remove or move it.
+            </p>
+          )}
+          <Button tone="primary" className="mt-3 w-full" disabled={draft.length === 0 || !!blocker || badStops.length > 0}
             onClick={() => setPending({ kind: "route" })}>
             <Play size={18} aria-hidden />Start route ({draft.length} stop{draft.length === 1 ? "" : "s"})
           </Button>
@@ -197,6 +256,17 @@ export function LiveDrive({ snap, toast }: { snap: Snapshot; toast: Toast }) {
           {saveOpen ? "Drive or push the robot to the spot, make sure it is localized, then tap the station to save its current position for this map."
             : "Stations are saved per map on this Pi. Use “Save stations” to record them."}
         </p>
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+          <span className="mr-auto text-[12px] text-muted">
+            Saved: {Object.entries(snap.map.station_counts ?? {}).map(([m, n]) => `${m} (${n})`).join(" · ") || "none yet"}
+          </span>
+          <button onClick={exportStations} className="flex min-h-10 items-center gap-1.5 rounded-lg border border-line-strong px-3 text-[13px] font-semibold text-muted active:bg-raised">
+            <Download size={15} aria-hidden />Export</button>
+          <button onClick={() => fileRef.current?.click()} className="flex min-h-10 items-center gap-1.5 rounded-lg border border-line-strong px-3 text-[13px] font-semibold text-muted active:bg-raised">
+            <Upload size={15} aria-hidden />Import</button>
+          <input ref={fileRef} type="file" accept="application/json,.json" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) importStations(f); e.target.value = ""; }} />
+        </div>
       </Panel>
 
       <Panel title="Environment (map on the Jetson)" icon={<Layers size={15} />}>
@@ -213,7 +283,8 @@ export function LiveDrive({ snap, toast }: { snap: Snapshot; toast: Toast }) {
       </Panel>
 
       {pending && (
-        <Sheet pending={pending} snap={snap} busy={busy} blocker={blocker} label={label} onClose={() => setPending(null)}
+        <Sheet pending={pending} snap={snap} busy={busy} blocker={blocker} label={label} check={pending.kind === "goal" ? pendingCheck : undefined}
+          onClose={() => setPending(null)}
           onConfirm={(areaClear) => {
             if (pending.kind === "pose") return run("/api/drive/initial_pose", pending.p, "Position set");
             if (pending.kind === "goal") return run("/api/drive/goal", { ...pending.p, area_clear: areaClear }, "Goal sent: robot is driving");
@@ -281,8 +352,8 @@ function Chip({ label, text, ok, icon }: { label: string; text: string; ok: bool
   );
 }
 
-function Sheet({ pending, snap, busy, blocker, label, onClose, onConfirm }: {
-  pending: Pending; snap: Snapshot; busy: boolean; blocker: string; label: (s: string) => string;
+function Sheet({ pending, snap, busy, blocker, label, check, onClose, onConfirm }: {
+  pending: Pending; snap: Snapshot; busy: boolean; blocker: string; label: (s: string) => string; check?: Check;
   onClose: () => void; onConfirm: (areaClear: boolean) => void;
 }) {
   const [clear, setClear] = useState(false);
@@ -304,6 +375,12 @@ function Sheet({ pending, snap, busy, blocker, label, onClose, onConfirm }: {
           <h3 className="text-lg font-bold">{title}</h3>
           <p className="num mt-0.5 text-[14px] text-muted">{detail}</p>
           {alignNote && <p className="mt-1 text-[13px] text-plan">{alignNote}</p>}
+          {pending.kind === "goal" && (
+            <p className={`mt-1 text-[13px] font-semibold ${!check ? "text-dim" : check.level === "bad" ? "text-err"
+              : check.level === "warn" ? "text-warn" : "text-ok"}`}>
+              {!check ? "Checking the point…" : check.reason}
+            </p>
+          )}
         </div>
         <button onClick={onClose} aria-label="Cancel" className="flex h-11 w-11 items-center justify-center rounded-lg border border-line text-muted"><X size={20} /></button>
       </div>
@@ -326,7 +403,7 @@ function Sheet({ pending, snap, busy, blocker, label, onClose, onConfirm }: {
       )}
       <div className="mt-3 grid grid-cols-2 gap-3">
         <Button onClick={onClose}>Cancel</Button>
-        <Button tone="primary" busy={busy} disabled={moves && (!clear || !!blocker)} onClick={() => onConfirm(clear)}>
+        <Button tone="primary" busy={busy} disabled={moves && (!clear || !!blocker || check?.level === "bad")} onClick={() => onConfirm(clear)}>
           {pending.kind === "pose" ? "Set position" : pending.kind === "map" ? "Load map" : pending.kind === "route" ? "Start route" : "Drive"}
         </Button>
       </div>

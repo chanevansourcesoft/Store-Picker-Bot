@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Bot, Brain, Cpu, History, Radio } from "lucide-react";
 import { api, fmtDuration, fmtTime, missionDuration } from "../api";
+import { RobotSoftware } from "../components/RobotSoftware";
 import { Dot, MissionStatusTag, Panel } from "../components/ui";
 import type { Mission, Snapshot } from "../types";
 
@@ -41,7 +42,7 @@ function Health({ title, icon, state, rows }: { title: string; icon: ReactNode; 
   );
 }
 
-export function SystemPage({ snap }: { snap: Snapshot }) {
+export function SystemPage({ snap, toast }: { snap: Snapshot; toast: (t: string, tone?: "ok" | "err" | "warn") => void }) {
   const c = snap.connections;
   const [missions, setMissions] = useState<Mission[]>([]);
   const latestStatus = snap.mission ? `${snap.mission.id}:${snap.mission.status}:${snap.mission.packed}` : "";
@@ -83,6 +84,8 @@ export function SystemPage({ snap }: { snap: Snapshot }) {
           ["Status", c.ai.detail],
         ]} />
       </div>
+
+      {snap.jetson_ctl && <RobotSoftware snap={snap} toast={toast} />}
 
       <Panel title="Mission history" icon={<History size={15} />}
         right={<span className="text-[12px] text-dim">{finished.length ? `${ok} of ${finished.length} completed · stored on this Pi` : "stored on this Pi"}</span>}

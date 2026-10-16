@@ -383,6 +383,49 @@ def test_rosbridge_drive():
     assert drive.snapshot()["route"]["state"] == "canceled"
     assert robot.resume()["success"]
 
+    # Goal checks: free floor ok, wall / outside / unknown bad
+    assert robot.check_point(-2.0, -1.0)["level"] == "ok", robot.check_point(-2.0, -1.0)
+    assert robot.check_point(-0.7, 0.4)["level"] == "bad"          # inside the box obstacle
+    assert robot.check_point(9.0, 9.0)["level"] == "bad"           # outside the map
+    assert robot.check_point(-4.3, 0.0)["level"] == "bad"          # in the outer wall
+    try:
+        drive.start([{"x": -0.7, "y": 0.4, "theta": 0.0}])
+        raise AssertionError("a goal inside an obstacle must be refused")
+    except ValueError as e:
+        assert "Inside a wall" in str(e) or "does not fit" in str(e), e
+
+    # Costmap overlay and footprint arrive in the map frame
+    wait(lambda: robot.costmap_layer()["costmap"] and robot.costmap_layer()["footprint"])
+    fp = robot.costmap_layer()["footprint"]
+    p = robot.pose()
+    assert abs(sum(x for x, _ in fp) / 4 - p["x"]) < 0.05 and abs(sum(y for _, y in fp) / 4 - p["y"]) < 0.05, (fp, p)
+
+    # Link watchdog: the Pi drives, its heartbeat stops -> the Jetson side cancels the goal
+    wait(lambda: robot.watchdog is not None)
+    drive.start([{"x": 0.3, "y": 1.5, "theta": 0.0}])
+    wait(lambda: robot.goal_status == "executing" and fake.ROBOT.armed)
+    robot.heartbeat_paused = True
+    wait(lambda: fake.ROBOT.watchdog_cancels == 1, timeout=8)
+    robot.heartbeat_paused = False
+    wait(lambda: not drive.busy(), timeout=10)
+    assert drive.snapshot()["route"]["state"] == "failed", drive.snapshot()["route"]
+
+    # Stations export / import
+    exported = stations.export()
+    assert exported["conf3"]["home"]
+    assert stations.import_data({"office_map": {"shelf_A": {"x": 1, "y": 2, "theta": 0}}}) == 1
+    try:
+        stations.import_data({"conf3": {"kitchen": {"x": 0, "y": 0, "theta": 0}}})
+        raise AssertionError("unknown station names must be refused")
+    except ValueError:
+        pass
+
+    # After a navigation (re)start the last good pose on the same map is restored (auto-aligned)
+    assert robot.scan_age() is not None and robot.scan_age() < 2
+    robot.last_good = (robot.map_name, robot.pose(), time.time())
+    assert "position set" in robot.restore_pose_after_start(robot.map_name, timeout=10)
+    assert "no recent position" in robot.restore_pose_after_start("other_map", timeout=1)
+
     assert not robot.load_map("../../etc/passwd")["success"]
     assert robot.load_map("office_map")["success"]
     wait(lambda: robot.live_layers()["map"]["width"] == 156)

@@ -44,6 +44,33 @@ class StationStore:
             self.data.get(map_name or "", {}).pop(name, None)
             self._write()
 
+    def export(self):
+        with self.lock:
+            return json.loads(json.dumps(self.data))
+
+    def import_data(self, data, replace=False):
+        """Merge {map: {station: {x, y, theta}}} (validated). Returns how many stations were imported."""
+        if not isinstance(data, dict):
+            raise ValueError("Expected {map: {station: {x, y, theta}}}.")
+        clean = {}
+        for map_name, stations in data.items():
+            if not isinstance(map_name, str) or not isinstance(stations, dict):
+                raise ValueError(f"Bad entry for map {map_name!r}.")
+            for name, s in stations.items():
+                if name not in VALID_NAMES:
+                    raise ValueError(f"Unknown station {name!r} on map {map_name}.")
+                try:
+                    clean.setdefault(map_name, {})[name] = {k: round(float(s[k]), 3) for k in ("x", "y", "theta")}
+                except (KeyError, TypeError, ValueError):
+                    raise ValueError(f"{map_name}/{name} needs numbers x, y, theta.")
+        with self.lock:
+            if replace:
+                self.data = {}
+            for map_name, stations in clean.items():
+                self.data.setdefault(map_name, {}).update(stations)
+            self._write()
+        return sum(len(v) for v in clean.values())
+
     def _write(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")

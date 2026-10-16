@@ -463,6 +463,10 @@ class MissionManager:
             where = config.station_label(status.get("goal_station")) if status.get("goal_station") else \
                 f"point ({goal.get('x', 0):.2f}, {goal.get('y', 0):.2f})"
             return "navigating", f"Driving to {where}"
+        if "scan_age" in status and (status["scan_age"] is None or status["scan_age"] > 2.0):
+            return "error", "No LiDAR scan: check the LiDAR (power / battery)"
+        if status.get("odom_bad"):
+            return "error", f"Odometry broken ({status['odom_bad']}): restart navigation"
         if "nav2_active" in status and status.get("nav2_active") is None:
             return "idle", "Nav2 is not running on the Jetson: start navigation.launch.py"
         if status.get("nav2_active") is False:

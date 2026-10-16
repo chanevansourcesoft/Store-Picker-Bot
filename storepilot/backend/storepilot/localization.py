@@ -10,6 +10,7 @@ quality(): share of scan points within 10 cm of a wall at a given pose (0..1).
 """
 
 import math
+from collections import deque
 
 import numpy as np
 
@@ -26,6 +27,7 @@ class LikelihoodField:
         self.max_dist = max_dist
         grid = np.asarray(data, dtype=np.int16).reshape(self.h, self.w)
         occupied = grid >= 65
+        self.unknown = grid < 0
         # distance to the nearest wall in cells (8-neighbour chamfer, capped at max_dist)
         steps = int(max_dist / self.res) + 1
         dist = np.where(occupied, 0.0, float(steps)).astype(np.float32)
@@ -57,6 +59,53 @@ class LikelihoodField:
         d = np.full(col.shape, self.max_dist, dtype=np.float32)
         d[inside] = self.dist[row[inside], col[inside]]
         return d
+
+    def clearance(self, x, y):
+        """(distance to the nearest wall in m, capped at max_dist; 'unknown' / 'outside' / None)."""
+        c = int(math.floor((x - self.ox) / self.res))
+        r = int(math.floor((y - self.oy) / self.res))
+        if not (0 <= c < self.w and 0 <= r < self.h):
+            return 0.0, "outside"
+        if self.unknown[r, c]:
+            return 0.0, "unknown"
+        return float(self.dist[r, c]), None
+
+    def reachable(self, x, y, min_clear):
+        """Cells the robot centre can reach from (x, y) without coming closer than min_clear to a wall
+        (4-connected flood fill). Cached per start area. None if (x, y) is outside the map."""
+        c0 = int(math.floor((x - self.ox) / self.res))
+        r0 = int(math.floor((y - self.oy) / self.res))
+        if not (0 <= c0 < self.w and 0 <= r0 < self.h):
+            return None
+        key = (r0 // 4, c0 // 4, round(min_clear, 2))
+        cache = getattr(self, "_reach_cache", {})
+        if key in cache:
+            return cache[key]
+        free = (self.dist >= min_clear) & ~self.unknown
+        start = None
+        # the robot may stand a little closer to a wall than min_clear: start from the nearest free cell
+        for rad in range(0, 8):
+            rs = slice(max(0, r0 - rad), min(self.h, r0 + rad + 1))
+            cs = slice(max(0, c0 - rad), min(self.w, c0 + rad + 1))
+            idx = np.argwhere(free[rs, cs])
+            if len(idx):
+                start = (int(idx[0][0]) + rs.start, int(idx[0][1]) + cs.start)
+                break
+        seen = np.zeros_like(free)
+        if start is not None:
+            q = deque([start])
+            seen[start] = True
+            while q:
+                r, c = q.popleft()
+                for nr, nc in ((r + 1, c), (r - 1, c), (r, c + 1), (r, c - 1)):
+                    if 0 <= nr < self.h and 0 <= nc < self.w and free[nr, nc] and not seen[nr, nc]:
+                        seen[nr, nc] = True
+                        q.append((nr, nc))
+        if len(cache) > 20:
+            cache.clear()
+        cache[key] = seen
+        self._reach_cache = cache
+        return seen
 
     def score(self, points, poses):
         d = self._distances(points, poses)

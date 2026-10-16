@@ -46,6 +46,8 @@ JETSON_MAP_ORIGINS = {
     "map_outside": (-5.67, -28.7), "map_office": (-9.91, -6.66), "map_02": (-20.7, -7.92),
 }
 ROS_BASE_FRAME = os.environ.get("ROS_BASE_FRAME", "base_footprint")
+# SSH target for starting / stopping the robot software on the Jetson (key login)
+JETSON_SSH = os.environ.get("JETSON_SSH", "ubuntu@192.168.149.1")
 # Drive commands are refused when fewer LiDAR points than this lie on map walls (bad localization).
 MIN_LOC_QUALITY = float(os.environ.get("STOREPILOT_MIN_LOC_QUALITY", "0.30"))
 ROS_BATTERY_TOPIC = os.environ.get("ROS_BATTERY_TOPIC", "/ros_robot_controller/battery")

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, WifiOff } from "lucide-react";
 import { useSnapshot } from "./api";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { BottomNav, SimBanner, TopBar, type Tab } from "./components/Shell";
 import { OpsPage } from "./pages/OpsPage";
 import { OrderPage } from "./pages/OrderPage";
@@ -44,6 +45,7 @@ export default function App() {
       )}
 
       <main ref={main} className={`scroll-y min-h-0 flex-1 p-3 transition-opacity ${link === "lost" ? "opacity-50" : ""}`}>
+        <ErrorBoundary resetKey={tab}>
         {!snap ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-muted">
             <Loader2 className="animate-spin" size={32} aria-hidden />
@@ -58,8 +60,9 @@ export default function App() {
         ) : tab === "activity" ? (
           <ActivityPage snap={snap} />
         ) : (
-          <SystemPage snap={snap} />
+          <SystemPage snap={snap} toast={toast} />
         )}
+        </ErrorBoundary>
       </main>
 
       <BottomNav tab={tab} setTab={setTab} badges={{ ops: hasError && tab !== "ops",

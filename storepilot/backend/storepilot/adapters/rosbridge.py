@@ -153,6 +153,28 @@ class TfTree:
 
 # ---------------------------------------------------------------- map image
 
+def costmap_to_png(info, data):
+    """Nav2 costmap -> RGBA PNG overlay: free transparent, inflation purple, lethal / inscribed red."""
+    w, h = info["width"], info["height"]
+    raw = bytearray()
+    for row in range(h - 1, -1, -1):
+        raw.append(0)
+        for v in data[row * w:(row + 1) * w]:
+            if v >= 99:
+                raw += bytes((240, 82, 79, 170))
+            elif v > 0:
+                a = 40 + int(v * 1.1)
+                raw += bytes((167, 139, 250, min(a, 150)))
+            else:
+                raw += bytes((0, 0, 0, 0))
+
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF)
+
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(bytes(raw), 6)) + chunk(b"IEND", b""))
+
+
 def grid_to_png(info, data):
     """nav_msgs/OccupancyGrid -> palette PNG (dark theme). Row 0 of the grid is the bottom."""
     w, h = info["width"], info["height"]
@@ -203,8 +225,11 @@ class RosbridgeLink:
         ws = self.ws
         if ws is None or not self.connected:
             raise AdapterError("rosbridge not connected")
-        with self.send_lock:
-            ws.send(json.dumps(payload))
+        try:
+            with self.send_lock:
+                ws.send(json.dumps(payload))
+        except Exception as e:     # connection closing / reconnecting: report it the same way
+            raise AdapterError(f"rosbridge send failed: {e.__class__.__name__}") from e
 
     def _run(self):
         while not self._stop.is_set():
@@ -292,6 +317,16 @@ class RosbridgeRobot(RobotAdapter):
         self.lock = threading.Lock()
         self.tf = TfTree()          # static transforms only (laser mount)
         self.track = PoseTracker()
+        self.last_good = None       # (map_name, pose dict, time.time()) while localized with a good LiDAR fit
+        self.odom_bad = None        # reason text when /odom is impossible (EKF diverged), else None
+        self.odom_bad_at = 0.0
+        self.driving = False        # set by the route executor; sent in the heartbeat to the Jetson watchdog
+        self.heartbeat_paused = False   # tests only: simulate a lost Pi
+        self.watchdog = None        # last /storepilot/watchdog state (dict) and when it came
+        self.watchdog_at = None
+        self.costmap = None         # {"info", "png", "version", "frame"}
+        self.footprint = None       # (frame, [(x, y), ...], stamp)
+        self.costmap_version = 0
         self.amcl_rx = None         # monotonic time of the last /amcl_pose
         self.map_info = None
         self.map_data = None
@@ -327,12 +362,17 @@ class RosbridgeRobot(RobotAdapter):
                 ("/plan", "nav_msgs/msg/Path", 500),
                 (battery_topic, "std_msgs/msg/UInt16", 1000),
                 ("/navigate_to_pose/_action/status", "action_msgs/msg/GoalStatusArray", 0),
+                ("/local_costmap/costmap", "nav_msgs/msg/OccupancyGrid", 1000),
+                ("/local_costmap/published_footprint", "geometry_msgs/msg/PolygonStamped", 300),
+                ("/storepilot/watchdog", "std_msgs/msg/String", 0),
             ],
             advertise=[("/goal_pose", "geometry_msgs/msg/PoseStamped"),
-                       ("/initialpose", "geometry_msgs/msg/PoseWithCovarianceStamped")],
+                       ("/initialpose", "geometry_msgs/msg/PoseWithCovarianceStamped"),
+                       ("/storepilot/heartbeat", "std_msgs/msg/Bool")],
             on_message=self._on_message)
         self.link.start()
         threading.Thread(target=self._poll_lifecycle, name="nav2-lifecycle", daemon=True).start()
+        threading.Thread(target=self._heartbeat, name="heartbeat", daemon=True).start()
 
     # ---------- incoming ----------
 
@@ -344,7 +384,23 @@ class RosbridgeRobot(RobotAdapter):
         return hits[0] if len(hits) == 1 else None
 
     def _on_message(self, topic, msg):
-        if topic == "/amcl_pose":
+        if topic == "/storepilot/watchdog":
+            try:
+                self.watchdog = json.loads(msg.get("data", "{}"))
+                self.watchdog_at = time.monotonic()
+            except ValueError:
+                pass
+        elif topic == "/local_costmap/costmap":
+            png = costmap_to_png(msg["info"], msg["data"])
+            with self.lock:
+                self.costmap_version += 1
+                self.costmap = {"info": msg["info"], "png": png, "version": self.costmap_version, "data": msg["data"],
+                                "frame": msg["header"]["frame_id"].lstrip("/"), "t": stamp_of(msg["header"])}
+        elif topic == "/local_costmap/published_footprint":
+            pts = [(p["x"], p["y"]) for p in msg["polygon"]["points"]]
+            with self.lock:
+                self.footprint = (msg["header"]["frame_id"].lstrip("/"), pts, stamp_of(msg["header"]))
+        elif topic == "/amcl_pose":
             with self.lock:
                 self.track.set_amcl(stamp_of(msg["header"]), pose_of(msg["pose"]["pose"]))
                 self.amcl_rx = time.monotonic()
@@ -363,8 +419,22 @@ class RosbridgeRobot(RobotAdapter):
                 self.map_name = guess
         elif topic == "/odom":
             tw = msg["twist"]["twist"]
+            t, pose = stamp_of(msg["header"]), pose_of(msg["pose"]["pose"])
+            speed = math.hypot(tw["linear"]["x"], tw["linear"]["y"])
             with self.lock:
-                self.track.add_odom(stamp_of(msg["header"]), pose_of(msg["pose"]["pose"]))
+                prev = (self.track.times[-1], self.track.poses[-1]) if self.track.times else None
+            jump = None
+            if prev and 0 < t - prev[0] < 1.0:
+                jump = math.hypot(pose[0] - prev[1][0], pose[1] - prev[1][1]) / (t - prev[0])
+            # this robot drives at most ~0.3 m/s: anything above 1 m/s is a broken odometry filter
+            if speed > 1.0 or (jump is not None and jump > 1.5) or abs(pose[0]) > 1000 or abs(pose[1]) > 1000:
+                self.odom_bad = (f"odometry reports {speed:.1f} m/s" if speed > 1.0 else
+                                 f"odometry jumped at {jump:.1f} m/s" if jump else "odometry far from origin")
+                self.odom_bad_at = time.monotonic()
+            elif self.odom_bad and time.monotonic() - self.odom_bad_at > 5.0:
+                self.odom_bad = None       # sane for 5 s again (e.g. after navigation was restarted)
+            with self.lock:
+                self.track.add_odom(t, pose)
                 self.odom_speed = math.hypot(tw["linear"]["x"], tw["linear"]["y"])
                 self.odom_turn = tw["angular"]["z"]
                 self.odom_at = time.monotonic()
@@ -451,6 +521,8 @@ class RosbridgeRobot(RobotAdapter):
         return None if p is None else {"x": p[0], "y": p[1], "theta": math.atan2(math.sin(p[2]), math.cos(p[2]))}
 
     def localized(self):
+        if self.odom_bad:
+            return False
         with self.lock:
             has_amcl = self.track.amcl is not None
         return has_amcl and not self.needs_initial_pose and self.loc_active is not False and self._now() is not None
@@ -492,7 +564,32 @@ class RosbridgeRobot(RobotAdapter):
             if pose is not None:
                 value = field.quality(pts, pose)
         self.quality_cache = (value, time.monotonic())
+        if value is not None and value >= 0.55 and self.map_name:
+            pose = self.pose()
+            if pose:
+                self.last_good = (self.map_name, pose, time.time())
         return value
+
+    def scan_age(self):
+        """Seconds since the last LiDAR scan arrived, None if never."""
+        with self.lock:
+            scan = self.scan
+        return None if not scan else time.monotonic() - scan[5]
+
+    def restore_pose_after_start(self, map_name, timeout=90.0):
+        """After navigation was (re)started from the dashboard: put the robot back at its last good pose
+        on the same map (auto-aligned) as soon as AMCL and the LiDAR are up. Returns a message."""
+        last = self.last_good
+        if not last or last[0] != map_name or time.time() - last[2] > 3600:
+            return "no recent position on this map: set it on the Map page"
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            if self.loc_active and self._scan_in_base() is not None and self._field() is not None:
+                p = last[1]
+                result = self.set_initial_pose(p["x"], p["y"], p["theta"], refine=True)
+                return result.get("message", "")
+            time.sleep(1.0)
+        return "LiDAR or AMCL not ready: set the position on the Map page"
 
     def refine_pose(self, x, y, theta):
         """Best pose near (x, y, theta) [meaning: now] by scan matching. Returns (pose_now, before, after) or None."""
@@ -530,6 +627,100 @@ class RosbridgeRobot(RobotAdapter):
         step = max(1, len(pts) // max_points)
         c, s_ = math.cos(pose[2]), math.sin(pose[2])
         return [(round(pose[0] + c * px - s_ * py, 3), round(pose[1] + s_ * px + c * py, 3)) for px, py in pts[::step]]
+
+    def map_from_odom(self, t=None):
+        """Transform odom -> map (x, y, yaw) at Jetson time t (latest if None), or None."""
+        with self.lock:
+            t = self.track.latest_time() if t is None else t
+            pose, odom = self.track.pose_at(t), self.track.odom_at(t)
+        if pose is None or odom is None:
+            return None
+        return compose(pose, inverse(odom))
+
+    def costmap_layer(self):
+        """Local costmap overlay placed in the map frame (the costmap itself lives in odom)."""
+        with self.lock:
+            cm = self.costmap
+            fp = self.footprint
+        out = {"costmap": None, "footprint": None}
+        m_o = self.map_from_odom()
+        if cm and m_o and cm["frame"] == "odom":
+            info = cm["info"]
+            o = info["origin"]["position"]
+            ox, oy, oyaw = compose(m_o, (o["x"], o["y"], yaw_of(info["origin"]["orientation"])))
+            out["costmap"] = {"version": cm["version"], "width": info["width"], "height": info["height"],
+                              "resolution": info["resolution"], "origin": {"x": ox, "y": oy, "yaw": oyaw}}
+        if fp and m_o and fp[0] == "odom":
+            out["footprint"] = [list(compose(m_o, (x, y, 0.0))[:2]) for x, y in fp[1]]
+        return out
+
+    def check_point(self, x, y, robot_half=0.18):
+        """Is (x, y) a sensible goal? -> {"level": ok|warn|bad, "reason", "clearance"}."""
+        field = self._field()
+        if field is None:
+            return {"level": "warn", "reason": "No map yet: cannot check this point.", "clearance": None}
+        clear, problem = field.clearance(x, y)
+        if problem == "outside":
+            return {"level": "bad", "reason": "Outside the map.", "clearance": 0.0}
+        if problem == "unknown":
+            return {"level": "bad", "reason": "Unknown (unmapped) area.", "clearance": 0.0}
+        if clear < 0.05:
+            return {"level": "bad", "reason": "Inside a wall or obstacle.", "clearance": round(clear, 2)}
+        if clear < robot_half:
+            return {"level": "bad", "reason": f"Only {clear * 100:.0f} cm from a wall: the robot does not fit.",
+                    "clearance": round(clear, 2)}
+        pose = self.pose() if self.localized() else None
+        if pose is not None:
+            reach = field.reachable(pose["x"], pose["y"], robot_half)
+            if reach is not None:
+                c = int(math.floor((x - field.ox) / field.res))
+                r = int(math.floor((y - field.oy) / field.res))
+                if not reach[r, c]:
+                    return {"level": "bad", "reason": "Not reachable from the robot (behind a wall, outside the room, "
+                                                      "or through a gap too narrow).", "clearance": round(clear, 2)}
+        lethal = self._costmap_cost(x, y)
+        if lethal is not None and lethal >= 99:
+            return {"level": "bad", "reason": "Blocked by an obstacle the robot sees right now.", "clearance": round(clear, 2)}
+        if clear < robot_half + 0.12:
+            return {"level": "warn", "reason": f"Close to a wall ({clear * 100:.0f} cm): Nav2 may stop short.",
+                    "clearance": round(clear, 2)}
+        return {"level": "ok", "reason": f"Free ({clear * 100:.0f}+ cm to the nearest wall).", "clearance": round(clear, 2)}
+
+    def _costmap_cost(self, x, y):
+        with self.lock:
+            cm = self.costmap
+        m_o = self.map_from_odom()
+        if not cm or not m_o:
+            return None
+        ox, oy, _ = compose(inverse(m_o), (x, y, 0.0))      # point in odom
+        info = cm["info"]
+        c = int((ox - info["origin"]["position"]["x"]) / info["resolution"])
+        r = int((oy - info["origin"]["position"]["y"]) / info["resolution"])
+        if not (0 <= c < info["width"] and 0 <= r < info["height"]):
+            return None
+        return cm["data"][r * info["width"] + c]
+
+    def set_maps(self, maps):
+        """Map list from the Jetson: [{"name", "origin": [x, y]}]."""
+        self.maps = [m["name"] for m in maps]
+        self.map_origins = {m["name"]: tuple(m["origin"]) for m in maps}
+        with self.lock:
+            info = self.map_info
+        if info is not None and not self.map_name:
+            self.map_name = self._guess_map(info)
+
+    def _heartbeat(self):
+        """Tell the Jetson watchdog twice a second that the Pi is alive (and whether it drives)."""
+        while True:
+            time.sleep(0.5)
+            if self.heartbeat_paused or not self.link.connected:
+                continue
+            try:
+                driving = self.driving or (self.goal_status or "") in ("accepted", "executing")
+                self.link.publish("/storepilot/heartbeat", {"data": bool(driving)})
+                self.heartbeat_sent_at = time.monotonic()
+            except Exception as e:  # the heartbeat must never stop: retry on the next tick
+                self.heartbeat_error = f"{e.__class__.__name__}: {e}"[:160]
 
     # ---------- RobotAdapter telemetry ----------
 
@@ -580,6 +771,8 @@ class RosbridgeRobot(RobotAdapter):
             "goal": goal,
             "goal_station": goal.get("station") if goal else None,
             "loc_quality": self.localization_quality(),
+            "odom_bad": self.odom_bad,
+            "scan_age": self.scan_age(),
             "map_name": self.map_name,
         }
 
@@ -609,6 +802,11 @@ class RosbridgeRobot(RobotAdapter):
                 "origin": {"x": info["origin"]["position"]["x"], "y": info["origin"]["position"]["y"]},
             },
             "maps": self.maps,
+            **self.costmap_layer(),
+            "watchdog": self.watchdog if self.watchdog_at and time.monotonic() - self.watchdog_at < 5 else None,
+            "heartbeat_sent_age": None if not getattr(self, "heartbeat_sent_at", None)
+            else round(time.monotonic() - self.heartbeat_sent_at, 1),
+            "heartbeat_error": getattr(self, "heartbeat_error", None),
             "scan": self.scan_points(),
             "plan": plan,
         }
