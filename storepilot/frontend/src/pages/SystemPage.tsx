@@ -73,6 +73,8 @@ export function SystemPage({ snap }: { snap: Snapshot }) {
           ["Last update", c.telemetry.age_sec === null ? "never" : `${c.telemetry.age_sec}s ago`],
           ["Source", snap.mode === "mock" ? "simulator" : "Jetson /status"],
           ["Robot stopped", snap.robot.stopped === null ? null : snap.robot.stopped ? "yes" : "no"],
+          ["Pick / scan / place", { simulated: "simulated", verified: "verified", unavailable: "unavailable" }[snap.safety.manipulation]],
+          ["Not verified", snap.robot.unverified.length ? snap.robot.unverified.join(", ") : "—"],
         ]} />
         <Health title="AI backend" icon={<Brain size={16} aria-hidden />} state={c.ai.state} rows={[
           ["Provider", c.ai.provider ?? "none (offline)"],

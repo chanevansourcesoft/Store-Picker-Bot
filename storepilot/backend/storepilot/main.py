@@ -109,6 +109,12 @@ def alerts(tel, robot, ai):
         out.append(("info", "Physical motion is disabled. Missions can be planned but not started."))
     if config.MODE == "live" and not config.JETSON_STOP_CONFIRMED:
         out.append(("warning", "Dashboard STOP is not connected to the Jetson. Use the hardware E-stop."))
+    if config.MODE == "live" and not config.MANIPULATION_VERIFIED:
+        out.append(("info", "Pick, scan and place are unavailable: the Jetson has no verified implementation yet."))
+    hidden = [f for f in config.TELEMETRY_FIELDS if f not in config.VERIFIED_TELEMETRY]
+    if config.MODE == "live" and hidden:
+        out.append(("info", "Not verified, so not shown: " + ", ".join(hidden) +
+                    " (STOREPILOT_VERIFIED_TELEMETRY)."))
     return [{"level": level, "text": text} for level, text in out]
 
 
@@ -120,11 +126,18 @@ def build_snapshot():
     health = tel.get("health") or {}
     stub = config.MODE == "live" and health and not health.get("ros_available", True)
 
+    live = config.MODE == "live"
+    unverified = [f for f in config.TELEMETRY_FIELDS if live and f not in config.VERIFIED_TELEMETRY]
+    if live and not config.MANIPULATION_VERIFIED:
+        unverified.append("holding")
+
     def value(key):
-        """Telemetry value, or None when it is not known (never invented)."""
+        """Telemetry value, or None when it is not known or not verified (never invented)."""
         if not tel["connected"] or key not in status or status[key] is None:
             return None
-        if stub and key in ("battery", "speed", "pose"):
+        if stub and key in config.TELEMETRY_FIELDS:
+            return None
+        if key in unverified:
             return None
         return status[key]
 
@@ -139,11 +152,13 @@ def build_snapshot():
         "speed": value("speed"),
         "holding": value("holding"),
         "obstacle": value("obstacle"),
-        "stopped": bool(status.get("stopped")) if tel["connected"] else None,
+        # older jetson_server.py has no "stopped" field: unknown, not "no"
+        "stopped": bool(status["stopped"]) if tel["connected"] and "stopped" in status else None,
         "busy": value("busy"),
         "last_error": value("last_error"),
         "target": s.missions.target(),
         "stop_pending": s.missions.stop_pending,
+        "unverified": unverified,
     }
 
     mission = None
@@ -166,6 +181,8 @@ def build_snapshot():
         "safety": {
             "motion_enabled": config.MODE == "mock" or config.ENABLE_MOTION,
             "stop_connected": config.MODE == "mock" or config.JETSON_STOP_CONFIRMED,
+            "manipulation": "simulated" if config.MODE == "mock" else
+                            ("verified" if config.MANIPULATION_VERIFIED else "unavailable"),
             "needs_area_confirmation": config.MODE == "live",
             "can_start": ready,
             "cannot_start_reason": not_ready_reason,

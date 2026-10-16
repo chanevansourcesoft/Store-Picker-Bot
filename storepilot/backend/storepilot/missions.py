@@ -220,6 +220,9 @@ class MissionManager:
             return False, "Robot reports it is busy."
         if config.MODE == "live" and not config.ENABLE_MOTION:
             return False, "Physical motion is disabled (STOREPILOT_ENABLE_MOTION=0)."
+        if config.MODE == "live" and not config.MANIPULATION_VERIFIED:
+            return False, ("Pick, scan and place are not verified on the Jetson yet "
+                           "(STOREPILOT_MANIPULATION_VERIFIED=0).")
         return True, ""
 
     def confirm(self, mission_id, area_clear=False):

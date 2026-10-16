@@ -207,10 +207,16 @@ def test_live_safety_switches():
             assert "motion is disabled" in str(e)
         with patch.object(config, "ENABLE_MOTION", True):
             try:
-                m.confirm(draft["id"], area_clear=False)
-                raise AssertionError("live start needs the area-clear confirmation")
+                m.confirm(draft["id"], area_clear=True)
+                raise AssertionError("unverified pick / scan / place must block a live start")
             except MissionError as e:
-                assert "clear" in str(e)
+                assert "not verified" in str(e)
+            with patch.object(config, "MANIPULATION_VERIFIED", True):
+                try:
+                    m.confirm(draft["id"], area_clear=False)
+                    raise AssertionError("live start needs the area-clear confirmation")
+                except MissionError as e:
+                    assert "clear" in str(e)
         result = m.stop()
         assert result["success"] is False and "hardware" in result["message"]
         assert robot.fetch_status()["stopped"] is False, "unconfirmed stop endpoint must not be called"

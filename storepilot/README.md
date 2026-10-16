@@ -70,6 +70,8 @@ The installer is safe to run again. It:
 | `JETSON_URL` | – | Jetson robot server, e.g. `http://192.168.2.50:8000` (live mode) |
 | `STOREPILOT_ENABLE_MOTION` | `0` | `1` = operators may start missions that move the real robot |
 | `JETSON_STOP_CONFIRMED` | `0` | `1` = you tested that `POST /stop` on the Jetson really halts the robot |
+| `STOREPILOT_MANIPULATION_VERIFIED` | `0` | `1` = pick / scan / place on the Jetson are real and return verified results. Until then live missions cannot start and "Holding" is not shown |
+| `STOREPILOT_VERIFIED_TELEMETRY` | (empty) | Live fields you checked against the robot: any of `pose,battery,speed`. Others show "Unavailable · not verified yet" |
 | `NEBIUS_API_KEY` | – | Nemotron on Nebius Token Factory. Without it: keyword parser + offline autopilot |
 | `STOREPILOT_PORT` | `8080` | Backend port (kiosk URL uses 8080) |
 
@@ -125,6 +127,58 @@ the Jetson HTTP adapter against a real HTTP server, and disconnect / reconnect r
 **Restore / remove:** `systemctl --user disable --now storepilot-backend`,
 `rm ~/.config/systemd/user/storepilot-backend.service ~/.config/autostart/storepilot-kiosk.desktop ~/.local/bin/storepilotctl`.
 Mission history is in `storepilot/data/storepilot.db` (delete it to start fresh).
+
+## Collecting the Jetson facts (read-only)
+
+Nothing here moves the robot or changes the Jetson.
+
+**On the Pi** (finds the Jetson, then checks its API with GET requests only):
+
+```bash
+cd ~/Documents/"Dark Store Robot"/Store-Picker-Bot/storepilot
+./deploy/probe_jetson.sh                 # lists hosts on this Wi-Fi with port 8000 open
+./deploy/probe_jetson.sh <jetson-ip>     # /health, /status, /map, real endpoint list, stub-value check, latency
+```
+
+**On the Jetson** (copy the script over, run it where ROS 2 runs; inside the container too if ROS is in Docker):
+
+```bash
+scp deploy/jetson_collect_info.sh <user>@<jetson-ip>:~/          # from the Pi
+bash ~/jetson_collect_info.sh ~/nav2_ws/install/setup.bash        # on the Jetson; add every setup.bash you normally source
+```
+
+It saves `~/storepilot_jetson_report_<time>.txt`: network, robot-server process and ports, `/openapi.json`,
+the `jetson_server.py` checksum (repo `main` = `44d798191b7dc679…`, repo today with the `stopped` field =
+`1379e7d8d7f7cfc4…`), `stations.yaml`, ROS 2 nodes / topics / actions, **who publishes and subscribes to
+`/cmd_vel`**, battery, odometry, AMCL / TF pose, LiDAR rate, Nav2 lifecycle, arm and Teensy devices.
+
+## Physical STOP verification (before `JETSON_STOP_CONFIRMED=1`)
+
+What the current `jetson_server.py` `/stop` does: cancels the Nav2 goal and publishes **one** zero
+`Twist` on `/cmd_vel`. It does **not** touch the SO-100 arm (the arm is driven from the LeRobot
+policy container), and another `/cmd_vel` publisher can override the single zero message. So with
+today's code the arm test below is expected to fail, and the flag must stay `0`.
+
+Test only with the wheels off the ground, the arm in a safe pose, people clear, and a hand on the
+hardware E-stop:
+
+```bash
+# Jetson, terminal 1: watch what reaches the wheels
+ros2 topic echo /cmd_vel
+# Jetson, terminal 2: watch the rate (should drop to nothing after stop)
+ros2 topic hz /cmd_vel
+# Pi: start a short navigation (this is a motion command)
+curl -X POST http://<jetson-ip>:8000/navigate -H 'content-type: application/json' -d '{"station":"shelf_A"}' &
+# Pi, while the wheels turn:
+curl -X POST http://<jetson-ip>:8000/stop
+curl http://<jetson-ip>:8000/status
+# Pi, afterwards (clears the stop flag; does not move anything by itself):
+curl -X POST http://<jetson-ip>:8000/resume
+```
+
+Pass only if: the wheels stop within a fraction of a second and stay stopped, no non-zero `/cmd_vel`
+appears afterwards, a new `/navigate` is refused until `/resume`, **and** an arm motion in progress
+(during teleop or a policy run) also stops. Record what you saw before setting the flag.
 
 ## Jetson integration: what is assumed, what is still needed
 
