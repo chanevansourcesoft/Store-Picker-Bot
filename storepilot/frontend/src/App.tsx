@@ -54,7 +54,7 @@ export default function App() {
         ) : tab === "order" ? (
           <OrderPage snap={snap} toast={toast} />
         ) : tab === "map" ? (
-          <MapPage snap={snap} />
+          <MapPage snap={snap} toast={toast} />
         ) : tab === "activity" ? (
           <ActivityPage snap={snap} />
         ) : (
@@ -65,7 +65,7 @@ export default function App() {
       <BottomNav tab={tab} setTab={setTab} badges={{ ops: hasError && tab !== "ops",
         order: snap?.mission?.status === "awaiting_confirmation" && tab !== "order" }} />
 
-      <div className="pointer-events-none fixed inset-x-3 bottom-[88px] z-50 flex flex-col gap-2">
+      <div className="pointer-events-none fixed inset-x-3 top-[76px] z-50 flex flex-col gap-2">
         {toasts.map((t) => (
           <div key={t.id} role="status"
             className={`pointer-events-auto rounded-lg border px-4 py-3 text-[14px] font-medium shadow-2xl shadow-black/60 ${

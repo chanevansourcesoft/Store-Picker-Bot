@@ -47,6 +47,7 @@ export interface Snapshot {
   safety: {
     motion_enabled: boolean;
     stop_connected: boolean;
+    stop_verified: boolean;
     manipulation: "simulated" | "verified" | "unavailable";
     needs_area_confirmation: boolean;
     can_start: boolean;
@@ -59,7 +60,7 @@ export interface Snapshot {
     };
     jetson: {
       state: "simulated" | "connected" | "disconnected" | "not_configured";
-      url: string | null; latency_ms: number | null; ros_available: boolean | null;
+      url: string | null; link?: string; latency_ms: number | null; ros_available: boolean | null;
       ros_connected: boolean | null; detail: string | null;
     };
     telemetry: { state: "simulated" | "live" | "stub" | "stale" | "unavailable"; age_sec: number | null };
@@ -74,7 +75,21 @@ export interface Snapshot {
     stopped: boolean | null; busy: boolean | null; last_error: string | null; target: string | null;
     stop_pending: boolean;
     unverified: string[];
+    battery_v?: number | null;
+    localized?: boolean | null;
+    needs_initial_pose?: boolean | null;
+    nav2_active?: boolean | null;
+    goal?: { x: number; y: number; theta: number; status: string | null; distance?: number; station?: string | null } | null;
+    map_name?: string | null;
   };
+  ros: {
+    map: { name: string | null; version: number; width: number; height: number; resolution: number;
+      origin: { x: number; y: number } } | null;
+    maps: string[];
+    scan: [number, number][];
+    plan: [number, number][];
+  } | null;
+  drive: { available: boolean; motion_enabled: boolean; stop_verified: boolean };
   mission: Mission | null;
   map: { stations: Record<string, Pose> | null; source: "simulated" | "jetson" | null; labels: Record<string, string> };
   alerts: { level: Level; text: string }[];

@@ -378,12 +378,15 @@ class MissionManager:
         The dashboard says 'stopped' only when telemetry confirms it."""
         self.abort.set()
         mission_id = self.current_id
-        if config.MODE == "live" and not config.JETSON_STOP_CONFIRMED:
+        rosbridge = getattr(self.adapter, "link_kind", "") == "rosbridge"
+        if config.MODE == "live" and not config.JETSON_STOP_CONFIRMED and not rosbridge:
             self.event("operator", "error", "STOP pressed: mission planner halted, but the Jetson stop endpoint is "
                        "not confirmed (JETSON_STOP_CONFIRMED=0). Use the hardware E-stop.", mission_id)
             return {"success": False, "message": "Jetson stop not connected. Use the hardware emergency stop.",
                     "planner_halted": True}
-        self.event("operator", "warning", "STOP requested by operator", mission_id)
+        self.event("operator", "warning", "STOP requested by operator" +
+                   (" (cancel goal + pause Nav2; physical stop not yet verified, keep the hardware E-stop at hand)"
+                    if rosbridge and not config.JETSON_STOP_CONFIRMED else ""), mission_id)
         result = self.adapter.stop()
         if result.get("success"):
             self.stop_pending = True
@@ -395,7 +398,8 @@ class MissionManager:
 
     def resume(self):
         """Clear the robot's stop state. Never restarts a mission."""
-        if config.MODE == "live" and not config.JETSON_STOP_CONFIRMED:
+        if config.MODE == "live" and not config.JETSON_STOP_CONFIRMED and \
+                getattr(self.adapter, "link_kind", "") != "rosbridge":
             raise MissionError("Jetson stop/resume endpoint is not confirmed.")
         result = self.adapter.resume()
         if result.get("success"):
@@ -454,6 +458,15 @@ class MissionManager:
             if tool == "scan_item":
                 return "picking", "Verifying pick (barcode)"
             return "picking", "Placing in basket" if args.get("target") == "basket" else "Returning item to shelf"
+        if status.get("nav_state") == "navigating":
+            goal = status.get("goal") or {}
+            where = config.station_label(status.get("goal_station")) if status.get("goal_station") else \
+                f"point ({goal.get('x', 0):.2f}, {goal.get('y', 0):.2f})"
+            return "navigating", f"Driving to {where}"
+        if status.get("nav2_active") is False:
+            return "idle", "Nav2 is paused: press Start Nav2"
+        if "localized" in status and not status.get("localized"):
+            return "idle", "Not localized: set the robot position on the map"
         if self.last_finished and time.monotonic() - self.last_finished[2] < 30:
             _, status_done, _ = self.last_finished
             if status_done == "completed":
@@ -465,6 +478,8 @@ class MissionManager:
             return "error", "Mission failed"
         if status.get("last_error"):
             return "idle", f"Last robot error: {status['last_error']}"
+        if "localized" in status:   # live over rosbridge: driving only
+            return "idle", "Ready to drive"
         return "idle", "Ready for a mission"
 
     def target(self):

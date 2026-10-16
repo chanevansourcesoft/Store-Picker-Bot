@@ -14,7 +14,8 @@ class Telemetry:
     def __init__(self, adapter, on_event):
         self.adapter = adapter
         self.on_event = on_event          # on_event(source, level, text)
-        self.poll_sec = config.POLL_SEC_MOCK if adapter.source == "simulated" else config.POLL_SEC_LIVE
+        self.poll_sec = getattr(adapter, "poll_sec", None) or (
+            config.POLL_SEC_MOCK if adapter.source == "simulated" else config.POLL_SEC_LIVE)
         self.lock = threading.Lock()
         self.status = None
         self.status_at = None             # monotonic time of the last good /status

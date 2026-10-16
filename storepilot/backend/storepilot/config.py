@@ -27,6 +27,17 @@ if MODE not in ("mock", "live"):
     raise SystemExit(f"STOREPILOT_MODE must be 'mock' or 'live', got {MODE!r}")
 
 JETSON_URL = os.environ.get("JETSON_URL", "").strip().rstrip("/")
+# How live mode talks to the Jetson:
+#   http      = jetson_server.py (Contract v2) at JETSON_URL
+#   rosbridge = Nav2 directly through rosbridge_websocket at ROSBRIDGE_URL (no Jetson code needed)
+JETSON_LINK = os.environ.get("JETSON_LINK", "http").strip().lower()
+ROSBRIDGE_URL = os.environ.get("ROSBRIDGE_URL", "").strip()
+JETSON_MAPS_DIR = os.environ.get("JETSON_MAPS_DIR", "/home/ubuntu/ros2_ws/src/slam/maps")
+JETSON_MAPS = [m.strip() for m in os.environ.get(
+    "JETSON_MAPS", "conf3,conf2,conf_mecanum,map_confrence,map_reception,map_test_new,office_map,map_01,"
+    "map_100,map_main,map_09,map_garden,map_outside,map_office,map_02").split(",") if m.strip()]
+ROS_BASE_FRAME = os.environ.get("ROS_BASE_FRAME", "base_footprint")
+ROS_BATTERY_TOPIC = os.environ.get("ROS_BATTERY_TOPIC", "/ros_robot_controller/battery")
 # Live-mode safety switches. Both are OFF unless the operator turns them on.
 ENABLE_MOTION = _flag("STOREPILOT_ENABLE_MOTION")
 JETSON_STOP_CONFIRMED = _flag("JETSON_STOP_CONFIRMED")
@@ -43,6 +54,7 @@ HOST = os.environ.get("STOREPILOT_HOST", "127.0.0.1")
 PORT = int(os.environ.get("STOREPILOT_PORT", "8080"))
 
 DB_PATH = Path(os.environ.get("STOREPILOT_DB", ROOT / "data" / "storepilot.db"))
+STATIONS_PATH = Path(os.environ.get("STOREPILOT_STATIONS", ROOT / "data" / "stations.json"))
 STATIC_DIR = ROOT / "frontend" / "dist"
 
 # The shared agent code (Nemotron planner, order parser, safety guards) lives in ../webapp/app

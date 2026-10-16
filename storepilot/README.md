@@ -128,6 +128,50 @@ the Jetson HTTP adapter against a real HTTP server, and disconnect / reconnect r
 `rm ~/.config/systemd/user/storepilot-backend.service ~/.config/autostart/storepilot-kiosk.desktop ~/.local/bin/storepilotctl`.
 Mission history is in `storepilot/data/storepilot.db` (delete it to start fresh).
 
+## Live driving over rosbridge (this robot)
+
+The robot's Nav2 is reached directly through `rosbridge_websocket` on the Jetson. Nothing is
+installed or changed in `mecanum_nav`. The dashboard only sends what RViz sends:
+`/initialpose` (Set position), `/goal_pose` (Send goal / station), cancel goal + Nav2 lifecycle
+pause (STOP), lifecycle resume (Start Nav2 / Resume) and `/map_server/load_map` (switch map).
+It never publishes `/cmd_vel`; rosbridge is started with an allow-list so it cannot.
+
+**1. On the Jetson** (after `navigation.launch.py` is running), in a second terminal:
+
+```bash
+source ~/ros2_ws/.robotrc
+ros2 launch rosbridge_server rosbridge_websocket_launch.xml port:=9090 \
+  topics_glob:="[/map, /tf, /tf_static, /odom, /scan, /plan, /ros_robot_controller/battery, /navigate_to_pose/_action/status, /goal_pose, /initialpose]" \
+  services_glob:="[/lifecycle_manager_navigation/*, /lifecycle_manager_localization/*, /navigate_to_pose/_action/cancel_goal, /map_server/load_map, /rosapi/get_param]" \
+  params_glob:="[*map_server*]"
+```
+
+**2. On the Pi** (`storepilot/.env`), then `storepilotctl restart`:
+
+```
+STOREPILOT_MODE=live
+JETSON_LINK=rosbridge
+ROSBRIDGE_URL=ws://192.168.20.185:9090
+STOREPILOT_ENABLE_MOTION=0      # 1 = allow Send goal / station drives from the dashboard
+JETSON_STOP_CONFIRMED=0         # 1 only after the physical STOP test below
+```
+
+**3. On the dashboard → Map:** *Start Nav2* → *Set position* (press where the robot is, drag toward
+its heading, release) → *Save stations* per map → *Send goal* or a station button (confirm the path
+is clear). *Environment* switches maps with `load_map`; set the position again afterwards.
+
+STOP over rosbridge = cancel all NavigateToPose goals + pause Nav2 (controller and recovery
+behaviours deactivate); the base's 0.5 s `cmd_vel` watchdog then stops the wheels. It is shown as
+*NOT VERIFIED* until you test it physically and set `JETSON_STOP_CONFIRMED=1`.
+
+Develop without the robot: `cd backend && .venv/bin/python -m tests.fake_nav2_rosbridge` (fake
+Nav2 on `ws://127.0.0.1:9091`, starts paused and unlocalized like the real robot), then run the
+backend with `ROSBRIDGE_URL=ws://127.0.0.1:9091`.
+
+Things to confirm on the first real connection: the map appears at once (`/map` is a latched
+topic; if not, it appears after any *Environment* switch), and STOP reports "goal canceled"
+(cancel uses the hidden action service; if rosbridge refuses it, the Nav2 pause still stops the robot).
+
 ## Collecting the Jetson facts (read-only)
 
 Nothing here moves the robot or changes the Jetson.

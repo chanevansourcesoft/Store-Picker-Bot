@@ -25,7 +25,7 @@ import logging
 import time
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -33,6 +33,7 @@ from . import config
 from .db import Store
 from .health import AIStatus, pi_health
 from .missions import MissionError, MissionManager
+from .stations import StationStore
 from .telemetry import Telemetry
 
 from app.config import load_inventory  # noqa: E402  (shared inventory, webapp/app/inventory.json)
@@ -41,10 +42,16 @@ log = logging.getLogger("storepilot")
 PUSH_SEC = 0.25
 
 
-def make_adapter():
+def make_adapter(stations):
     if config.MODE == "mock":
         from .adapters.sim import SimRobot
         return SimRobot(load_inventory)
+    if config.JETSON_LINK == "rosbridge":
+        from .adapters.rosbridge import RosbridgeRobot
+        if not config.ROSBRIDGE_URL:
+            raise SystemExit("JETSON_LINK=rosbridge needs ROSBRIDGE_URL, e.g. ws://192.168.20.185:9090")
+        return RosbridgeRobot(config.ROSBRIDGE_URL, stations, config.JETSON_MAPS_DIR, config.JETSON_MAPS,
+                              base_frame=config.ROS_BASE_FRAME, battery_topic=config.ROS_BATTERY_TOPIC)
     from .adapters.jetson import JetsonAdapter
     if not config.JETSON_URL:
         from .adapters.base import AdapterError, RobotAdapter
@@ -66,7 +73,9 @@ def make_adapter():
 class Services:
     def __init__(self):
         self.store = Store(config.DB_PATH)
-        self.adapter = make_adapter()
+        self.stations = StationStore(config.STATIONS_PATH)
+        self.adapter = make_adapter(self.stations)
+        self.rosbridge = getattr(self.adapter, "link_kind", "") == "rosbridge"
         simulated = self.adapter.source == "simulated"
         add = lambda source, level, text: self.store.add_event(source, level, text, simulated=simulated)  # noqa: E731
         self.ai = AIStatus(add)
@@ -84,12 +93,15 @@ services: Services | None = None
 
 # ---------- snapshot ----------
 
+def robot_url():
+    return config.ROSBRIDGE_URL if config.JETSON_LINK == "rosbridge" else config.JETSON_URL
+
 def alerts(tel, robot, ai):
     out = []
     status = tel.get("status") or {}
     health = tel.get("health") or {}
-    if config.MODE == "live" and not config.JETSON_URL:
-        out.append(("error", "JETSON_URL is not set: the dashboard cannot reach the robot."))
+    if config.MODE == "live" and not robot_url():
+        out.append(("error", "No robot address set (JETSON_URL or ROSBRIDGE_URL): the dashboard cannot reach the robot."))
     elif not tel["connected"]:
         out.append(("error", "Robot disconnected: telemetry unavailable. Mission history is kept on this Pi."))
     elif tel["age"] is not None and tel["age"] > config.STALE_AFTER_SEC:
@@ -107,12 +119,23 @@ def alerts(tel, robot, ai):
         out.append(("warning", f"AI backend problem: {ai['detail']}"))
     if config.MODE == "live" and not config.ENABLE_MOTION:
         out.append(("info", "Physical motion is disabled. Missions can be planned but not started."))
-    if config.MODE == "live" and not config.JETSON_STOP_CONFIRMED:
+    rosbridge = services is not None and services.rosbridge
+    if config.MODE == "live" and not config.JETSON_STOP_CONFIRMED and not rosbridge:
         out.append(("warning", "Dashboard STOP is not connected to the Jetson. Use the hardware E-stop."))
+    if rosbridge and not config.JETSON_STOP_CONFIRMED:
+        out.append(("warning", "STOP cancels the goal and pauses Nav2, but is not physically verified yet. "
+                               "Keep the hardware E-stop at hand."))
+    if rosbridge and tel["connected"]:
+        if status.get("nav2_active") is False:
+            out.append(("warning", "Nav2 is paused on the Jetson: press Start Nav2 on the Map page."))
+        elif status.get("localized") is False:
+            out.append(("warning", "Robot is not localized: set its position on the Map page (like 2D Pose Estimate)."))
+        if status.get("battery_v") is not None and status["battery_v"] < 11.1:
+            out.append(("warning", f"Battery {status['battery_v']:.2f} V: charge before driving (3S pack)."))
     if config.MODE == "live" and not config.MANIPULATION_VERIFIED:
         out.append(("info", "Pick, scan and place are unavailable: the Jetson has no verified implementation yet."))
     hidden = [f for f in config.TELEMETRY_FIELDS if f not in config.VERIFIED_TELEMETRY]
-    if config.MODE == "live" and hidden:
+    if config.MODE == "live" and hidden and not rosbridge:
         out.append(("info", "Not verified, so not shown: " + ", ".join(hidden) +
                     " (STOREPILOT_VERIFIED_TELEMETRY)."))
     return [{"level": level, "text": text} for level, text in out]
@@ -127,7 +150,10 @@ def build_snapshot():
     stub = config.MODE == "live" and health and not health.get("ros_available", True)
 
     live = config.MODE == "live"
-    unverified = [f for f in config.TELEMETRY_FIELDS if live and f not in config.VERIFIED_TELEMETRY]
+    # jetson_server.py (http) reports default battery / constant speed, so those wait for verification.
+    # Over rosbridge, pose and speed come straight from ROS TF and /odom.
+    unverified = [f for f in config.TELEMETRY_FIELDS
+                  if live and not s.rosbridge and f not in config.VERIFIED_TELEMETRY]
     if live and not config.MANIPULATION_VERIFIED:
         unverified.append("holding")
 
@@ -159,6 +185,12 @@ def build_snapshot():
         "target": s.missions.target(),
         "stop_pending": s.missions.stop_pending,
         "unverified": unverified,
+        "battery_v": status.get("battery_v") if tel["connected"] else None,
+        "localized": status.get("localized") if tel["connected"] else None,
+        "needs_initial_pose": status.get("needs_initial_pose") if tel["connected"] else None,
+        "nav2_active": status.get("nav2_active") if tel["connected"] else None,
+        "goal": status.get("goal") if tel["connected"] else None,
+        "map_name": status.get("map_name") if tel["connected"] else None,
     }
 
     mission = None
@@ -175,12 +207,18 @@ def build_snapshot():
     ready, not_ready_reason = s.missions.readiness()
     ai = s.ai.snapshot()
     map_data = tel.get("map") or {}
+    ros = None
+    if s.rosbridge:
+        map_data = {"stations": s.stations.get(s.adapter.map_name)} if tel["connected"] else {}
+        ros = s.adapter.live_layers() if tel["connected"] else None
     return {
         "mode": config.MODE,
         "server_time": time.time(),
         "safety": {
             "motion_enabled": config.MODE == "mock" or config.ENABLE_MOTION,
-            "stop_connected": config.MODE == "mock" or config.JETSON_STOP_CONFIRMED,
+            # rosbridge: STOP really cancels the goal and pauses Nav2; "verified" = tested on the robot
+            "stop_connected": config.MODE == "mock" or config.JETSON_STOP_CONFIRMED or s.rosbridge,
+            "stop_verified": config.MODE == "mock" or config.JETSON_STOP_CONFIRMED,
             "manipulation": "simulated" if config.MODE == "mock" else
                             ("verified" if config.MANIPULATION_VERIFIED else "unavailable"),
             "needs_area_confirmation": config.MODE == "live",
@@ -191,8 +229,9 @@ def build_snapshot():
             "dashboard": {"state": "ok", **pi_health()},
             "jetson": {
                 "state": "simulated" if s.adapter.source == "simulated" else
-                         ("not_configured" if not config.JETSON_URL else ("connected" if tel["connected"] else "disconnected")),
-                "url": config.JETSON_URL or None,
+                         ("not_configured" if not robot_url() else ("connected" if tel["connected"] else "disconnected")),
+                "url": robot_url() or None,
+                "link": getattr(s.adapter, "link_kind", "http") if s.adapter.source != "simulated" else "simulator",
                 "latency_ms": getattr(s.adapter, "last_latency_ms", None),
                 "ros_available": health.get("ros_available"),
                 "ros_connected": health.get("ros_connected"),
@@ -212,6 +251,12 @@ def build_snapshot():
             "stations": map_data.get("stations"),
             "source": s.adapter.source if map_data else None,
             "labels": config.STATION_LABELS,
+        },
+        "ros": ros,
+        "drive": {
+            "available": s.rosbridge,
+            "motion_enabled": config.ENABLE_MOTION,
+            "stop_verified": config.JETSON_STOP_CONFIRMED,
         },
         "alerts": alerts(tel, robot, ai),
         "events": s.store.recent_events(limit=60),
@@ -305,6 +350,134 @@ def api_resume():
         return services.missions.resume()
     except MissionError as e:
         _error(e)
+
+
+# ---------- live driving over rosbridge (Nav2 goals only, never wheel speeds) ----------
+
+class GoalIn(BaseModel):
+    x: float
+    y: float
+    theta: float = 0.0
+    area_clear: bool = False
+
+
+class PoseIn(BaseModel):
+    x: float
+    y: float
+    theta: float = 0.0
+
+
+class ConfirmOnly(BaseModel):
+    area_clear: bool = False
+
+
+class NameIn(BaseModel):
+    name: str
+
+
+def _ros():
+    """The rosbridge adapter, if connected (409 otherwise)."""
+    if not services.rosbridge:
+        raise HTTPException(409, "Driving needs live mode with JETSON_LINK=rosbridge.")
+    if not services.telemetry.snapshot()["connected"]:
+        raise HTTPException(409, "Robot disconnected.")
+    return services.adapter
+
+
+def _check_motion(area_clear):
+    if not config.ENABLE_MOTION:
+        raise HTTPException(409, "Physical motion is disabled (STOREPILOT_ENABLE_MOTION=0).")
+    if services.missions.current_id is not None:
+        raise HTTPException(409, "A mission is running.")
+    if not area_clear:
+        raise HTTPException(409, "Confirm that the robot's path is clear first.")
+
+
+def _event(source, level, text):
+    services.store.add_event(source, level, text, simulated=False)
+
+
+def _result(result, ok_text, fail_text):
+    if result.get("success"):
+        _event("operator", "info", ok_text)
+        return result
+    _event("robot", "error", f"{fail_text}: {result.get('message')}")
+    raise HTTPException(409, result.get("message") or fail_text)
+
+
+@app.post("/api/drive/goal")
+def api_drive_goal(body: GoalIn):
+    robot = _ros()
+    _check_motion(body.area_clear)
+    return _result(robot.send_goal(body.x, body.y, body.theta),
+                   f"Drive goal sent to ({body.x:.2f}, {body.y:.2f}) — operator confirmed path clear",
+                   "Drive goal refused")
+
+
+@app.post("/api/drive/station/{name}")
+def api_drive_station(name: str, body: ConfirmOnly):
+    robot = _ros()
+    _check_motion(body.area_clear)
+    target = services.stations.get(robot.map_name).get(name)
+    if not target:
+        raise HTTPException(409, f"No {config.station_label(name)} saved for map {robot.map_name or '(unknown)'}.")
+    return _result(robot.send_goal(target["x"], target["y"], target["theta"], station=name),
+                   f"Driving to {config.station_label(name)} — operator confirmed path clear",
+                   f"Drive to {config.station_label(name)} refused")
+
+
+@app.post("/api/drive/initial_pose")
+def api_initial_pose(body: PoseIn):
+    robot = _ros()
+    return _result(robot.set_initial_pose(body.x, body.y, body.theta),
+                   f"Robot position set to ({body.x:.2f}, {body.y:.2f}) — like 2D Pose Estimate",
+                   "Setting the position failed")
+
+
+@app.post("/api/nav2/start")
+def api_nav2_start():
+    robot = _ros()
+    return _result(robot.start_nav2(), "Nav2 started (resumed) by operator", "Nav2 start failed")
+
+
+@app.post("/api/maps/load")
+def api_load_map(body: NameIn):
+    robot = _ros()
+    if (robot.goal_status or "") in ("accepted", "executing"):
+        raise HTTPException(409, "The robot is driving: stop it before switching maps.")
+    return _result(robot.load_map(body.name), f"Map {body.name} loaded on the Jetson — set the robot position",
+                   f"Loading map {body.name} failed")
+
+
+@app.post("/api/stations")
+def api_save_station(body: NameIn):
+    robot = _ros()
+    pose = robot.pose() if robot.localized() else None
+    if not pose:
+        raise HTTPException(409, "Robot position unknown: localize the robot first.")
+    try:
+        entry = services.stations.save(robot.map_name, body.name, pose)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    _event("operator", "success",
+           f"{config.station_label(body.name)} saved on map {robot.map_name} at ({entry['x']:.2f}, {entry['y']:.2f})")
+    return entry
+
+
+@app.delete("/api/stations/{name}")
+def api_delete_station(name: str):
+    robot = _ros()
+    services.stations.delete(robot.map_name, name)
+    _event("operator", "info", f"{config.station_label(name)} removed from map {robot.map_name}")
+    return {"ok": True}
+
+
+@app.get("/api/rosmap.png")
+def api_rosmap():
+    png = getattr(services.adapter, "map_png", None)
+    if not png:
+        raise HTTPException(404, "No map received from the robot yet.")
+    return Response(content=png, media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
 @app.websocket("/ws")

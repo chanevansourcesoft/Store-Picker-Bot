@@ -1,10 +1,12 @@
 import { Check, MapPin } from "lucide-react";
+import { LiveDrive } from "../components/LiveDrive";
 import { routeProgress, StoreMap } from "../components/StoreMap";
 import { Panel, Stat, StateBadge } from "../components/ui";
 import type { Snapshot } from "../types";
 import { label } from "./OpsPage";
 
-export function MapPage({ snap }: { snap: Snapshot }) {
+export function MapPage({ snap, toast }: { snap: Snapshot; toast: (t: string, tone?: "ok" | "err" | "warn") => void }) {
+  if (snap.drive.available) return <LiveDrive snap={snap} toast={toast} />;
   const r = snap.robot;
   const { stops, current } = routeProgress(snap);
   const running = snap.mission?.status === "running";

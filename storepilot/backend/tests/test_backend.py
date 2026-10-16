@@ -288,6 +288,67 @@ def test_disconnect_is_reported():
     print("PASS: test_disconnect_is_reported")
 
 
+def test_rosbridge_drive():
+    """Live driving over rosbridge against the fake Nav2: paused + unlocalized at start like the real robot."""
+    import asyncio
+    import socket
+
+    from storepilot.adapters.rosbridge import RosbridgeRobot
+    from storepilot.stations import StationStore
+    from tests import fake_nav2_rosbridge as fake
+
+    fake.ROBOT = fake.Robot()
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    sock.close()
+    threading.Thread(target=lambda: asyncio.run(fake.main("127.0.0.1", port)), daemon=True).start()
+    time.sleep(0.5)
+
+    stations = StationStore(Path(tempfile.mkdtemp()) / "stations.json")
+    robot = RosbridgeRobot(f"ws://127.0.0.1:{port}", stations, fake.MAPS_DIR, ["conf3", "office_map"])
+
+    def wait(cond, timeout=10):
+        end = time.time() + timeout
+        while time.time() < end:
+            if cond():
+                return True
+            time.sleep(0.05)
+        raise AssertionError("timed out")
+
+    wait(lambda: robot.link.connected and robot.nav_active is False and robot.map_png)
+    assert robot.map_name == "conf3", robot.map_name
+    status = robot.fetch_status()
+    assert status["pose"] is None and not status["localized"], "unlocalized robot must have no pose"
+    assert status["battery_v"] == 11.286
+    assert not robot.send_goal(1, 0, 0)["success"], "goals refused while Nav2 is paused"
+
+    assert robot.start_nav2()["success"]
+    wait(lambda: robot.nav_active is True)
+    assert robot.set_initial_pose(-2.0, -1.0, 0.0)["success"]
+    wait(lambda: robot.fetch_status()["pose"] is not None)
+    stations.save(robot.map_name, "home", robot.pose())
+
+    assert robot.send_goal(-0.5, 1.5, 1.57)["success"]
+    wait(lambda: robot.fetch_status()["nav_state"] == "navigating")
+    wait(lambda: robot.scan_points() and robot.live_layers()["plan"])
+    assert robot.stop()["message"] == "goal canceled, Nav2 paused"
+    wait(lambda: robot.nav_active is False)
+    assert robot.fetch_status()["stopped"] and not robot.send_goal(0, 0, 0)["success"]
+    assert robot.resume()["success"] and robot.goal_status == "canceled", "resume must not re-send the goal"
+
+    assert robot.navigate("home")["success"], "blocking drive to a saved station"
+    assert robot.fetch_status()["station"] == "home"
+
+    assert not robot.load_map("../../etc/passwd")["success"]
+    assert robot.load_map("office_map")["success"]
+    wait(lambda: robot.live_layers()["map"]["width"] == 156)
+    assert not robot.fetch_status()["localized"], "a new map needs a new initial pose"
+    assert fake.ROBOT.cmd_vel_published == 0, "StorePilot must never publish /cmd_vel"
+    robot.link.shutdown()
+    print("PASS: test_rosbridge_drive")
+
+
 def test_mentioned():
     assert mentioned("soup_can", "2 tomato soups please")
     assert mentioned("chips_pack", "one chips")
@@ -306,6 +367,7 @@ def run_all():
     test_live_safety_switches()
     test_jetson_adapter_http()
     test_disconnect_is_reported()
+    test_rosbridge_drive()
     print("\nAll StorePilot backend tests passed!")
 
 
