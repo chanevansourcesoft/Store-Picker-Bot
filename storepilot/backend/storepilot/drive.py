@@ -48,11 +48,13 @@ class DriveController:
         self.stations = stations
         self.event = event                    # event(source, level, text)
         self.settings_path = Path(settings_path)
-        self.settings = {"auto_align": True, "guard": True}
+        self.settings = {"auto_align": True, "guard": True, "amcl_recovery": False, "stop_verified_at": None}
         try:
             self.settings.update(json.loads(self.settings_path.read_text()))
         except (FileNotFoundError, json.JSONDecodeError):
             pass
+        if self.settings.get("stop_verified_at") is True:   # written by an older version: time not recorded
+            self.settings["stop_verified_at"] = "time not recorded"
         self.lock = threading.Lock()
         self.route = None                     # dict while a route runs or just finished
         self.abort = threading.Event()
@@ -63,9 +65,12 @@ class DriveController:
     # ---------- settings ----------
 
     def set_settings(self, **values):
-        for key in ("auto_align", "guard"):
+        for key in ("auto_align", "guard", "amcl_recovery"):          # on / off switches
             if key in values and values[key] is not None:
                 self.settings[key] = bool(values[key])
+        if "stop_verified_at" in values:                               # a timestamp, or None to clear
+            v = values["stop_verified_at"]
+            self.settings["stop_verified_at"] = v if isinstance(v, str) and v else None
         self.settings_path.parent.mkdir(parents=True, exist_ok=True)
         self.settings_path.write_text(json.dumps(self.settings))
         return dict(self.settings)
@@ -91,6 +96,10 @@ class DriveController:
                             "label": w.get("label") or f"point {i}", "station": None})
         if not out:
             raise ValueError("The route has no waypoints.")
+        for w in out:
+            check = self.robot.check_point(w["x"], w["y"])
+            if check["level"] == "bad":
+                raise ValueError(f"{w['label']} ({w['x']:.2f}, {w['y']:.2f}): {check['reason']}")
         if len(out) > 20:
             raise ValueError("At most 20 waypoints per route.")
         return out
@@ -131,6 +140,9 @@ class DriveController:
     def _check_abort(self):
         if self.abort.is_set() or self.robot.stopped:
             raise RouteAborted()
+        if self.robot.odom_bad:
+            self.robot.cancel_goal()
+            raise RuntimeError(f"Odometry broke while driving ({self.robot.odom_bad})")
 
     def _speed(self):
         s = self.robot.odom_speed
@@ -168,6 +180,7 @@ class DriveController:
     def _run(self):
         route = self.route
         total = len(route["waypoints"])
+        self.robot.driving = True          # heartbeat tells the Jetson watchdog the Pi is driving
         try:
             for i, wp in enumerate(route["waypoints"]):
                 self._set(index=i, realigns=0)
@@ -185,6 +198,8 @@ class DriveController:
             self.robot.cancel_goal()
             self._set(state="failed", message=str(e), finished=True)
             self.event("robot", "error", f"Route stopped: {e}")
+        finally:
+            self.robot.driving = False
 
     def _drive_to(self, wp, i, total):
         name = f"{wp['label']} ({i + 1}/{total})"
@@ -263,7 +278,7 @@ class DriveController:
             try:
                 if not self.settings["auto_align"] or self.busy() or not self.robot.link.connected:
                     continue
-                if not self.robot.localized() or self.robot.loc_active is False:
+                if self.robot.odom_bad or not self.robot.localized() or self.robot.loc_active is False:
                     continue
                 if (self.robot.goal_status or "") in ("accepted", "executing") or self._speed() >= STILL_SPEED:
                     continue

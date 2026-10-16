@@ -20,6 +20,7 @@ WebSocket:
 
 import asyncio
 import contextlib
+import threading
 import json
 import logging
 import time
@@ -33,6 +34,7 @@ from . import config
 from .db import Store
 from .health import AIStatus, pi_health
 from .drive import DriveController
+from .jetson_ctl import JetsonControl
 from .missions import MissionError, MissionManager
 from .stations import StationStore
 from .telemetry import Telemetry
@@ -82,6 +84,8 @@ class Services:
             self.adapter, self.stations,
             lambda source, level, text: self.store.add_event(source, level, text, simulated=False),
             config.STATIONS_PATH.with_name("drive_settings.json")) if self.rosbridge else None
+        self.jetson = JetsonControl(config.JETSON_SSH, on_maps=self.adapter.set_maps) \
+            if self.rosbridge and config.JETSON_SSH else None
         simulated = self.adapter.source == "simulated"
         add = lambda source, level, text: self.store.add_event(source, level, text, simulated=simulated)  # noqa: E731
         self.ai = AIStatus(add)
@@ -98,6 +102,17 @@ services: Services | None = None
 
 
 # ---------- snapshot ----------
+
+def nav_process_running():
+    """True if the Jetson reports the navigation launch process running (via SSH status)."""
+    st = services.jetson.snapshot()["status"] if services and services.jetson else None
+    return bool(st and st.get("nav_running"))
+
+
+def stop_verified():
+    """STOP counts as verified after the physical test: env flag, or the operator recorded it on the dashboard."""
+    return config.JETSON_STOP_CONFIRMED or bool(services and services.drive and services.drive.settings.get("stop_verified_at"))
+
 
 def robot_url():
     return config.ROSBRIDGE_URL if config.JETSON_LINK == "rosbridge" else config.JETSON_URL
@@ -128,12 +143,23 @@ def alerts(tel, robot, ai):
     rosbridge = services is not None and services.rosbridge
     if config.MODE == "live" and not config.JETSON_STOP_CONFIRMED and not rosbridge:
         out.append(("warning", "Dashboard STOP is not connected to the Jetson. Use the hardware E-stop."))
-    if rosbridge and not config.JETSON_STOP_CONFIRMED:
+    if rosbridge and not stop_verified():
         out.append(("warning", "STOP cancels the goal and pauses Nav2, but is not physically verified yet. "
                                "Keep the hardware E-stop at hand."))
+    if rosbridge and tel["connected"] and (status.get("scan_age") is None or status["scan_age"] > 2.0):
+        age = status.get("scan_age")
+        out.append(("error", ("No LiDAR scan received yet" if age is None else f"No LiDAR scan for {age:.0f} s") +
+                             ": localization and obstacle detection do not work. Check the LiDAR (power / low battery)."))
+    if rosbridge and tel["connected"] and status.get("odom_bad"):
+        out.append(("error", f"Odometry is broken on the Jetson ({status['odom_bad']}): the EKF diverged, often after a "
+                             "LiDAR dropout or low battery. Driving is blocked. Restart navigation (System page)."))
     if rosbridge and tel["connected"]:
         if status.get("nav2_active") is None:
-            out.append(("warning", "Nav2 is not running on the Jetson: start `ros2 launch mecanum_nav navigation.launch.py`."))
+            if nav_process_running():
+                out.append(("warning", "Navigation is starting: Nav2 waits for the robot position (Set position) and "
+                                       "a working LiDAR before it becomes active."))
+            else:
+                out.append(("warning", "Navigation is not running on the Jetson: start it on the System page."))
         elif status.get("nav2_active") is False:
             out.append(("warning", "Nav2 is paused on the Jetson: press Start Nav2 on the Map page."))
         elif status.get("localized") is False:
@@ -179,6 +205,8 @@ def build_snapshot():
         return status[key]
 
     state, detail = s.missions.robot_state(tel)
+    if detail.startswith("Nav2 is not running") and nav_process_running():
+        detail = "Navigation is starting: waiting for the robot position and LiDAR"
     robot = {
         "state": state,
         "detail": detail,
@@ -198,6 +226,7 @@ def build_snapshot():
         "unverified": unverified,
         "battery_v": status.get("battery_v") if tel["connected"] else None,
         "loc_quality": status.get("loc_quality") if tel["connected"] else None,
+        "odom_bad": status.get("odom_bad") if tel["connected"] else None,
         "localized": status.get("localized") if tel["connected"] else None,
         "needs_initial_pose": status.get("needs_initial_pose") if tel["connected"] else None,
         "nav2_active": status.get("nav2_active") if tel["connected"] else None,
@@ -222,6 +251,7 @@ def build_snapshot():
     ros = None
     if s.rosbridge:
         map_data = {"stations": s.stations.get(s.adapter.map_name)} if tel["connected"] else {}
+        map_data["station_counts"] = {m: len(v) for m, v in s.stations.export().items() if v}
         ros = s.adapter.live_layers() if tel["connected"] else None
     return {
         "mode": config.MODE,
@@ -230,7 +260,7 @@ def build_snapshot():
             "motion_enabled": config.MODE == "mock" or config.ENABLE_MOTION,
             # rosbridge: STOP really cancels the goal and pauses Nav2; "verified" = tested on the robot
             "stop_connected": config.MODE == "mock" or config.JETSON_STOP_CONFIRMED or s.rosbridge,
-            "stop_verified": config.MODE == "mock" or config.JETSON_STOP_CONFIRMED,
+            "stop_verified": config.MODE == "mock" or stop_verified(),
             "manipulation": "simulated" if config.MODE == "mock" else
                             ("verified" if config.MANIPULATION_VERIFIED else "unavailable"),
             "needs_area_confirmation": config.MODE == "live",
@@ -262,14 +292,17 @@ def build_snapshot():
         "map": {
             "stations": map_data.get("stations"),
             "source": s.adapter.source if map_data else None,
+            "station_counts": map_data.get("station_counts"),
             "labels": config.STATION_LABELS,
         },
         "ros": ros,
         "route": s.drive.snapshot() if s.drive else None,
+        "jetson_ctl": s.jetson.snapshot() if s.jetson else None,
         "drive": {
             "available": s.rosbridge,
             "motion_enabled": config.ENABLE_MOTION,
-            "stop_verified": config.JETSON_STOP_CONFIRMED,
+            "stop_verified": stop_verified(),
+            "stop_verified_at": s.drive.settings.get("stop_verified_at") if s.drive else None,
         },
         "alerts": alerts(tel, robot, ai),
         "events": s.store.recent_events(limit=60),
@@ -429,6 +462,11 @@ def _check_motion(area_clear):
         robot = services.adapter
         if robot.stopped:
             raise HTTPException(409, "Robot is stopped: press Resume first.")
+        if robot.odom_bad:
+            raise HTTPException(409, f"Odometry is broken ({robot.odom_bad}): restart navigation first.")
+        age = robot.scan_age()
+        if age is None or age > 2.0:
+            raise HTTPException(409, "No LiDAR scan: check the LiDAR before driving.")
         if robot.nav_active is not True:
             raise HTTPException(409, "Nav2 is not active: press Start Nav2 first.")
         if not robot.localized():
@@ -555,6 +593,125 @@ def api_delete_station(name: str):
     services.stations.delete(robot.map_name, name)
     _event("operator", "info", f"{config.station_label(name)} removed from map {robot.map_name}")
     return {"ok": True}
+
+
+# ---------- points, stations, robot software, AMCL ----------
+
+class PointsIn(BaseModel):
+    points: list[dict]
+
+
+class StationsImportIn(BaseModel):
+    data: dict
+    replace: bool = False
+
+
+class NavStartIn(BaseModel):
+    map: str
+    speed: float = 0.10
+
+
+class FlagIn(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/drive/check")
+def api_check_points(body: PointsIn):
+    robot = _ros()
+    return [robot.check_point(float(p["x"]), float(p["y"])) for p in body.points[:50]]
+
+
+@app.get("/api/stations/export")
+def api_stations_export():
+    return services.stations.export()
+
+
+@app.post("/api/stations/import")
+def api_stations_import(body: StationsImportIn):
+    try:
+        n = services.stations.import_data(body.data, replace=body.replace)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    _event("operator", "success", f"Imported {n} station(s)" + (" (replaced all)" if body.replace else ""))
+    return {"imported": n}
+
+
+def _jetson():
+    if not services.jetson:
+        raise HTTPException(409, "Robot software control needs live mode over rosbridge and JETSON_SSH.")
+    return services.jetson
+
+
+def _ctl_result(ok, msg, what):
+    _event("operator", "info" if ok else "error", f"{what}: {msg}")
+    if not ok:
+        raise HTTPException(409, msg or f"{what} failed")
+    return {"success": True, "message": msg}
+
+
+@app.post("/api/jetson/nav/start")
+def api_nav_start(body: NavStartIn):
+    ctl = _jetson()
+    ok, msg = ctl.nav_start(body.map, body.speed)
+    if ok and services.drive.settings.get("amcl_recovery"):
+        ctl.set_amcl_recovery(True)
+    if ok:
+        robot = services.adapter
+        robot.map_name = body.map
+        robot.needs_initial_pose = True
+
+        def restore():
+            text = robot.restore_pose_after_start(body.map)
+            _event("robot", "info", f"After navigation start: {text}")
+        threading.Thread(target=restore, daemon=True).start()
+    return _ctl_result(ok, msg, f"Start navigation ({body.map}, {body.speed:.2f} m/s)")
+
+
+@app.post("/api/jetson/nav/stop")
+def api_nav_stop():
+    ctl = _jetson()
+    if services.drive and services.drive.busy():
+        services.drive.cancel("Navigation stopped from the dashboard")
+    ok, msg = ctl.nav_stop()
+    return _ctl_result(ok, msg, "Stop navigation")
+
+
+@app.post("/api/jetson/bridge/restart")
+def api_bridge_restart():
+    ctl = _jetson()
+    if services.drive and services.drive.busy():
+        raise HTTPException(409, "A route is running: cancel it before restarting rosbridge.")
+    ok, msg = ctl.bridge_restart()
+    return _ctl_result(ok, msg, "Restart rosbridge + watchdog")
+
+
+@app.post("/api/amcl/recovery")
+def api_amcl_recovery(body: FlagIn):
+    ctl = _jetson()
+    ok, msg = ctl.set_amcl_recovery(body.enabled)
+    if ok:
+        services.drive.set_settings(amcl_recovery=body.enabled)
+    return _ctl_result(ok, msg, "AMCL recovery (runtime only)")
+
+
+@app.post("/api/stop/verified")
+def api_stop_verified(body: FlagIn):
+    if not services.drive:
+        raise HTTPException(409, "Only for live driving.")
+    from .db import now_iso
+    services.drive.set_settings(stop_verified_at=now_iso() if body.enabled else None)
+    _event("operator", "success" if body.enabled else "warning",
+           "STOP physically verified by the operator (wheels stopped at once and stayed stopped)"
+           if body.enabled else "STOP verification removed")
+    return {"stop_verified": body.enabled}
+
+
+@app.get("/api/costmap.png")
+def api_costmap():
+    cm = getattr(services.adapter, "costmap", None)
+    if not cm:
+        raise HTTPException(404, "No costmap from the robot yet.")
+    return Response(content=cm["png"], media_type="image/png", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/rosmap.png")

@@ -189,6 +189,28 @@ Things to confirm on the first real connection: the map appears at once (`/map` 
 topic; if not, it appears after any *Environment* switch), and STOP reports "goal canceled"
 (cancel uses the hidden action service; if rosbridge refuses it, the Nav2 pause still stops the robot).
 
+## Jetson side: `storepilot/jetson/` → `~/storepilot_jetson/` (nothing in `~/ros2_ws` changes)
+
+| File | Purpose |
+|---|---|
+| `storepilot_ctl.sh` | `status` · `nav-start <map> <speed>` · `nav-stop` · `bridge-restart` · `amcl-recovery on\|off` · `amcl-get`. The dashboard (System → Robot software) calls it over SSH (`JETSON_SSH`, key login). |
+| `start_rosbridge.sh` | rosbridge with the allow-list, services in their own threads and a 5 s service timeout (a stuck Nav2 service can no longer block the heartbeat or STOP). |
+| `storepilot_watchdog.py` | Link watchdog: the Pi sends `/storepilot/heartbeat` twice a second (true while it drives). If the Pi goes silent for 3 s while its goal runs, all NavigateToPose goals are cancelled; the base's 0.5 s `cmd_vel` watchdog stops the wheels. RViz goals are never touched. |
+
+Deploy / update from the Pi:
+```bash
+ssh ubuntu@192.168.149.1 'mkdir -p ~/storepilot_jetson/logs'
+scp jetson/*.sh jetson/*.py ubuntu@192.168.149.1:storepilot_jetson/
+ssh ubuntu@192.168.149.1 'bash ~/storepilot_jetson/storepilot_ctl.sh bridge-restart'
+```
+
+Dashboard safety checks on top of Nav2: driving is refused when the robot is stopped, Nav2 is not active,
+the robot is not localized, the LiDAR fit is poor, **no LiDAR scan arrives** (e.g. low battery), or
+**odometry is impossible** (EKF diverged: > 1 m/s on a 0.3 m/s robot). Every goal is checked against the
+map first (outside, inside a wall, closer than the robot's half-diagonal to a wall, or not reachable
+from the robot → refused). After navigation is (re)started from the dashboard, the last good pose on the
+same map is restored automatically (auto-aligned).
+
 ## Collecting the Jetson facts (read-only)
 
 Nothing here moves the robot or changes the Jetson.

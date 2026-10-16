@@ -77,6 +77,7 @@ export interface Snapshot {
     unverified: string[];
     battery_v?: number | null;
     loc_quality?: number | null;
+    odom_bad?: string | null;
     localized?: boolean | null;
     needs_initial_pose?: boolean | null;
     nav2_active?: boolean | null;
@@ -89,18 +90,29 @@ export interface Snapshot {
     maps: string[];
     scan: [number, number][];
     plan: [number, number][];
+    costmap?: { version: number; width: number; height: number; resolution: number;
+      origin: { x: number; y: number; yaw: number } } | null;
+    footprint?: [number, number][] | null;
+    watchdog?: { armed: boolean; heartbeat_age?: number | null; goal_running?: boolean; cancels: number;
+      last_reason?: string; timeout?: number } | null;
   } | null;
-  drive: { available: boolean; motion_enabled: boolean; stop_verified: boolean };
+  jetson_ctl: {
+    target: string; age_s: number | null; error: string | null; busy: string | null; amcl_recovery: boolean | null;
+    status: { nav_running: boolean; map: string; speed: string; nav_uptime_s: string; rosbridge: boolean;
+      watchdog: boolean; load: string; maps: { name: string; origin: number[] }[] } | null;
+  } | null;
+  drive: { available: boolean; motion_enabled: boolean; stop_verified: boolean; stop_verified_at?: string | null };
   route: {
     busy: boolean;
-    settings: { auto_align: boolean; guard: boolean };
+    settings: { auto_align: boolean; guard: boolean; amcl_recovery?: boolean; stop_verified_at?: string | null };
     route: {
       waypoints: { x: number; y: number; theta: number; label: string; station: string | null }[];
       index: number; state: string; message: string; realigns: number; finished: boolean;
     } | null;
   } | null;
   mission: Mission | null;
-  map: { stations: Record<string, Pose> | null; source: "simulated" | "jetson" | null; labels: Record<string, string> };
+  map: { stations: Record<string, Pose> | null; source: "simulated" | "jetson" | null; labels: Record<string, string>;
+    station_counts?: Record<string, number> | null };
   alerts: { level: Level; text: string }[];
   events: EventItem[];
 }

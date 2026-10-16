@@ -69,6 +69,9 @@ class Robot:
         self.speed = 0.0
         self.cmd_vel_published = 0     # must stay 0: StorePilot never drives the wheels directly
         self.nomotion_calls = 0
+        self.last_beat = None        # fake StorePilot watchdog (same rule as storepilot_watchdog.py)
+        self.armed = False
+        self.watchdog_cancels = 0
 
     def make_grid(self):
         ox, oy, w, h, boxes = MAPS[self.map]
@@ -93,7 +96,39 @@ class Robot:
             return True
         return self.grid["data"][r * info["width"] + c] >= 65
 
+    def watchdog_check(self):
+        if self.armed and self.status == 2 and self.last_beat and time.monotonic() - self.last_beat > 3.0:
+            self.status = 5
+            self.armed = False
+            self.watchdog_cancels += 1
+
+    def msg_costmap(self):
+        """3 x 3 m local costmap in odom around the robot: walls lethal, 20 cm inflation."""
+        odom_base = compose(inverse(MAP_ODOM), self.truth)
+        res, n = 0.05, 60
+        ox, oy = odom_base[0] - 1.5, odom_base[1] - 1.5
+        data = []
+        for r in range(n):
+            for c in range(n):
+                mx, my, _ = compose(MAP_ODOM, (ox + (c + 0.5) * res, oy + (r + 0.5) * res, 0.0))
+                if self.occupied(mx, my):
+                    data.append(100)
+                elif any(self.occupied(mx + dx, my + dy) for dx, dy in ((0.15, 0), (-0.15, 0), (0, 0.15), (0, -0.15))):
+                    data.append(60)
+                else:
+                    data.append(0)
+        return {"header": {"frame_id": "odom", "stamp": now_stamp()},
+                "info": {"resolution": res, "width": n, "height": n,
+                         "origin": {"position": {"x": ox, "y": oy, "z": 0.0}, "orientation": quat(0)}}, "data": data}
+
+    def msg_footprint(self):
+        ob = compose(inverse(MAP_ODOM), self.truth)
+        pts = [compose(ob, (x, y, 0.0)) for x, y in ((0.135, 0.12), (0.135, -0.12), (-0.135, -0.12), (-0.135, 0.12))]
+        return {"header": {"frame_id": "odom", "stamp": now_stamp()},
+                "polygon": {"points": [{"x": p[0], "y": p[1], "z": 0.0} for p in pts]}}
+
     def step(self, dt):
+        self.watchdog_check()
         self.speed = 0.0
         if not (self.goal and self.status == 2 and self.nav_active):
             return
@@ -174,6 +209,9 @@ class Robot:
     def on_publish(self, topic, msg):
         if topic == "/cmd_vel":
             self.cmd_vel_published += 1
+        elif topic == "/storepilot/heartbeat":
+            self.last_beat = time.monotonic()
+            self.armed = bool(msg.get("data"))
         elif topic == "/initialpose" and self.loc_active:
             p = msg["pose"]["pose"]
             q = p["orientation"]
@@ -283,6 +321,11 @@ async def loop():
             await publish("/navigate_to_pose/_action/status", ROBOT.msg_status())
         if tick % 4 == 0 and ROBOT.msg_amcl():
             await publish("/amcl_pose", ROBOT.msg_amcl())
+        if tick % 6 == 0:
+            await publish("/local_costmap/published_footprint", ROBOT.msg_footprint())
+        if tick % 20 == 0:
+            await publish("/local_costmap/costmap", ROBOT.msg_costmap())
+            await publish("/storepilot/watchdog", {"data": json.dumps({"armed": ROBOT.armed, "cancels": ROBOT.watchdog_cancels})})
         if tick % 10 == 0:
             await publish("/plan", ROBOT.msg_plan())
             await publish("/ros_robot_controller/battery", {"data": 11286})

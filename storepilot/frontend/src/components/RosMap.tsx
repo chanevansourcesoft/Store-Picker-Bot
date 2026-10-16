@@ -12,8 +12,9 @@ const S = 100; // SVG units per meter
  * robot pose, goal and saved stations. In "goal" / "pose" mode, press where the robot should be
  * and drag toward the heading (like RViz Nav2 Goal / 2D Pose Estimate), then release.
  */
-export function RosMap({ snap, mode = "view", onPick, compact = false, draft = [] }: {
+export function RosMap({ snap, mode = "view", onPick, compact = false, draft = [], showCostmap = true, badPoints = [] }: {
   snap: Snapshot; mode?: PickMode; onPick?: (p: Picked) => void; compact?: boolean; draft?: Picked[];
+  showCostmap?: boolean; badPoints?: number[];
 }) {
   const ros = snap.ros;
   const m = ros?.map;
@@ -110,6 +111,15 @@ export function RosMap({ snap, mode = "view", onPick, compact = false, draft = [
         <image href={`/api/rosmap.png?v=${m.name}-${m.version}`} x={0} y={0} width={world.w * S} height={world.h * S}
           preserveAspectRatio="none" style={{ imageRendering: "pixelated" }} />
 
+        {/* Nav2 local costmap (lives in odom; the backend placed it in the map frame) */}
+        {showCostmap && ros.costmap && (
+          <g transform={`translate(${X(ros.costmap.origin.x)} ${Y(ros.costmap.origin.y)}) rotate(${deg(ros.costmap.origin.yaw)})`}>
+            <image href={`/api/costmap.png?v=${ros.costmap.version}`} x={0} y={-ros.costmap.height * ros.costmap.resolution * S}
+              width={ros.costmap.width * ros.costmap.resolution * S} height={ros.costmap.height * ros.costmap.resolution * S}
+              preserveAspectRatio="none" style={{ imageRendering: "pixelated" }} />
+          </g>
+        )}
+
         {/* LiDAR */}
         <g fill="#f0524f">
           {ros.scan.map(([x, y], i) => <rect key={i} x={X(x) - 2.5 * k} y={Y(y) - 2.5 * k} width={5 * k} height={5 * k} />)}
@@ -136,7 +146,7 @@ export function RosMap({ snap, mode = "view", onPick, compact = false, draft = [
         {routePts.map((p, i) => {
           const done = active && i < active.index;
           const current = active && i === active.index;
-          const color = current ? "var(--color-info)" : done ? "#3a4757" : "var(--color-warn)";
+          const color = badPoints.includes(i) ? "var(--color-err)" : current ? "var(--color-info)" : done ? "#3a4757" : "var(--color-warn)";
           return (
             <g key={`wp${i}`} transform={`translate(${X(p.x)} ${Y(p.y)})`}>
               <path d={`M 0 0 L ${30 * k * Math.cos(p.theta)} ${-30 * k * Math.sin(p.theta)}`} stroke={color} strokeWidth={4 * k} />
@@ -163,8 +173,12 @@ export function RosMap({ snap, mode = "view", onPick, compact = false, draft = [
           </g>
         )}
 
-        {/* robot */}
+        {/* robot: real footprint from Nav2 when available */}
         {pose && <Robot pose={pose} X={X} Y={Y} k={k} />}
+        {ros.footprint && ros.footprint.length > 2 && (
+          <polygon points={ros.footprint.map(([x, y]) => `${X(x).toFixed(1)},${Y(y).toFixed(1)}`).join(" ")}
+            fill="none" stroke="var(--color-teal)" strokeWidth={2.5 * k} strokeDasharray={`${6 * k} ${4 * k}`} />
+        )}
       </svg>
 
       <div className="pointer-events-none absolute bottom-2 left-2 rounded bg-ok/10 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-ok ring-1 ring-ok/30">
