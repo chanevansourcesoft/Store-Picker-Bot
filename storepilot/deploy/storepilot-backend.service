@@ -11,7 +11,8 @@ Type=simple
 WorkingDirectory=@ROOT@/backend
 Environment=PYTHONUNBUFFERED=1
 # Settings come from @ROOT@/.env (mode, Jetson URL, safety switches, API key)
-ExecStart="@ROOT@/backend/.venv/bin/python" -m uvicorn storepilot.main:app --host 127.0.0.1 --port 8080 --no-access-log
+# Host and port come from .env (STOREPILOT_HOST, STOREPILOT_PORT)
+ExecStart="@ROOT@/backend/.venv/bin/python" -m storepilot
 StandardOutput=append:%h/.local/state/storepilot/backend.log
 StandardError=append:%h/.local/state/storepilot/backend.log
 Restart=always
