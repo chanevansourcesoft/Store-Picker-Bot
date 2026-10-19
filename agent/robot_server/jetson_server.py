@@ -72,6 +72,7 @@ STATION_MAP = {
 }
 
 STATIONS_FILE = Path(__file__).resolve().parent / "stations.yaml"
+NAV_TIMEOUT_SEC = 120.0  # a navigation that takes longer is cancelled and counts as failed
 
 
 def _read_station(name, pos):
@@ -226,6 +227,10 @@ class Nav2Client(Node):
 
         # Goal handle for cancellation
         self._goal_handle = None
+        # Every goal gets a number. Callbacks of an older goal (a late result after a
+        # timeout or a cancel) are ignored, so they cannot finish or fail the new goal.
+        self._goal_lock = threading.Lock()
+        self._goal_seq = 0
         self._navigation_complete = threading.Event()
         self._navigation_result = None
 
@@ -264,8 +269,13 @@ class Nav2Client(Node):
         goal_msg.pose.pose.orientation.z = math.sin(theta / 2.0)
         goal_msg.pose.pose.orientation.w = math.cos(theta / 2.0)
 
-        # Send goal
-        self._navigation_complete.clear()
+        # Send goal: a fresh result and done-event for this goal only
+        with self._goal_lock:
+            self._goal_seq += 1
+            seq = self._goal_seq
+            self._goal_handle = None
+            self._navigation_result = None
+            done = self._navigation_complete = threading.Event()
         with robot_state.lock:
             robot_state.busy = True
             robot_state.nav_state = "navigating"
@@ -276,27 +286,49 @@ class Nav2Client(Node):
         send_goal_future = self._action_client.send_goal_async(
             goal_msg, feedback_callback=self._feedback_callback
         )
-        send_goal_future.add_done_callback(self._goal_response_callback)
+        send_goal_future.add_done_callback(lambda future: self._goal_response_callback(future, seq))
 
-        # Wait for navigation to complete
-        self._navigation_complete.wait(timeout=120.0)  # 2 minute timeout
+        # Wait for THIS goal to finish
+        finished = done.wait(timeout=NAV_TIMEOUT_SEC)
+        if not finished:
+            self.get_logger().warn(f"Navigation to {station} timed out, cancelling the goal")
+            self.cancel_navigation()
+            with self._goal_lock:
+                if self._goal_seq == seq:
+                    self._goal_seq += 1  # a late result of this goal is ignored now
+            with robot_state.lock:
+                robot_state.nav_state = "failed"
+                robot_state.last_error = "Navigation timed out"
 
         with robot_state.lock:
             robot_state.busy = False
             robot_state.speed = 0.0
 
-        return self._navigation_result
+        return finished and self._navigation_result is True
 
-    def _goal_response_callback(self, future):
+    def _is_current(self, seq):
+        with self._goal_lock:
+            return seq == self._goal_seq
+
+    def _finish(self, seq, ok):
+        """Give goal `seq` its result and wake up send_goal (only if it is still the current goal)."""
+        with self._goal_lock:
+            if seq != self._goal_seq:
+                return
+            self._navigation_result = ok
+            self._navigation_complete.set()
+
+    def _goal_response_callback(self, future, seq):
         """Called when goal is accepted or rejected."""
+        if not self._is_current(seq):
+            return  # answer for an older goal
         goal_handle = future.result()
         if not goal_handle.accepted:
             self.get_logger().warn("Goal rejected by Nav2")
             with robot_state.lock:
                 robot_state.nav_state = "failed"
                 robot_state.last_error = "Goal rejected"
-            self._navigation_result = False
-            self._navigation_complete.set()
+            self._finish(seq, False)
             return
 
         self._goal_handle = goal_handle
@@ -304,26 +336,25 @@ class Nav2Client(Node):
 
         # Get result
         result_future = goal_handle.get_result_async()
-        result_future.add_done_callback(self._get_result_callback)
+        result_future.add_done_callback(lambda future: self._get_result_callback(future, seq))
 
-    def _get_result_callback(self, future):
+    def _get_result_callback(self, future, seq):
         """Called when navigation completes."""
-        result = future.result().result
+        if not self._is_current(seq):
+            return  # result of an older goal: it must not finish the current one
         status = future.result().status
 
         if status == 4:  # SUCCEEDED
             self.get_logger().info("Navigation succeeded")
             with robot_state.lock:
                 robot_state.nav_state = "arrived"
-            self._navigation_result = True
+            self._finish(seq, True)
         else:
             self.get_logger().warn(f"Navigation failed with status {status}")
             with robot_state.lock:
                 robot_state.nav_state = "failed"
                 robot_state.last_error = f"Nav failed (status {status})"
-            self._navigation_result = False
-
-        self._navigation_complete.set()
+            self._finish(seq, False)
 
     def _feedback_callback(self, feedback_msg):
         """Update robot pose from Nav2 feedback."""

@@ -37,4 +37,5 @@ python -m store_agent.test_order_tracker
 python -m store_agent.test_autopilot
 python -m robot_server.test_stations
 python -m robot_server.test_mock_robot
+python -m robot_server.test_nav2_client
 ```
