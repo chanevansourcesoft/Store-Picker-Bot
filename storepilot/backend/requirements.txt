@@ -1,10 +1,10 @@
-# StorePilot AI dashboard backend (Raspberry Pi). Versions match the tested webapp venv.
+# StorePilot AI dashboard backend (Raspberry Pi). Versions match the tested QuickPick venv.
 fastapi==0.142.2
 uvicorn==0.54.0
 websockets==16.1.1
 pydantic==2.13.5
 requests==2.34.2
-# Used by the shared Nemotron agent in ../webapp/app (order parsing and planning)
+# Used by the shared Nemotron agent in ../../agent (installed by deploy/install.sh: pip install -e agent)
 openai==3.26.0
 python-dotenv==1.2.4
 # Localization assist (scan-to-map matching on the Pi)

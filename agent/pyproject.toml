@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "store-agent"
+version = "0.1.0"
+description = "Shared store agent (Nemotron planner, order parser, OrderTracker guards, robot client) and the robot API servers"
+requires-python = ">=3.10"
+# Versions are pinned by the apps (storepilot/backend/requirements.txt, storepilot/quickpick/requirements.txt)
+dependencies = ["openai", "python-dotenv", "requests", "fastapi", "uvicorn", "pydantic"]
+
+[project.optional-dependencies]
+jetson = ["pyyaml"]
+
+[tool.setuptools]
+packages = ["store_agent", "robot_server"]
+
+[tool.setuptools.package-data]
+store_agent = ["catalog.json"]
+robot_server = ["stations.example.yaml"]

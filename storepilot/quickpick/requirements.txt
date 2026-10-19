@@ -1,0 +1,12 @@
+# Only what the app needs (Python 3.10+). Versions match our tested venv.
+# Install from storepilot/quickpick: the shared agent (Nemotron planner, robot client, mock robot)
+-e ../../agent
+streamlit==1.65.0
+openai==3.26.0
+python-dotenv==1.2.4
+requests==2.34.2
+# The simulated robot (demo mode) uses these:
+fastapi==0.142.2
+pydantic==2.13.5
+# Only for quickpick/fake_rosbridge.py (testing the live map without the robot):
+websockets==16.1.1

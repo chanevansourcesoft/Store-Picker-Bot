@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS missions (
     total INTEGER NOT NULL DEFAULT 0,
     bill TEXT NOT NULL DEFAULT '{}',
     problems TEXT NOT NULL DEFAULT '[]',
-    step_log TEXT NOT NULL DEFAULT '[]'
+    step_log TEXT NOT NULL DEFAULT '[]',
+    stock_reserved INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,6 +58,9 @@ class Store:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
+        # Databases from before stock reservation: add the column (old missions = not reserved)
+        if "stock_reserved" not in [r[1] for r in self.conn.execute("PRAGMA table_info(missions)")]:
+            self.conn.execute("ALTER TABLE missions ADD COLUMN stock_reserved INTEGER NOT NULL DEFAULT 0")
         self.conn.commit()
 
     # ---------- missions ----------
@@ -109,6 +113,14 @@ class Store:
                 "SELECT * FROM missions WHERE mode = ? AND status = 'completed' AND finished_at IS NOT NULL "
                 "ORDER BY id DESC LIMIT ?", (mode, limit)).fetchall()
         return [self._mission(r) for r in rows]
+
+    def take_reservation(self, mission_id):
+        """True once for a mission that still holds reserved stock (then it is marked released)."""
+        with self.lock:
+            cursor = self.conn.execute(
+                "UPDATE missions SET stock_reserved = 0 WHERE id = ? AND stock_reserved = 1", (mission_id,))
+            self.conn.commit()
+            return cursor.rowcount == 1
 
     def close_unfinished(self):
         """After a restart nothing resumes by itself: running -> interrupted, waiting -> expired."""

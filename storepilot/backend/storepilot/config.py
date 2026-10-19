@@ -3,13 +3,12 @@ StorePilot settings, read once from the environment and storepilot/.env.
 
 Two modes, never mixed:
     mock  built-in simulator. Every value it produces is labelled SIMULATED.
-    live  the Jetson robot server (webapp/robot_server/jetson_server.py, Contract v2).
+    live  the Jetson robot server (agent/robot_server/jetson_server.py, Contract v2).
           If the Jetson does not answer, the dashboard shows "Disconnected".
           It never falls back to the simulator.
 """
 
 import os
-import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -54,7 +53,7 @@ ROS_BATTERY_TOPIC = os.environ.get("ROS_BATTERY_TOPIC", "/ros_robot_controller/b
 # Live-mode safety switches. Both are OFF unless the operator turns them on.
 ENABLE_MOTION = _flag("STOREPILOT_ENABLE_MOTION")
 JETSON_STOP_CONFIRMED = _flag("JETSON_STOP_CONFIRMED")
-# Pick / scan / place on the Jetson are timed stubs today. Until a real implementation returns
+# The GR00T pick (pick + place in basket, robot_server/arm.py) is a timed stub today. Until it returns
 # verified results, live missions cannot start and holding / pick results are not shown.
 MANIPULATION_VERIFIED = _flag("STOREPILOT_MANIPULATION_VERIFIED")
 # Live telemetry fields shown only after you checked them on the robot: pose, battery, speed.
@@ -69,11 +68,6 @@ PORT = int(os.environ.get("STOREPILOT_PORT", "8080"))
 DB_PATH = Path(os.environ.get("STOREPILOT_DB", ROOT / "data" / "storepilot.db"))
 STATIONS_PATH = Path(os.environ.get("STOREPILOT_STATIONS", ROOT / "data" / "stations.json"))
 STATIC_DIR = ROOT / "frontend" / "dist"
-
-# The shared agent code (Nemotron planner, order parser, safety guards) lives in ../webapp/app
-WEBAPP_DIR = Path(os.environ.get("STOREPILOT_WEBAPP_DIR", ROOT.parent / "webapp")).resolve()
-if str(WEBAPP_DIR) not in sys.path:
-    sys.path.insert(0, str(WEBAPP_DIR))
 
 # Telemetry timing
 POLL_SEC_LIVE = 1.0
@@ -90,13 +84,6 @@ STATION_LABELS = {
     "customer": "Packing area",
 }
 
-# Display names for products in webapp/app/inventory.json
-PRODUCT_LABELS = {
-    "soup_can": "Tomato Soup",
-    "chips_pack": "Classic Chips",
-    "juice_box": "Orange Juice",
-}
-
 MAX_UNITS_PER_MISSION = 10   # sanity limit for one order
 
 
@@ -105,4 +92,6 @@ def station_label(station):
 
 
 def product_label(item):
-    return PRODUCT_LABELS.get(item, str(item or "?").replace("_", " ").title())
+    """Display name from the shared catalog (agent/store_agent/catalog.json)."""
+    from store_agent.inventory import product_name   # after .env is loaded above
+    return product_name(item)

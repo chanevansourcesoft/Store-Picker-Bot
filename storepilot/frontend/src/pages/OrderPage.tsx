@@ -6,7 +6,7 @@ import type { CatalogItem, Mission, Snapshot } from "../types";
 import { label } from "./OpsPage";
 
 const EXAMPLES = [
-  "2 tomato soups and 1 orange juice to the packing area",
+  "2 chips packets and 1 Frooti to the packing area",
   "Pick 3 classic chips",
   "Pick 2 packets of Maggi and 1 Coke bottle",
 ];
@@ -196,7 +196,7 @@ export function OrderPage({ snap, toast }: { snap: Snapshot; toast: (t: string, 
 
       <Panel title="New order">
         <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} maxLength={500}
-          placeholder="e.g. Pick 2 tomato soups and 1 orange juice and bring them to the packing area"
+          placeholder="e.g. Pick 2 chips packets and 1 Frooti and bring them to the packing area"
           className="w-full resize-none rounded-lg border border-line-strong bg-raised px-3.5 py-3 text-[17px] leading-snug text-ink placeholder:text-dim focus:border-info focus:outline-none" />
         <div className="mt-2 flex flex-wrap gap-2">
           {EXAMPLES.map((ex) => (

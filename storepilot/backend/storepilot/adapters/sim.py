@@ -11,6 +11,8 @@ import random
 import threading
 import time
 
+from robot_server import instructions
+
 from .base import VALID_STATIONS, RobotAdapter
 
 # Simulated store layout (meters). Not the real store.
@@ -29,9 +31,9 @@ TICK = 0.05
 class SimRobot(RobotAdapter):
     source = "simulated"
 
-    def __init__(self, inventory_loader, pick_fail=0.10, scan_fail=0.08, nav_fail=0.04, time_scale=1.0, seed=None):
+    def __init__(self, inventory_loader, pick_fail=0.10, nav_fail=0.04, time_scale=1.0, seed=None):
         self.inventory = inventory_loader
-        self.pick_fail, self.scan_fail, self.nav_fail = pick_fail, scan_fail, nav_fail
+        self.pick_fail, self.nav_fail = pick_fail, nav_fail
         self.time_scale = time_scale      # tests use a small value to run fast
         self.rng = random.Random(seed)
         self.lock = threading.Lock()
@@ -148,7 +150,8 @@ class SimRobot(RobotAdapter):
             self.state.update(station=station, nav_state="arrived", speed=0.0)
         return self._ok({"success": True, "message": f"arrived at {station}"})
 
-    def pick(self, item, shelf, instruction=None):
+    def pick(self, item, shelf):
+        """One simulated GR00T run: pick the item and place it in the basket."""
         problem = self._check_ready()
         if problem:
             return self._fail(problem)
@@ -161,55 +164,38 @@ class SimRobot(RobotAdapter):
             return self._fail(f"{item} is not on {shelf}")
         if self.state["station"] != shelf:
             return self._fail(f"not at {shelf}, currently at {self.state['station'] or 'moving'}")
+        instruction, problem = instructions.lookup(item, shelf)
+        if problem:
+            return self._fail(problem)
         with self.lock:
             self.state["busy"] = True
-        if not self._sleep(1.8):
+            self.state["holding"] = item      # in the gripper during the run
+        if not self._sleep(2.5):
+            with self.lock:
+                self.state["holding"] = None
             return self._fail("robot is stopped")
+        with self.lock:
+            self.state["holding"] = None      # the run ends in the rest pose
+            self.state["battery"] = max(0.0, self.state["battery"] - 0.05)
         if self.rng.random() < self.pick_fail:
             return self._fail("grasp failed")
-        with self.lock:
-            self.state["holding"] = item
-            self.state["battery"] = max(0.0, self.state["battery"] - 0.05)
-        return self._ok({"success": True, "message": "picked"})
+        return self._ok({"success": True, "message": f"placed {item} in basket", "item": item, "shelf": shelf,
+                         "target": "basket", "instruction": instruction, "barcode": None})
 
-    def scan(self):
+    def return_item(self, item):
         problem = self._check_ready()
         if problem:
             return self._fail(problem)
-        if not self.state["holding"]:
-            return self._fail("not holding anything")
-        with self.lock:
-            self.state["busy"] = True
-        if not self._sleep(0.9):
-            return self._fail("robot is stopped")
-        if self.rng.random() < self.scan_fail:
-            with self.lock:
-                self.state["busy"] = False
-                self.state["last_error"] = "barcode not readable"
-            return {"success": False, "barcode": None, "message": "barcode not readable"}
-        barcode = self.inventory()[self.state["holding"]]["barcode"]
-        return self._ok({"success": True, "barcode": barcode})
-
-    def place(self, target):
-        problem = self._check_ready()
-        if problem:
-            return self._fail(problem)
-        item = self.state["holding"]
-        if not item:
-            return self._fail("not holding anything")
-        if target not in ("basket", "return"):
-            return self._fail("target must be 'basket' or 'return'")
-        if target == "return" and self.state["station"] != self.inventory()[item]["shelf"]:
+        shelf = self.inventory().get(item, {}).get("shelf")
+        if not shelf:
+            return self._fail(f"unknown item {item}")
+        if self.state["station"] != shelf:
             return self._fail(f"cannot return {item} here")
         with self.lock:
             self.state["busy"] = True
         if not self._sleep(1.0):
             return self._fail("robot is stopped")
-        with self.lock:
-            self.state["holding"] = None
-        if target == "basket":
-            return self._ok({"success": True, "message": f"placed {item} in basket"})
-        return self._ok({"success": True, "message": f"returned {item} to shelf"})
+        return self._ok({"success": True, "message": f"returned {item} to shelf", "item": item, "target": "return"})
 
     def stop(self):
         with self.lock:

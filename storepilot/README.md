@@ -9,11 +9,19 @@ explicit HTTP interface. The Jetson stays the source of truth and runs all robot
  └─ Chromium kiosk ──HTTP/WebSocket──► StorePilot backend (FastAPI, :8080, on the Pi)
                                          ├─ SQLite: mission history + events (survives disconnects)
                                          ├─ Nemotron via Nebius Token Factory (key stays on the Pi)
-                                         │    order parsing + step planning (shared code in ../webapp/app)
+                                         │    order parsing + step planning (shared code in ../agent)
                                          └─ Robot adapter
                                               ├─ mock: built-in simulator (labelled SIMULATED)
                                               └─ live: Jetson robot server, Contract v2 (HTTP)
 ```
+
+This folder holds both store apps. They share the agent in `../agent` (Nemotron planner,
+order parser, OrderTracker guards, robot client) and one `.env`:
+
+| Folder | App | Start (mock, no robot, no key) |
+|---|---|---|
+| `backend/` + `frontend/` | StorePilot AI dashboard (this README) | `./dev.sh`, or the installed service on :8080 |
+| `quickpick/` | QuickPick customer kiosk + owner dashboard (Streamlit) | `cd quickpick && DEMO_MODE=1 streamlit run Home.py` ([README](quickpick/README.md)) |
 
 ## What it shows
 
@@ -32,7 +40,9 @@ every event make it impossible to mistake simulated data for the robot.
 ## Safety boundaries (built in)
 
 - The dashboard can only request **high-level** actions (go to a named station, pick a named
-  product, scan, place, stop, resume). There is no API for wheel velocities, PWM or joints.
+  product into the basket, return a product to its shelf, stop, resume). There is no API for
+  wheel velocities, PWM or joints. The planner only chooses product ids; the GR00T instruction
+  comes from `policy/instructions.json` on the robot.
 - The LLM never touches actuators directly: its tool calls go through the shared OrderTracker
   guards (no over-picking, return only at the item's own shelf) and the robot adapter.
 - **Every mission needs an operator confirmation.** In live mode the operator must also tick
@@ -54,7 +64,7 @@ cd ~/Documents/"Dark Store Robot"/Store-Picker-Bot/storepilot
 
 The installer is safe to run again. It:
 1. installs Node.js 22 LTS in `~/.local/opt/node` if missing (checksum verified),
-2. creates `backend/.venv` and installs `backend/requirements.txt`,
+2. creates `backend/.venv` and installs `backend/requirements.txt` and the shared agent (`pip install -e ../agent`),
 3. creates `.env` from `.env.example` if missing,
 4. builds the frontend (`frontend/dist`, served by the backend),
 5. installs and starts the systemd **user** service `storepilot-backend` (starts at boot; this Pi
@@ -70,7 +80,7 @@ The installer is safe to run again. It:
 | `JETSON_URL` | – | Jetson robot server, e.g. `http://192.168.2.50:8000` (live mode) |
 | `STOREPILOT_ENABLE_MOTION` | `0` | `1` = operators may start missions that move the real robot |
 | `JETSON_STOP_CONFIRMED` | `0` | `1` = you tested that `POST /stop` on the Jetson really halts the robot |
-| `STOREPILOT_MANIPULATION_VERIFIED` | `0` | `1` = pick / scan / place on the Jetson are real and return verified results. Until then live missions cannot start and "Holding" is not shown |
+| `STOREPILOT_MANIPULATION_VERIFIED` | `0` | `1` = the GR00T pick on the Jetson (pick + place in basket, `agent/robot_server/arm.py`) is real and tested. Until then live missions cannot start and "Holding" is not shown |
 | `STOREPILOT_VERIFIED_TELEMETRY` | (empty) | Live fields you checked against the robot: any of `pose,battery,speed`. Others show "Unavailable · not verified yet" |
 | `NEBIUS_API_KEY` | – | Nemotron on Nebius Token Factory. Without it: keyword parser + offline autopilot |
 | `STOREPILOT_PORT` | `8080` | Backend port (kiosk URL uses 8080) |
@@ -266,25 +276,24 @@ appears afterwards, a new `/navigate` is refused until `/resume`, **and** an arm
 ## Jetson integration: what is assumed, what is still needed
 
 The live adapter (`backend/storepilot/adapters/jetson.py`) speaks the contract of
-`webapp/robot_server/jetson_server.py` (Contract v2): `GET /health /status /map`,
-`POST /navigate /pick /scan /place /stop /resume`. Before switching to live mode, please confirm:
+`agent/robot_server/jetson_server.py` (Contract v2): `GET /health /status /map`,
+`POST /navigate /pick /place /stop /resume` (`/pick` = pick + place in basket; see
+`agent/robot_server/README.md`). Before switching to live mode, please confirm:
 
 1. **Address:** the Jetson's IP on the robot network and that `jetson_server.py` runs on port 8000
    and is reachable from the Pi (`curl http://<jetson>:8000/health`).
 2. **Which server runs:** is it `jetson_server.py` from this repo, unchanged? Its `/health` says
-   `"healthy"` (the adapter accepts that and `"ok"`).
+   `"ok"` (the adapter also accepts `"healthy"` from older versions).
 3. **Stop:** does `POST /stop` really halt the base (Nav2 cancel + zero velocity) and the arm?
    Only then set `JETSON_STOP_CONFIRMED=1`.
 4. **Pose source and frame:** `/status.pose` comes from Nav2 feedback only while navigating. Is
    there a continuous pose (AMCL / `map→base_link` TF) we can expose when idle?
 5. **Battery and speed:** `/status.battery` stays at its default 100 unless `/battery_state` is
    published, and `speed` is a constant 0.3 while navigating. Which topics give real values?
-6. **Pick / scan / place:** these are still timed stubs on the Jetson. Which service will run the
-   GR00T pick and barcode / load-cell verification, and will it report failures in the same JSON?
-7. **Stations:** is `robot_server/stations.yaml` filled with the real store positions? The map
+6. **Pick:** `/pick` is still a timed stub on the Jetson (`agent/robot_server/arm.py`). It must call
+   the GR00T pick function from `policy/` and report failures in the same JSON. There is no barcode
+   scan; load-cell verification is not connected either.
+7. **Stations:** is `agent/robot_server/stations.yaml` filled with the real store positions? The map
    draws exactly what `/map` returns.
 8. **Map image (optional):** to draw the real occupancy grid, the Jetson would need to serve it
    (for example `GET /map/image` + resolution / origin), or allow rosbridge from the Pi.
-
-Note: the older Streamlit webapp (`../webapp`) checks `/health` for `"ok"` only, so against the real
-Jetson (`"healthy"`) it would fall back to its simulator. StorePilot does not have this problem.

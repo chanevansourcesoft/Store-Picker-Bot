@@ -39,3 +39,6 @@ checkpoints/
 .idea/
 *.swp
 .DS_Store
+
+# Runtime state (live stock, shared by the apps)
+/data/

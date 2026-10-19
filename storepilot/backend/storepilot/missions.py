@@ -1,7 +1,7 @@
 """
 Missions: order text -> parsed items -> validated plan -> operator confirmation -> run.
 
-Planning reuses the shared agent in webapp/app (NVIDIA Nemotron on Nebius Token
+Planning reuses the shared agent in agent/store_agent (NVIDIA Nemotron on Nebius Token
 Factory, or the offline autopilot without a key). Its OrderTracker guards refuse
 wrong commands before they reach the robot.
 
@@ -21,12 +21,14 @@ from datetime import datetime
 from . import config
 from .db import now_iso
 
-# Shared code from webapp/app (config.py put webapp/ on sys.path)
-import app.agent as shared_agent            # noqa: E402
-import app.tools as shared_tools            # noqa: E402
-from app.agent import group_items_by_shelf, plan_shelf_route, run_agent   # noqa: E402
-from app.config import MODEL_AGENT, MODEL_FAST, has_llm, load_inventory   # noqa: E402
-from app.order_parser import parse_order, parse_order_offline             # noqa: E402
+# Shared agent code (agent/store_agent, installed with pip install -e ../../agent)
+import store_agent.agent as shared_agent
+import store_agent.tools as shared_tools
+from store_agent.agent import group_items_by_shelf, plan_shelf_route, run_agent
+from store_agent.config import MODEL_AGENT, MODEL_FAST, has_llm
+from store_agent.inventory import load_inventory, release, reserve
+from store_agent.order_parser import parse_order, parse_order_offline
+from store_agent.order_tracker import basket_item, unpacked_units
 
 RESULT_STATUS = {"done": "completed", "done_with_problems": "completed_with_issues", "failed": "failed"}
 FINISHED = ("completed", "completed_with_issues", "failed", "aborted", "interrupted", "rejected",
@@ -45,7 +47,7 @@ def mentioned(item, text):
     """True if the order text names this product (id word or display-name word, singular or plural).
     A parsed item that is not mentioned was inferred by the model and needs the operator's eye."""
     words = set(item.lower().split("_")) | set(config.product_label(item).lower().split())
-    words -= {"can", "pack", "box", "packet", "bottle"}   # container words alone prove nothing
+    words -= {"can", "pack", "box", "packet", "bottle", "and", "the"}   # container and filler words prove nothing
     text = text.lower()
     return any(w in text or w + "s" in text or w.rstrip("s") in text.split() for w in words if len(w) > 2)
 
@@ -55,8 +57,8 @@ def model_name(model):
 
 
 class RobotProxy:
-    """What the shared agent sees as `robot_client`. It only exposes the four
-    high-level commands the planner may use, plus status for its tracker."""
+    """What the shared agent sees as `robot_client`. It only exposes the high-level
+    commands the planner may use (navigate, pick), plus status for its tracker."""
 
     def __init__(self, manager):
         self.m = manager
@@ -77,15 +79,8 @@ class RobotProxy:
     def navigate(self, station):
         return self._command("navigate_to", {"station": station}, lambda: self.m.adapter.navigate(station))
 
-    def pick(self, item, shelf, instruction=None):
-        return self._command("pick_item", {"item": item, "instruction": instruction},
-                             lambda: self.m.adapter.pick(item, shelf, instruction))
-
-    def scan(self):
-        return self._command("scan_item", {}, self.m.adapter.scan)
-
-    def place(self, target):
-        return self._command("place_item", {"target": target}, lambda: self.m.adapter.place(target))
+    def pick(self, item, shelf):
+        return self._command("pick_item", {"item": item}, lambda: self.m.adapter.pick(item, shelf))
 
 
 class MissionManager:
@@ -102,7 +97,6 @@ class MissionManager:
         self.thread = None
         self.last_finished = None       # (mission_id, status, monotonic time)
         self.stop_pending = False       # STOP sent, not yet confirmed by telemetry
-        self.held = None                # product the robot holds (from successful picks)
 
         # The shared agent talks to "robot_client": route it through our proxy.
         proxy = RobotProxy(self)
@@ -113,6 +107,7 @@ class MissionManager:
         for mission_id in interrupted:
             self.event("system", "warning", "Mission was running when the dashboard restarted. "
                        "Marked interrupted; it will NOT resume by itself.", mission_id)
+            self.release_stock(mission_id)
         for mission_id in expired:
             self.event("system", "info", "Unconfirmed mission expired after restart.", mission_id)
 
@@ -221,7 +216,7 @@ class MissionManager:
         if config.MODE == "live" and not config.ENABLE_MOTION:
             return False, "Physical motion is disabled (STOREPILOT_ENABLE_MOTION=0)."
         if config.MODE == "live" and not config.MANIPULATION_VERIFIED:
-            return False, ("Pick, scan and place are not verified on the Jetson yet "
+            return False, ("The GR00T pick (pick and place in basket) is not verified on the Jetson yet "
                            "(STOREPILOT_MANIPULATION_VERIFIED=0).")
         return True, ""
 
@@ -239,12 +234,16 @@ class MissionManager:
                 raise MissionError("Confirm that the robot's path is clear before starting a real mission.")
             if load_inventory() and self.validate(mission["items"], mission["route"], load_inventory()):
                 raise MissionError("Stock changed since the order was checked. Submit it again.")
+            # Reserve the stock now (all or nothing), so no other order can take these units
+            ok, _ = reserve([{"item": i["item"], "qty": i["qty"]} for i in mission["items"]])
+            if not ok:
+                raise MissionError("Stock changed since the order was checked. Submit it again.")
+            self.store.update_mission(mission_id, stock_reserved=1)
 
             planner = f"NVIDIA Nemotron ({model_name(MODEL_AGENT)})" if has_llm() else "offline autopilot (no API key)"
             self.store.update_mission(mission_id, status="running", confirmed_at=now_iso(), planner=planner)
             self.current_id = mission_id
             self.abort.clear()
-            self.held = None
             self.event("operator", "info", "Mission confirmed by operator" +
                        (" (path reported clear)" if config.MODE == "live" else ""), mission_id)
             self.event("ai", "info", f"Planner started: {planner}", mission_id)
@@ -252,6 +251,17 @@ class MissionManager:
                                            daemon=True)
             self.thread.start()
         return self.store.get_mission(mission_id)
+
+    def release_stock(self, mission_id):
+        """Give back the reserved stock of every unit the mission did not put in the basket (once)."""
+        if not self.store.take_reservation(mission_id):
+            return
+        mission = self.store.get_mission(mission_id)
+        back = unpacked_units(mission["items"], mission.get("step_log") or [])
+        if back:
+            release(back)
+            self.event("system", "info", "Back to stock (not packed): " + ", ".join(
+                f"{qty}× {config.product_label(item)}" for item, qty in back.items()), mission_id)
 
     def discard(self, mission_id):
         mission = self.store.get_mission(mission_id)
@@ -282,6 +292,7 @@ class MissionManager:
             packed = self.store.get_mission(mission_id)["packed"]
             self.store.update_mission(mission_id, status=status, finished_at=now_iso(), bill=bill,
                                       problems=problems, packed=packed)
+            self.release_stock(mission_id)
             with self.lock:
                 self.current_id, self.action = None, None
                 self.last_finished = (mission_id, status, time.monotonic())
@@ -313,11 +324,8 @@ class MissionManager:
                 text = f"Navigating to {config.station_label(station)}"
             self.event("robot", "info", text, mission_id)
         elif tool == "pick_item":
-            instruction = args.get("instruction")
-            self.event("robot", "info", f"Pick operation requested: {config.product_label(args['item'])}"
-                       + (f" · GR00T instruction “{instruction}”" if instruction else ""), mission_id)
-        elif tool == "scan_item":
-            self.event("robot", "info", "Pick verification pending (barcode scan)", mission_id)
+            self.event("robot", "info", f"Pick requested: {config.product_label(args['item'])} "
+                       "(one GR00T run: pick and place in basket)", mission_id)
 
     def after_command(self):
         with self.lock:
@@ -343,32 +351,17 @@ class MissionManager:
                        f"Arrived at {station}" if ok else f"Navigation to {station} failed: {message}", mission_id)
         elif tool == "pick_item":
             name = config.product_label(args.get("item"))
-            if ok:
-                self.held = args.get("item")
-            self.event("robot", "success" if ok else "warning",
-                       f"Picked {name}" if ok else f"Pick of {name} failed: {message}", mission_id)
-        elif tool == "scan_item":
-            product = result.get("product")
-            if ok and product == self.held:
-                self.event("robot", "success", f"Pick verified: barcode matches {config.product_label(product)}",
-                           mission_id)
-            elif ok:
-                self.event("robot", "warning", f"Barcode mismatch: scanned {config.product_label(product)}",
-                           mission_id)
-            else:
-                self.event("robot", "warning", f"Verification failed: {message}", mission_id)
-        elif tool == "place_item":
-            if ok and args.get("target") == "basket":
+            if basket_item(entry):
                 packed = min(mission["packed"] + 1, mission["total"])
                 updates["packed"] = packed
-                self.event("robot", "success", f"Item placed in basket ({packed} of {mission['total']} picked)",
-                           mission_id)
+                instruction = result.get("instruction")
+                self.event("robot", "success", f"{name} placed in basket ({packed} of {mission['total']} picked)"
+                           + (f" · GR00T instruction “{instruction}”" if instruction else ""), mission_id)
             elif ok:
-                self.event("robot", "info", "Item returned to its shelf for a retry", mission_id)
+                self.event("robot", "warning", f"Robot picked {name} but did not report it in the basket",
+                           mission_id)
             else:
-                self.event("robot", "warning", f"Place failed: {message}", mission_id)
-            if ok:
-                self.held = None
+                self.event("robot", "warning", f"Pick of {name} failed: {message}", mission_id)
         self.store.update_mission(mission_id, **updates)
 
     # ---------- STOP / resume ----------
@@ -453,11 +446,7 @@ class MissionManager:
                 if station in ("customer", "home"):
                     return "returning", f"To {config.station_label(station)}"
                 return "navigating", f"To {config.station_label(station)}"
-            if tool == "pick_item":
-                return "picking", f"Picking {config.product_label(args.get('item'))}"
-            if tool == "scan_item":
-                return "picking", "Verifying pick (barcode)"
-            return "picking", "Placing in basket" if args.get("target") == "basket" else "Returning item to shelf"
+            return "picking", f"Picking {config.product_label(args.get('item'))} into the basket"
         if status.get("nav_state") == "navigating":
             goal = status.get("goal") or {}
             where = config.station_label(status.get("goal_station")) if status.get("goal_station") else \

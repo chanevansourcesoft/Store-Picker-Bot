@@ -27,14 +27,17 @@ from storepilot.health import AIStatus
 from storepilot.missions import MissionError, MissionManager, mentioned
 from storepilot.telemetry import Telemetry
 
-from app.config import DEFAULT_INVENTORY
+from store_agent import inventory as stock_store
+from store_agent.inventory import DEFAULT_INVENTORY
+
+# Missions reserve stock: use a temporary stock file, never the real one
+stock_store.STOCK_FILE = Path(tempfile.mkdtemp()) / "stock.json"
 
 INVENTORY = lambda: DEFAULT_INVENTORY  # noqa: E731
 
 
 def fast_sim(**kw):
     kw.setdefault("pick_fail", 0)
-    kw.setdefault("scan_fail", 0)
     kw.setdefault("nav_fail", 0)
     return SimRobot(INVENTORY, time_scale=0.02, seed=1, **kw)
 
@@ -59,8 +62,8 @@ def services(adapter=None, db=None):
 def offline():
     """No Nemotron: keyword parser + offline autopilot."""
     return [patch("storepilot.missions.has_llm", return_value=False),
-            patch("app.agent.get_client", side_effect=RuntimeError("no key")),
-            patch("app.tools.load_inventory", INVENTORY), patch("app.agent.load_inventory", INVENTORY),
+            patch("store_agent.agent.get_client", side_effect=RuntimeError("no key")),
+            patch("store_agent.tools.load_inventory", INVENTORY), patch("store_agent.agent.load_inventory", INVENTORY),
             patch("storepilot.missions.load_inventory", INVENTORY)]
 
 
@@ -79,10 +82,13 @@ def test_sim_moves_and_stops():
     assert robot.navigate("shelf_A")["success"]
     pose = robot.fetch_status()["pose"]
     assert abs(pose["x"] - SIM_STATIONS["shelf_A"]["x"]) < 1e-6
-    assert not robot.pick("juice_box", "shelf_C")["success"], "must be at the item's own shelf"
-    assert robot.pick("soup_can", "shelf_A")["success"]
-    assert robot.scan()["barcode"] == DEFAULT_INVENTORY["soup_can"]["barcode"]
-    assert robot.place("basket")["message"] == "placed soup_can in basket"
+    assert not robot.pick("frooti", "shelf_A")["success"], "must be at the item's own shelf"
+    result = robot.pick("chips_packet", "shelf_A")   # one GR00T run: pick AND place in the basket
+    assert result["success"] and result["target"] == "basket" and result["item"] == "chips_packet", result
+    assert result["instruction"] == "pick up the chips packet and place it in the basket", result
+    assert robot.fetch_status()["holding"] is None
+    assert not hasattr(robot, "scan")
+    assert robot.return_item("chips_packet")["success"]
 
     slow = SimRobot(INVENTORY, time_scale=1.0, nav_fail=0)
     t = threading.Thread(target=lambda: setattr(slow, "result", slow.navigate("customer")))
@@ -103,21 +109,28 @@ def test_offline_mission_runs_after_confirm_only():
         p.start()
     try:
         store, robot, tel, m = services()
-        draft = m.submit_order("2 tomato soups and 1 juice please, and a pizza")
+        start = stock_store.get_stock()
+        draft = m.submit_order("2 chips and 1 frooti please, and a pizza")
         assert draft["status"] == "awaiting_confirmation", draft
-        assert [(i["item"], i["qty"]) for i in draft["items"]] == [("soup_can", 2), ("juice_box", 1)]
+        assert [(i["item"], i["qty"]) for i in draft["items"]] == [("chips_packet", 2), ("frooti", 1)]
         assert draft["unknown"] == ["pizza"]
         time.sleep(0.3)
         assert robot.fetch_status()["station"] == "home", "nothing moves before confirmation"
 
+        assert stock_store.get_stock() == start, "nothing is reserved before confirmation"
         m.confirm(draft["id"])
+        assert stock_store.get_stock()["chips_packet"] == start["chips_packet"] - 2, "reserved at confirm"
         done = wait_finished(store, draft["id"])
         assert done["status"] == "completed", done
         assert done["packed"] == 3 and done["planner"].startswith("offline autopilot")
         texts = [e["text"] for e in store.recent_events(200, mission_id=draft["id"])]
         assert any(t.startswith("Mission plan validated") for t in texts)
-        assert any(t.startswith("Pick verified") for t in texts)
+        assert sum(" placed in basket (" in t for t in texts) == 3, texts
+        assert any("GR00T instruction “pick up the Frooti" in t for t in texts), texts
         assert any(t.startswith("Mission completed: 3/3") for t in texts)
+        stock = stock_store.get_stock()
+        assert (stock["chips_packet"], stock["frooti"]) == (start["chips_packet"] - 2, start["frooti"] - 1), stock
+        assert store.get_mission(draft["id"])["stock_reserved"] == 0
         tel.shutdown()
     finally:
         for p in patches:
@@ -138,7 +151,7 @@ def test_rejected_and_discarded():
             raise AssertionError("a rejected mission must not start")
         except MissionError:
             pass
-        too_many = m.submit_order("11 soups")
+        too_many = m.submit_order("11 chips")
         assert too_many["status"] == "rejected"
         ok = m.submit_order("1 chips")
         m.discard(ok["id"])
@@ -155,14 +168,16 @@ def test_stop_aborts_and_never_resumes_mission():
     for p in patches:
         p.start()
     try:
-        robot = SimRobot(INVENTORY, time_scale=0.3, pick_fail=0, scan_fail=0, nav_fail=0)
+        robot = SimRobot(INVENTORY, time_scale=0.3, pick_fail=0, nav_fail=0)
         store, robot, tel, m = services(adapter=robot)
-        draft = m.submit_order("3 juice")
+        start = stock_store.get_stock()["frooti"]
+        draft = m.submit_order("3 frooti")
         m.confirm(draft["id"])
         time.sleep(0.4)
         assert m.stop()["success"]
         done = wait_finished(store, draft["id"])
         assert done["status"] == "aborted", done
+        assert stock_store.get_stock()["frooti"] == start - done["packed"], "unpacked units go back to stock"
         time.sleep(0.1)
         assert m.robot_state(tel.snapshot())[0] == "paused"
         ok, reason = m.readiness()
@@ -181,7 +196,10 @@ def test_stop_aborts_and_never_resumes_mission():
 def test_restart_marks_running_interrupted():
     db = Path(tempfile.mkdtemp()) / "t.db"
     store = Store(db)
-    running = store.create_mission(text="x", mode="mock", status="running", total=1)
+    running = store.create_mission(text="x", mode="mock", status="running", total=2, stock_reserved=1,
+                                   items=[{"item": "mentos", "qty": 2}])
+    assert stock_store.reserve([{"item": "mentos", "qty": 2}])[0]
+    before = stock_store.get_stock()["mentos"]
     waiting = store.create_mission(text="y", mode="mock", status="awaiting_confirmation", total=1)
     patches = offline()
     for p in patches:
@@ -189,6 +207,7 @@ def test_restart_marks_running_interrupted():
     try:
         store2, _, tel, m = services(db=db)
         assert store2.get_mission(running)["status"] == "interrupted"
+        assert stock_store.get_stock()["mentos"] == before + 2, "an interrupted mission gives its stock back"
         assert store2.get_mission(waiting)["status"] == "expired"
         assert m.current_id is None, "nothing resumes after a restart"
         tel.shutdown()
@@ -206,7 +225,7 @@ def test_live_safety_switches():
         p.start()
     try:
         store, robot, tel, m = services()
-        draft = m.submit_order("1 soup")
+        draft = m.submit_order("1 chips")
         try:
             m.confirm(draft["id"], area_clear=True)
             raise AssertionError("motion disabled must block the start")
@@ -436,10 +455,11 @@ def test_rosbridge_drive():
 
 
 def test_mentioned():
-    assert mentioned("soup_can", "2 tomato soups please")
-    assert mentioned("chips_pack", "one chips")
-    assert not mentioned("chips_pack", "2 packets of Maggi")
-    assert not mentioned("juice_box", "a coke bottle")
+    assert mentioned("hide_and_seek", "2 hide and seek please")
+    assert mentioned("chips_packet", "one chips")
+    assert not mentioned("chips_packet", "2 packets of Maggi")
+    assert not mentioned("hide_and_seek", "2 chips and 1 frooti"), "'and' alone does not name Hide and Seek"
+    assert not mentioned("frooti", "a coke bottle")
     print("PASS: test_mentioned")
 
 
