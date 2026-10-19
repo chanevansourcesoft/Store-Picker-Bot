@@ -1,5 +1,18 @@
 {
-  "soup_can": {"shelf": "shelf_A", "instruction": "pick up the soup can and place it in the basket"},
-  "chips_pack": {"shelf": "shelf_B", "instruction": "pick up the chips pack and place it in the basket"},
-  "juice_box": {"shelf": "shelf_C", "instruction": "pick up the juice box and place it in the basket"}
+  "chips_packet": {
+    "shelf": "shelf_A", 
+    "instruction": "pick up the chips packet and place it in the basket"
+  },
+  "mentos":       {
+    "shelf": "shelf_A", 
+    "instruction": "pick up the Mentos candy roll and place it in the basket"
+  },
+  "frooti":       {
+    "shelf": "shelf_B", 
+    "instruction": "pick up the Frooti mango drink box and place it in the basket"
+  },
+  "hide_and_seek":{
+    "shelf": "shelf_B", 
+    "instruction": "pick up the Hide and Seek biscuit pack and place it in the basket"
+  }
 }

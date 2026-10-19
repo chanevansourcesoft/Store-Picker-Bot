@@ -2,7 +2,25 @@
 
 Check that the follower mirrors the leader before setting up cameras and recording.
 Complete [ARM_SETUP.md](ARM_SETUP.md) first (both arms calibrated). All commands run from the `policy/` folder.
-Commands are shown for both setups: **with Docker** on the Jetson, and **without Docker** on a PC after `source env.sh` (see [README.md](../README.md)).
+
+## Start a terminal
+
+Every command in this guide is shown twice. Use the one for your setup.
+
+**With Docker (Jetson):** go to the `policy/` folder; each command starts with `docker compose run --rm policy`.
+
+```bash
+cd path/to/Store-Picker-Bot/policy
+```
+
+**Without Docker (PC):** in every new terminal, activate the Python environment, then load `env.sh`
+(it loads `.env` and the calibration folder, and goes to `policy/`). Setup: "Getting started without
+Docker" in [README.md](../README.md).
+
+```bash
+conda activate lerobot_env      # only with a conda env; skip it with uv (policy/.venv)
+source path/to/Store-Picker-Bot/policy/env.sh
+```
 
 ## 1. Before you start
 
@@ -28,7 +46,7 @@ docker compose run --rm policy lerobot-teleoperate \
   --robot.type=so100_follower --robot.port=FOLLOWER_PORT --robot.id=picker_follower \
   --teleop.type=so100_leader --teleop.port=LEADER_PORT --teleop.id=picker_leader
 
-# Without Docker (after `source env.sh`, see README.md)
+# Without Docker (PC)
 lerobot-teleoperate \
   --robot.type=so100_follower --robot.port=FOLLOWER_PORT --robot.id=picker_follower \
   --teleop.type=so100_leader --teleop.port=LEADER_PORT --teleop.id=picker_leader

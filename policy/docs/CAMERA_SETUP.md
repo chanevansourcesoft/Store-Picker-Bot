@@ -1,9 +1,27 @@
 # Camera setup
 
 Set up the gripper and scene cameras on the Jetson or a PC.
-Commands are shown for both setups: **with Docker** on the Jetson, and **without Docker** on a PC after `source env.sh` (see [README.md](../README.md)).
 Only the policy process opens the cameras.
 Complete "Getting started" in [README.md](../README.md) first. All commands run from the `policy/` folder.
+
+## Start a terminal
+
+Every command in this guide is shown twice. Use the one for your setup.
+
+**With Docker (Jetson):** go to the `policy/` folder; each command starts with `docker compose run --rm policy`.
+
+```bash
+cd path/to/Store-Picker-Bot/policy
+```
+
+**Without Docker (PC):** in every new terminal, activate the Python environment, then load `env.sh`
+(it loads `.env` and the calibration folder, and goes to `policy/`). Setup: "Getting started without
+Docker" in [README.md](../README.md).
+
+```bash
+conda activate lerobot_env      # only with a conda env; skip it with uv (policy/.venv)
+source path/to/Store-Picker-Bot/policy/env.sh
+```
 
 ## 1. Mount the cameras
 
@@ -23,7 +41,7 @@ Connect both cameras to the Jetson (or the PC), then:
 # With Docker (Jetson)
 docker compose run --rm policy lerobot-find-cameras opencv
 
-# Without Docker (after `source env.sh`, see README.md)
+# Without Docker (PC)
 lerobot-find-cameras opencv
 ```
 
@@ -48,7 +66,7 @@ Both cameras must support 640×480 at 30 FPS:
 docker compose run --rm policy v4l2-ctl -d GRIPPER_CAM --list-formats-ext
 docker compose run --rm policy v4l2-ctl -d SCENE_CAM --list-formats-ext
 
-# Without Docker (after `source env.sh`, see README.md)
+# Without Docker (PC)
 v4l2-ctl -d GRIPPER_CAM --list-formats-ext
 v4l2-ctl -d SCENE_CAM --list-formats-ext
 ```
@@ -64,7 +82,7 @@ Automatic exposure, white balance, and focus make the images change between epis
 # With Docker (Jetson)
 docker compose run --rm policy v4l2-ctl -d SCENE_CAM --list-ctrls
 
-# Without Docker (after `source env.sh`, see README.md)
+# Without Docker (PC)
 v4l2-ctl -d SCENE_CAM --list-ctrls
 ```
 
@@ -77,7 +95,7 @@ docker compose run --rm policy v4l2-ctl -d SCENE_CAM \
   --set-ctrl=white_balance_automatic=0 \
   --set-ctrl=focus_automatic_continuous=0
 
-# Without Docker (after `source env.sh`, see README.md)
+# Without Docker (PC)
 v4l2-ctl -d SCENE_CAM \
   --set-ctrl=auto_exposure=1 \
   --set-ctrl=white_balance_automatic=0 \
@@ -108,7 +126,7 @@ Take new test images with the arm in its rest pose and an item in each bin:
 # With Docker (Jetson)
 docker compose run --rm policy lerobot-find-cameras opencv
 
-# Without Docker (after `source env.sh`, see README.md)
+# Without Docker (PC)
 lerobot-find-cameras opencv
 ```
 

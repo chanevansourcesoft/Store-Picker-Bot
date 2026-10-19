@@ -1,8 +1,26 @@
 # Arm setup
 
 Set up and calibrate the SO-100 follower (on the robot) and leader (for teleoperation) on the Jetson or a PC.
-Commands are shown for both setups: **with Docker** on the Jetson, and **without Docker** on a PC after `source env.sh` (see [README.md](../README.md)).
 Complete "Getting started" in [README.md](../README.md) first. All commands run from the `policy/` folder.
+
+## Start a terminal
+
+Every command in this guide is shown twice. Use the one for your setup.
+
+**With Docker (Jetson):** go to the `policy/` folder; each command starts with `docker compose run --rm policy`.
+
+```bash
+cd path/to/Store-Picker-Bot/policy
+```
+
+**Without Docker (PC):** in every new terminal, activate the Python environment, then load `env.sh`
+(it loads `.env` and the calibration folder, and goes to `policy/`). Setup: "Getting started without
+Docker" in [README.md](../README.md).
+
+```bash
+conda activate lerobot_env      # only with a conda env; skip it with uv (policy/.venv)
+source path/to/Store-Picker-Bot/policy/env.sh
+```
 
 ## 1. Find the arm ports
 
@@ -12,7 +30,7 @@ Power both arms and connect their USB cables to the Jetson (or the PC).
 # With Docker (Jetson)
 docker compose run --rm policy lerobot-find-port
 
-# Without Docker (after `source env.sh`, see README.md)
+# Without Docker (PC)
 lerobot-find-port
 ```
 
@@ -38,7 +56,7 @@ docker compose run --rm policy lerobot-setup-motors \
 docker compose run --rm policy lerobot-setup-motors \
   --teleop.type=so100_leader --teleop.port=LEADER_PORT
 
-# Without Docker (after `source env.sh`, see README.md)
+# Without Docker (PC)
 lerobot-setup-motors \
   --robot.type=so100_follower --robot.port=FOLLOWER_PORT
 
@@ -59,7 +77,7 @@ docker compose run --rm policy lerobot-calibrate \
   --robot.port=FOLLOWER_PORT \
   --robot.id=picker_follower
 
-# Without Docker (after `source env.sh`, see README.md)
+# Without Docker (PC)
 lerobot-calibrate \
   --robot.type=so100_follower \
   --robot.port=FOLLOWER_PORT \
@@ -75,7 +93,7 @@ docker compose run --rm policy lerobot-calibrate \
   --teleop.port=LEADER_PORT \
   --teleop.id=picker_leader
 
-# Without Docker (after `source env.sh`, see README.md)
+# Without Docker (PC)
 lerobot-calibrate \
   --teleop.type=so100_leader \
   --teleop.port=LEADER_PORT \
@@ -101,7 +119,7 @@ exactly in its middle, so the jump sits behind the stop where it can never be re
 docker compose run --rm policy python3 calibration/calibrate_wrist_roll.py --arm follower
 docker compose run --rm policy python3 calibration/calibrate_wrist_roll.py --arm leader
 
-# Without Docker (after `source env.sh`, see README.md)
+# Without Docker (PC)
 python calibration/calibrate_wrist_roll.py --arm follower
 python calibration/calibrate_wrist_roll.py --arm leader
 ```

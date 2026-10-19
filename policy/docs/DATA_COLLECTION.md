@@ -1,7 +1,6 @@
 # Data collection
 
 How to record teleoperated demonstrations for GR00T on the Jetson or a PC.
-Commands are shown for both setups: **with Docker** on the Jetson, and **without Docker** on a PC after `source env.sh` (see [README.md](../README.md)).
 Complete [ARM_SETUP.md](ARM_SETUP.md), [TELEOP_TEST.md](TELEOP_TEST.md) and [CAMERA_SETUP.md](CAMERA_SETUP.md) first (container built, both arms calibrated, teleoperation working, cameras checked).
 
 Recording uses `data_collection/record.py`. LeRobot does the recording, exactly like `lerobot-record`
@@ -9,6 +8,25 @@ Recording uses `data_collection/record.py`. LeRobot does the recording, exactly 
 **recording plan**: which products, how many rounds, and how many episodes of each.
 
 All commands run from the `policy/` folder.
+
+## Start a terminal
+
+Every command in this guide is shown twice. Use the one for your setup.
+
+**With Docker (Jetson):** go to the `policy/` folder; each command starts with `docker compose run --rm policy`.
+
+```bash
+cd path/to/Store-Picker-Bot/policy
+```
+
+**Without Docker (PC):** in every new terminal, activate the Python environment, then load `env.sh`
+(it loads `.env` and the calibration folder, and goes to `policy/`). Setup: "Getting started without
+Docker" in [README.md](../README.md).
+
+```bash
+conda activate lerobot_env      # only with a conda env; skip it with uv (policy/.venv)
+source path/to/Store-Picker-Bot/policy/env.sh
+```
 
 ## 1. Conventions
 
@@ -24,7 +42,7 @@ Keep these fixed for the whole project. Training and the pick service depend on 
 The instruction is the sentence GR00T is trained on. It is fixed per product in `instructions.json`:
 
 ```json
-"soup_can": {"shelf": "shelf_A", "instruction": "pick up the soup can and place it in the basket"}
+"mentos": {"shelf": "shelf_A", "instruction": "pick up the Mentos candy roll and place it in the basket"}
 ```
 
 The item ids are the same as in the store's `inventory.json`. The pick service reads the same file when
@@ -66,7 +84,7 @@ Without it, the script warns and the cameras stay automatic.
 # With Docker (Jetson)
 docker compose run --rm policy python3 data_collection/record.py
 
-# Without Docker (after `source env.sh`, see README.md)
+# Without Docker (PC)
 python data_collection/record.py
 ```
 
@@ -74,8 +92,8 @@ It asks for the plan. Press Enter to accept a default in brackets:
 
 ```
 Products (from instructions.json):
-  1) soup_can       shelf_A    "pick up the soup can and place it in the basket"
-  2) chips_pack     shelf_B    "pick up the chips pack and place it in the basket"
+  1) chips_packet   shelf_A    "pick up the chips packet and place it in the basket"
+  2) mentos         shelf_A    "pick up the Mentos candy roll and place it in the basket"
   ...
 Products to record (numbers or ids, comma-separated, or all) [all]:
 Rounds (base positions per shelf, 1-7) [5]:
@@ -86,7 +104,7 @@ Start? [Y]:
 ```
 
 The same choices can be given as options, without questions:
-`--products soup_can,chips_pack --rounds 5 --per_round 10`.
+`--products chips_packet,mentos --rounds 5 --per_round 10`.
 
 The dataset is saved in `data_collection/dataset/dataset_v<N>_<DDMMYYYY_HHMMSS>/`, for example
 `data_collection/dataset/dataset_v1_12102026_153045/`. The version N counts up by itself: the next new
@@ -100,8 +118,8 @@ from slightly different base positions. A **round** is one base position. At eac
 through the rounds in order, and in each round records every product of that shelf:
 
 ```
-shelf_A:  round 1 (centre)  -> soup_can x 10, tea_box x 10
-          round 2 (left)    -> soup_can x 10, tea_box x 10
+shelf_A:  round 1 (centre)  -> chips_packet x 10, mentos x 10
+          round 2 (left)    -> chips_packet x 10, mentos x 10
           ...
 shelf_B:  round 1 (centre)  -> ...
 ```
@@ -124,7 +142,7 @@ rest pose, then press N. Every episode, for every product and shelf, starts and 
 ### Keys
 
 Press these in the terminal running the script. The last line of the terminal always shows the state,
-for example `WAITING  shelf_A round 2/5 | soup_can 4/10 | plan 14/200`.
+for example `WAITING  shelf_A round 2/5 | mentos 4/10 | plan 14/200`.
 
 | Key | When | What it does |
 |---|---|---|
@@ -158,7 +176,7 @@ Quit at any time, and continue on another day with the dataset's folder name:
 # With Docker (Jetson)
 docker compose run --rm policy python3 data_collection/record.py --resume dataset_v1_12102026_153045
 
-# Without Docker (after `source env.sh`, see README.md)
+# Without Docker (PC)
 python data_collection/record.py --resume dataset_v1_12102026_153045
 ```
 
@@ -210,7 +228,7 @@ docker compose run --rm policy lerobot-replay \
   --dataset.root=data_collection/dataset/dataset_v1_12102026_153045 \
   --dataset.episode=0
 
-# Without Docker (after `source env.sh`, see README.md)
+# Without Docker (PC)
 lerobot-replay \
   --robot.type=so100_follower --robot.port=FOLLOWER_PORT --robot.id=picker_follower \
   --dataset.repo_id=local/dataset_v1_12102026_153045 \
@@ -227,7 +245,7 @@ docker compose run --rm policy lerobot-edit-dataset \
   --root=data_collection/dataset/dataset_v1_12102026_153045 \
   --operation.type=info
 
-# Without Docker (after `source env.sh`, see README.md)
+# Without Docker (PC)
 lerobot-edit-dataset \
   --repo_id=local/dataset_v1_12102026_153045 \
   --root=data_collection/dataset/dataset_v1_12102026_153045 \
@@ -244,7 +262,7 @@ Episodes marked with B stay in the dataset until you remove them, best once a re
 # With Docker (Jetson)
 docker compose run --rm policy python3 data_collection/remove_bad_episodes.py dataset_v1_12102026_153045
 
-# Without Docker (after `source env.sh`, see README.md)
+# Without Docker (PC)
 python data_collection/remove_bad_episodes.py dataset_v1_12102026_153045
 ```
 
@@ -268,7 +286,7 @@ Or upload it to the Hugging Face Hub (needs `HF_TOKEN` in the repo root `.env`, 
 docker compose run --rm policy hf upload <hf-user>/dataset_v1_12102026_153045 \
   /workspace/policy/data_collection/dataset/dataset_v1_12102026_153045 --repo-type=dataset
 
-# Without Docker (after `source env.sh`, see README.md)
+# Without Docker (PC)
 hf upload <hf-user>/dataset_v1_12102026_153045 \
   data_collection/dataset/dataset_v1_12102026_153045 --repo-type=dataset
 ```
