@@ -38,7 +38,7 @@ def fake_steps(item, ok=True):
 
 def make_fake_agent(steps):
     """A fake run_agent() that sends the given steps to on_step."""
-    def fake_run_agent(order, on_step=None):
+    def fake_run_agent(order, on_step=None, should_stop=None):
         for i, entry in enumerate(steps):
             entry = dict(entry, step=i + 1)
             if on_step:
@@ -207,7 +207,7 @@ def test_worker_error_releases_stock():
         before = store.get_stock()
         order_id, _ = store.create_order([{"item": "frooti", "qty": 2}])
 
-        def crash(order, on_step=None):
+        def crash(order, on_step=None, should_stop=None):
             on_step(dict(fake_steps("frooti")[0], step=1))
             raise RuntimeError("planner crashed")
         with patch("quickpick.worker.run_agent", crash):
@@ -264,6 +264,61 @@ def test_packing_order_after_restart_fails_and_releases_stock():
         reset_inventory()
 
 
+def test_stop_ends_running_order_and_holds_the_queue():
+    """STOP during an order: the planner sends nothing more, the order ends with
+    "Stopped by the operator", unpacked stock goes back, and no new order starts until Resume."""
+    import time
+    db_path = setup_test_db()
+    reset_inventory()
+    try:
+        before = store.get_stock()
+        order_id, _ = store.create_order([{"item": "chips_packet", "qty": 2}])
+        robot = FakeRobot(DEFAULT_INVENTORY)
+        model = ScriptedModel([nav("shelf_A"), pick("chips_packet"), pick("chips_packet"),
+                               nav("customer"), nav("home")])
+
+        def on_step(entry):
+            if entry["tool"] == "pick_item":
+                worker.halt()                      # operator presses STOP after the first pick
+        with patch("store_agent.tools.robot_client", robot), patch("store_agent.agent.robot_client", robot), \
+                patch("store_agent.agent.get_client", return_value=model):
+            worker.process_single_order(order_id, on_step=on_step)
+
+        order = store.get_order(order_id)
+        assert robot.picks_sent("chips_packet") == 1 and robot.station == "shelf_A", robot.commands
+        assert order["status"] == "done_with_problems", order["status"]
+        assert any(p.startswith("Stopped by the operator") for p in order["problems"]), order["problems"]
+        assert before["chips_packet"] - store.get_stock()["chips_packet"] == 1
+
+        # While STOP is on, the worker takes no new order
+        queued, _ = store.create_order([{"item": "mentos", "qty": 1}])
+        with patch("quickpick.worker.run_agent", make_fake_agent(fake_steps("mentos"))), \
+                patch("quickpick.worker.robot_client", robot):
+            worker.start_worker()
+            time.sleep(1.5)
+            assert store.get_order(queued)["status"] == "queued", "no new order while STOP is on"
+
+            # The robot itself reports "stopped" (e.g. hardware E-stop): still no new order
+            worker.resume_orders()
+            robot.status = lambda: {"stopped": True, "holding": None, "station": "shelf_A"}
+            time.sleep(1.5)
+            assert store.get_order(queued)["status"] == "queued", "no new order while the robot is stopped"
+
+            robot.status = lambda: {"stopped": False, "holding": None, "station": "shelf_A"}
+            for _ in range(50):
+                if store.get_order(queued)["status"] == "done":
+                    break
+                time.sleep(0.1)
+            assert store.get_order(queued)["status"] == "done", "after Resume the queue runs again"
+            worker.stop_worker()
+        print("PASS: test_stop_ends_running_order_and_holds_the_queue")
+    finally:
+        worker.resume_orders()
+        worker.stop_worker()
+        teardown_test_db(db_path)
+        reset_inventory()
+
+
 def run_all_tests():
     """Run all worker tests."""
     print("Running worker tests...\n")
@@ -277,6 +332,7 @@ def run_all_tests():
     test_worker_error_releases_stock()
     test_old_unreserved_order_reduces_at_pick()
     test_packing_order_after_restart_fails_and_releases_stock()
+    test_stop_ends_running_order_and_holds_the_queue()
 
     print("\nAll worker tests passed!")
 

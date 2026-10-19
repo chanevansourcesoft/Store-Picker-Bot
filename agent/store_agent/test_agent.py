@@ -228,6 +228,26 @@ def test_model_picks_too_many_is_refused():
     print("PASS: test_model_picks_too_many_is_refused")
 
 
+def test_stop_halts_agent_before_next_command():
+    """STOP after the first unit: no more model calls or robot commands, no clean-up motion,
+    the bill covers what is in the basket."""
+    robot = FakeRobot(DEFAULT_INVENTORY)
+    script = [nav("shelf_A"), pick("chips_packet"), pick("chips_packet"), nav("customer"), nav("home")]
+    model = ScriptedModel(script)
+    stop = lambda: len(robot.basket) >= 1  # noqa: E731  (operator presses STOP after the first unit)
+    order = {"items": [{"item": "chips_packet", "qty": 2}], "unknown": []}
+    with patch("store_agent.tools.robot_client", robot), patch("store_agent.agent.robot_client", robot), \
+            patch("store_agent.tools.load_inventory", return_value=DEFAULT_INVENTORY), \
+            patch("store_agent.agent.load_inventory", return_value=DEFAULT_INVENTORY):
+        bill, log = run_agent(order, client=model, should_stop=stop)
+
+    assert robot.commands == [("navigate", "shelf_A"), ("pick", "chips_packet")], robot.commands
+    assert len(model.seen_messages) == 2, "no model call after STOP"
+    assert bill["total"] == 20 and bill["status"] == "done_with_problems", bill
+    assert any(p.startswith("Stopped by the operator") for p in bill["problems"]), bill["problems"]
+    print("PASS: test_stop_halts_agent_before_next_command")
+
+
 def run_all_tests():
     """Run all tests."""
     print("Running agent tests...\n")
@@ -240,6 +260,7 @@ def run_all_tests():
     test_early_stop_detection()
     test_robot_holding_after_pick_is_reported_not_moved()
     test_model_picks_too_many_is_refused()
+    test_stop_halts_agent_before_next_command()
 
     print("\nAll tests passed!")
 

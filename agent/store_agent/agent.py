@@ -47,6 +47,10 @@ MAX_CONTINUE_ATTEMPTS = 3  # How many times to continue if order is incomplete.
 WEIGHT_ORDER = {"heavy": 0, "medium": 1, "light": 2}
 
 
+class AgentStopped(Exception):
+    """The operator pressed STOP: no more model calls, no more robot commands."""
+
+
 def strip_think(text):
     """Remove <think>...</think> from model output."""
     return re.sub(r"<think>.*?</think>", "", text or "", flags=re.DOTALL).strip()
@@ -239,18 +243,26 @@ def check_order_complete(order, packed_items, holding=None):
     return is_complete, missing, extra
 
 
-def run_agent_loop(messages, inventory, log, step_offset=0, client=None, on_step=None, tracker=None):
+def run_agent_loop(messages, inventory, log, step_offset=0, client=None, on_step=None, tracker=None,
+                   should_stop=None):
     """Run the agent loop. Returns (log, stopped_reason, step).
 
     on_step: optional callback(step_entry) called after each tool call.
     tracker: optional OrderTracker (guards + progress line after every tool call).
+    should_stop: optional callable; when it returns True, AgentStopped is raised before
+        the next model call or robot command.
     """
     if client is None:
         client = get_client()
 
+    def check_stop():
+        if should_stop is not None and should_stop():
+            raise AgentStopped()
+
     step = step_offset
 
     while step < MAX_STEPS:
+        check_stop()
         step += 1
         response = client.chat.completions.create(
             model=MODEL_AGENT,
@@ -281,6 +293,7 @@ def run_agent_loop(messages, inventory, log, step_offset=0, client=None, on_step
                 except json.JSONDecodeError:
                     tool_args = {}
 
+                check_stop()  # never send a robot command after STOP
                 tool_result = run_tool(tool_name, tool_args, tracker)
 
                 step_entry = {
@@ -330,13 +343,15 @@ def final_status(tracker, problems):
     return "failed"
 
 
-def run_agent(order, client=None, on_step=None):
+def run_agent(order, client=None, on_step=None, should_stop=None):
     """
     Run the agent loop. Returns:
     - bill: dict with items, total, paid, problems, status
     - log: list of steps [{tool, input, result}, ...]
 
     on_step: optional callback(step_entry) called after each tool call.
+    should_stop: optional callable (the STOP button). When it returns True the agent sends
+        no more robot commands (no clean-up motion either); the bill covers what is in the basket.
     """
     if client is None:
         try:
@@ -382,9 +397,14 @@ def run_agent(order, client=None, on_step=None):
     stopped_reason = None
 
     while True:
-        log, stopped_reason, total_steps = run_agent_loop(
-            messages, inventory, log, step_offset=total_steps, client=client, on_step=on_step, tracker=tracker
-        )
+        try:
+            log, stopped_reason, total_steps = run_agent_loop(
+                messages, inventory, log, step_offset=total_steps, client=client, on_step=on_step,
+                tracker=tracker, should_stop=should_stop)
+        except AgentStopped:
+            stopped_reason = "operator_stop"
+            problems.append("Stopped by the operator. No further robot commands were sent.")
+            break
         tracker.sync_from_status(robot_client.status())
 
         if tracker.missing():

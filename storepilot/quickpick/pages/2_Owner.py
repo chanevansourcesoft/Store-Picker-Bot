@@ -30,7 +30,7 @@ from store_agent.agent import group_items_by_shelf, plan_shelf_route, strip_thin
 from store_agent.config import MODEL_ULTRA, ROBOT_URL, get_client, has_llm
 from store_agent.inventory import load_inventory
 from quickpick.step_log import basket_item, is_recovered, step_target
-from quickpick.worker import init_worker
+from quickpick.worker import halt, init_worker, is_halted, resume_orders
 from quickpick.ui_style import (
     BASE_CSS,
     OWNER_CSS,
@@ -518,13 +518,16 @@ def live_robot_card():
             <div style="margin-top:.35rem;">{pills[robot_state]}</div>
             """)
         with top_right:
-            if st.button("■ STOP", key="stop_btn", use_container_width=True, help="Emergency stop",
-                         disabled=robot_state in ("offline", "stopped")):
+            if st.button("■ STOP", key="stop_btn", use_container_width=True,
+                         help="Emergency stop: the robot AND the order planner",
+                         disabled=is_halted() and robot_state in ("offline", "stopped")):
+                halt()  # first the planner: it sends no further robot command
                 result = robot_client.stop()
                 if result.get("success"):
-                    st.toast("Robot stopped", icon="🛑")
+                    st.toast("Robot and planner stopped", icon="🛑")
                 else:
-                    st.toast(result.get("message", "Error"), icon="⚠️")
+                    st.toast(f"Planner stopped. Robot: {result.get('message', 'no answer')}. "
+                             "Use the hardware E-stop.", icon="⚠️")
                 st.rerun(scope="fragment")
 
         battery = robot.get("battery", 0) or 0
@@ -560,12 +563,15 @@ def live_robot_card():
         for icon, msg in alerts:
             html(f'<div class="qp-alert">{icon} {esc(msg)}</div>')
 
-        if robot_state == "stopped":
+        if is_halted():
+            html('<div class="qp-card-sub">🛑 Orders are paused: no new order starts until Resume.</div>')
+        if robot_state == "stopped" or is_halted():
             st.write("")
             if st.button("▶ Resume after stop", key="resume_btn", use_container_width=True, type="primary"):
-                result = robot_client.resume()
+                result = robot_client.resume() if robot_state == "stopped" else {"success": True}
                 if result.get("success"):
-                    st.toast("Robot resumed", icon="▶️")
+                    resume_orders()  # queued orders may start again (a stopped order is not restarted)
+                    st.toast("Resumed", icon="▶️")
                 else:
                     st.toast(result.get("message", "Error"), icon="⚠️")
                 st.rerun(scope="fragment")

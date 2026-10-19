@@ -21,6 +21,24 @@ _worker_thread: Optional[threading.Thread] = None
 _worker_running = False
 _worker_lock = threading.Lock()
 
+# STOP from the owner dashboard: the running order stops before its next robot command,
+# and no new order starts until Resume.
+_halted = threading.Event()
+
+
+def halt():
+    """STOP pressed: stop the planner of the running order and take no new orders."""
+    _halted.set()
+
+
+def resume_orders():
+    """Resume pressed (after the robot itself resumed): queued orders may start again."""
+    _halted.clear()
+
+
+def is_halted():
+    return _halted.is_set()
+
 
 def process_single_order(order_id: int, on_step: Optional[Callable] = None):
     """
@@ -98,7 +116,7 @@ def process_single_order(order_id: int, on_step: Optional[Callable] = None):
         }
 
         # Run the agent
-        bill, log = run_agent(order_dict, on_step=step_callback)
+        bill, log = run_agent(order_dict, on_step=step_callback, should_stop=_halted.is_set)
 
         # Complete the order (the agent decides done / done_with_problems / failed)
         store.complete_order(order_id, bill, bill.get("problems", []), status=bill.get("status"))
@@ -122,8 +140,10 @@ def worker_loop():
 
     while _worker_running:
         try:
-            # Get next queued order
-            order = store.get_next_queued_order()
+            # Get next queued order (none while STOP is on, or while the robot says it is stopped)
+            order = None if _halted.is_set() else store.get_next_queued_order()
+            if order and robot_client.status().get("stopped"):
+                order = None
 
             if order:
                 print(f"[Worker] Processing order #{order['id']}")
