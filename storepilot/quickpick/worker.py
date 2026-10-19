@@ -147,6 +147,10 @@ def start_worker():
         if _worker_thread is not None and _worker_thread.is_alive():
             return  # Already running
 
+        # No worker in this process yet, so an order still "packing" was cut off by a restart
+        for order_id in store.fail_interrupted_orders():
+            print(f"[Worker] Order #{order_id} was packing when the app stopped: marked failed, not resumed")
+
         _worker_running = True
         _worker_thread = threading.Thread(target=worker_loop, daemon=True, name="OrderWorker")
         _worker_thread.start()

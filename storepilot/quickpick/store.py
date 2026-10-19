@@ -329,6 +329,25 @@ def cancel_order(order_id):
     return cancelled
 
 
+def fail_interrupted_orders():
+    """Orders still 'packing' when the app starts were cut off by a restart or crash.
+    They are marked failed (never resumed: the robot and the basket must be checked first)
+    and the units they did not pack go back to stock. Returns the order ids."""
+    init_db()
+    conn = _get_connection()
+    ids = [row["id"] for row in conn.execute("SELECT id FROM orders WHERE status = 'packing'").fetchall()]
+    for order_id in ids:
+        order = get_order(order_id)
+        problems = list(order.get("problems") or []) + [
+            "Interrupted by an app restart while packing. Not resumed: check the robot and the basket."]
+        with _transaction() as conn:
+            conn.execute(
+                "UPDATE orders SET status = 'failed', problems = ?, current_task = NULL "
+                "WHERE id = ? AND status = 'packing'", (json.dumps(problems), order_id))
+        release_unpacked(order)
+    return ids
+
+
 def delete_order(order_id):
     """Delete an order (for testing)."""
     init_db()

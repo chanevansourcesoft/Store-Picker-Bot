@@ -239,6 +239,31 @@ def test_old_unreserved_order_reduces_at_pick():
         reset_inventory()
 
 
+def test_packing_order_after_restart_fails_and_releases_stock():
+    """An order left in "packing" by a restart is marked failed when the worker starts
+    (never resumed), and its unpacked units go back to stock."""
+    db_path = setup_test_db()
+    reset_inventory()
+    try:
+        before = store.get_stock()
+        order_id, _ = store.create_order([{"item": "frooti", "qty": 3}])
+        store.update_order_status(order_id, "packing", current_task="Picked frooti")
+        store.append_step_log(order_id, dict(fake_steps("frooti")[0], step=1))   # 1 of 3 packed
+
+        worker.start_worker()          # what the app does at start
+        worker.stop_worker()
+
+        order = store.get_order(order_id)
+        assert order["status"] == "failed", order["status"]
+        assert any("Interrupted by an app restart" in p for p in order["problems"]), order["problems"]
+        assert before["frooti"] - store.get_stock()["frooti"] == 1, "2 unpacked units back in stock"
+        assert store.get_current_packing_order() is None
+        print("PASS: test_packing_order_after_restart_fails_and_releases_stock")
+    finally:
+        teardown_test_db(db_path)
+        reset_inventory()
+
+
 def run_all_tests():
     """Run all worker tests."""
     print("Running worker tests...\n")
@@ -251,6 +276,7 @@ def run_all_tests():
     test_unpacked_units_go_back_to_stock()
     test_worker_error_releases_stock()
     test_old_unreserved_order_reduces_at_pick()
+    test_packing_order_after_restart_fails_and_releases_stock()
 
     print("\nAll worker tests passed!")
 
