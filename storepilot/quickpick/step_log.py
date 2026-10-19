@@ -6,18 +6,21 @@ A failed step is "recovered" when the same action on the same target
     pick chips_packet -> grasp failed, then pick chips_packet -> picked
 """
 
+from store_agent.order_tracker import basket_item as shared_basket_item
+
 
 def basket_item(entry):
-    """Item a successful place_item(basket) step put in the basket, else None.
-    Reads the structured "item" field; orders saved before it existed only have the
-    robot's message ("placed X in basket")."""
+    """Item a step put in the basket, else None: a pick_item the robot reported in the
+    basket (structured fields). Orders saved before the structured fields existed only
+    have the robot's message on place_item ("placed X in basket")."""
+    item = shared_basket_item(entry)
+    if item:
+        return item
     result = entry.get("result") or {}
-    if entry.get("tool") != "place_item" or not result.get("success"):
+    if entry.get("tool") != "place_item" or not result.get("success") or result.get("item"):
         return None
-    if (entry.get("input") or {}).get("target", result.get("target")) != "basket":
+    if (entry.get("input") or {}).get("target") != "basket":
         return None
-    if result.get("item"):
-        return result["item"]
     message = result.get("message") or ""
     return message.split(" ")[1] if message.startswith("placed ") and " " in message else None
 

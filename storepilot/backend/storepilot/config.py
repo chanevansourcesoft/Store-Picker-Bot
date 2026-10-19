@@ -53,7 +53,7 @@ ROS_BATTERY_TOPIC = os.environ.get("ROS_BATTERY_TOPIC", "/ros_robot_controller/b
 # Live-mode safety switches. Both are OFF unless the operator turns them on.
 ENABLE_MOTION = _flag("STOREPILOT_ENABLE_MOTION")
 JETSON_STOP_CONFIRMED = _flag("JETSON_STOP_CONFIRMED")
-# Pick / scan / place on the Jetson are timed stubs today. Until a real implementation returns
+# The GR00T pick (pick + place in basket, robot_server/arm.py) is a timed stub today. Until it returns
 # verified results, live missions cannot start and holding / pick results are not shown.
 MANIPULATION_VERIFIED = _flag("STOREPILOT_MANIPULATION_VERIFIED")
 # Live telemetry fields shown only after you checked them on the robot: pose, battery, speed.

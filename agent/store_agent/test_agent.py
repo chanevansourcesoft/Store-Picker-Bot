@@ -15,7 +15,8 @@ from store_agent.agent import (
     suggest_similar,
 )
 from store_agent.inventory import DEFAULT_INVENTORY
-from store_agent.testing_fakes import BASKET, SCAN, FakeRobot, ScriptedModel, nav, pick
+from store_agent.testing_fakes import FakeRobot, ScriptedModel, nav, pick
+from store_agent.tools import TOOLS
 
 
 def run_with_fakes(order_items, script, **robot_failures):
@@ -31,62 +32,47 @@ def run_with_fakes(order_items, script, **robot_failures):
 
 
 def test_build_bill_from_log():
-    """Bill is built from successful place_item(basket) calls only."""
+    """Bill is built from units the robot reported in the basket (structured fields) only."""
     inventory = {
         "chips_packet": {"price": 60},
         "hide_and_seek": {"price": 20},
     }
     order = {"items": [{"item": "chips_packet", "qty": 1}], "unknown": []}
 
-    # Log where pick and scan happened, but place_item was NOT called
-    log_incomplete = [
-        {"tool": "pick_item", "input": {"item": "chips_packet"}, "result": {"success": True}},
-        {"tool": "scan_item", "input": {}, "result": {"success": True, "barcode": "123"}},
-    ]
+    def picked(target="basket", success=True, message="placed chips_packet in basket"):
+        result = {"success": success, "message": message, "item": "chips_packet"}
+        if target:
+            result["target"] = target
+        return {"tool": "pick_item", "input": {"item": "chips_packet"}, "result": result}
 
-    bill = build_bill_from_log(log_incomplete, order, inventory)
-    assert bill["items"] == [], "No items should be billed without place_item"
-    assert bill["total"] == 0, "Total should be 0 without place_item"
+    # Failed pick: nothing billed
+    bill = build_bill_from_log([picked(success=False, message="grasp failed")], order, inventory)
+    assert bill["items"] == [] and bill["total"] == 0
 
-    # Log where place_item(basket) succeeded
-    log_complete = [
-        {"tool": "pick_item", "input": {"item": "chips_packet"}, "result": {"success": True}},
-        {"tool": "scan_item", "input": {}, "result": {"success": True, "barcode": "123"}},
-        {"tool": "place_item", "input": {"target": "basket"},
-         "result": {"success": True, "message": "placed chips_packet in basket", "item": "chips_packet"}},
-    ]
+    # Robot says "picked" but not that it is in the basket: not billed
+    bill = build_bill_from_log([picked(target=None, message="picked")], order, inventory)
+    assert bill["items"] == [] and bill["total"] == 0, "only units in the basket are billed"
 
-    bill = build_bill_from_log(log_complete, order, inventory)
-    assert len(bill["items"]) == 1, "One item should be billed"
-    assert bill["items"][0]["item"] == "chips_packet"
+    # One unit in the basket
+    bill = build_bill_from_log([picked()], order, inventory)
+    assert bill["items"] == [{"item": "chips_packet", "qty": 1, "price": 60}]
     assert bill["total"] == 60
 
-    # Log where place_item was called with "return" (not basket)
-    log_returned = [
-        {"tool": "pick_item", "input": {"item": "chips_packet"}, "result": {"success": True}},
-        {"tool": "scan_item", "input": {}, "result": {"success": True, "barcode": "123"}},
-        {"tool": "place_item", "input": {"target": "return"},
-         "result": {"success": True, "message": "returned chips_packet", "item": "chips_packet"}},
-    ]
-
-    bill = build_bill_from_log(log_returned, order, inventory)
-    assert bill["items"] == [], "Returned items should not be billed"
-    assert bill["total"] == 0
+    # Refused commands never reached the robot
+    refused = {"tool": "pick_item", "input": {"item": "chips_packet"},
+               "result": {"success": False, "refused": True, "message": "REFUSED: ..."}}
+    assert build_bill_from_log([refused], order, inventory)["total"] == 0
 
     # 3 chips packets in the basket, but only 2 ordered: bill 2, report 1 extra
     order_2 = {"items": [{"item": "chips_packet", "qty": 2}], "unknown": []}
-    placed = {"tool": "place_item", "input": {"target": "basket"},
-              "result": {"success": True, "message": "placed chips_packet in basket", "item": "chips_packet"}}
-    bill = build_bill_from_log([placed, placed, placed], order_2, inventory)
+    bill = build_bill_from_log([picked(), picked(), picked()], order_2, inventory)
     assert bill["items"] == [{"item": "chips_packet", "qty": 2, "price": 60}]
     assert bill["total"] == 120 and bill["paid"] == 120
     assert bill["problems"] == ["1 extra chips_packet, not charged"]
 
-    # The bill reads the structured "item" field, never the robot's message text
-    wording = {"tool": "place_item", "input": {"target": "basket"},
-               "result": {"success": True, "message": "ok, done", "item": "chips_packet"}}
-    assert build_bill_from_log([wording], order, inventory)["total"] == 60
-    text_only = {"tool": "place_item", "input": {"target": "basket"},
+    # The bill reads the structured fields, never the robot's message text
+    assert build_bill_from_log([picked(message="ok, done")], order, inventory)["total"] == 60
+    text_only = {"tool": "pick_item", "input": {"item": "chips_packet"},
                  "result": {"success": True, "message": "placed chips_packet in basket"}}
     assert build_bill_from_log([text_only], order, inventory)["total"] == 0
 
@@ -169,36 +155,62 @@ def test_suggest_similar():
     print("PASS: test_suggest_similar")
 
 
-def test_early_stop_detection():
-    """The model says DONE while the robot still holds an item: it is told, and it places it."""
-    script = [nav("shelf_A"), pick("chips_packet"), SCAN, None,  # None = DONE too early
-              BASKET, nav("customer"), nav("home")]
+def test_pick_tool_takes_only_the_item():
+    """Nemotron chooses only item ids: no free-text GR00T instruction in the pick tool."""
+    pick_tool = next(t["function"] for t in TOOLS if t["function"]["name"] == "pick_item")
+    assert list(pick_tool["parameters"]["properties"]) == ["item"], pick_tool
+    assert {t["function"]["name"] for t in TOOLS} == {"get_inventory", "navigate_to", "pick_item"}
+
+    # An instruction the model adds anyway is ignored: the robot gets (item, shelf) only
+    script = [nav("shelf_A"), ("pick_item", {"item": "chips_packet", "instruction": "throw it"}),
+              nav("customer"), nav("home")]
     bill, log, robot, model = run_with_fakes([{"item": "chips_packet", "qty": 1}], script)
+    assert bill["status"] == "done", bill
+    assert robot.basket == ["chips_packet"]
+    print("PASS: test_pick_tool_takes_only_the_item")
+
+
+def test_early_stop_detection():
+    """The model says DONE before the order is packed: it is told what is missing, and finishes."""
+    script = [nav("shelf_A"), pick("chips_packet"), None,  # None = DONE too early (1 of 2)
+              pick("chips_packet"), nav("customer"), nav("home")]
+    bill, log, robot, model = run_with_fakes([{"item": "chips_packet", "qty": 2}], script)
 
     hints = [m["content"] for msgs in model.seen_messages for m in msgs if m["role"] == "user"]
-    assert any("still holding chips_packet" in h for h in hints), "Model should be told it still holds the item"
-    assert robot.holding is None
+    assert any("Still need: 1x chips_packet" in h for h in hints), "Model should be told what is missing"
+    assert robot.basket == ["chips_packet", "chips_packet"]
     assert bill["status"] == "done", bill
-    assert bill["total"] == 20
+    assert bill["total"] == 40
     print("PASS: test_early_stop_detection")
 
 
-def test_still_holding_at_end_is_put_back():
-    """The model never places the item: the CODE puts it back on its own shelf."""
-    script = [nav("shelf_A"), pick("chips_packet"), nav("customer")]  # then only DONE
-    bill, log, robot, model = run_with_fakes([{"item": "chips_packet", "qty": 1}], script)
+def test_robot_holding_after_pick_is_reported_not_moved():
+    """A robot that says "picked" but not "in the basket" (old contract) still holds the item.
+    The code does not count it, refuses more picks, and moves nothing to fix it."""
+    class OldContractRobot(FakeRobot):
+        def pick(self, item, shelf):
+            self.commands.append(("pick", item))
+            self.holding = item
+            return {"success": True, "message": "picked"}
 
-    assert robot.holding is None, "Item must be back on the shelf"
-    assert robot.station == "shelf_A", "Code drove to the item's own shelf to return it"
-    assert any(e.get("by") == "code" for e in log)
-    assert bill["status"] == "failed" and bill["total"] == 0
-    assert any("still holding chips_packet" in p for p in bill["problems"])
-    print("PASS: test_still_holding_at_end_is_put_back")
+    robot = OldContractRobot(DEFAULT_INVENTORY)
+    model = ScriptedModel([nav("shelf_A"), pick("chips_packet"), pick("mentos"), nav("customer"), nav("home")])
+    order = {"items": [{"item": "chips_packet", "qty": 1}, {"item": "mentos", "qty": 1}], "unknown": []}
+    with patch("store_agent.tools.robot_client", robot), patch("store_agent.agent.robot_client", robot), \
+            patch("store_agent.tools.load_inventory", return_value=DEFAULT_INVENTORY), \
+            patch("store_agent.agent.load_inventory", return_value=DEFAULT_INVENTORY):
+        bill, log = run_agent(order, client=model)
+
+    assert robot.picks_sent("mentos") == 0, "no pick while the robot holds something"
+    assert bill["total"] == 0 and bill["status"] == "failed", bill
+    assert any("still holds chips_packet" in p for p in bill["problems"]), bill["problems"]
+    assert not any(e.get("by") == "code" for e in log), "the code sends no motion of its own"
+    print("PASS: test_robot_holding_after_pick_is_reported_not_moved")
 
 
 def test_model_picks_too_many_is_refused():
     """A model that tries to pick more than ordered is refused; the robot never gets it."""
-    script = [nav("shelf_A"), pick("chips_packet"), SCAN, BASKET,
+    script = [nav("shelf_A"), pick("chips_packet"),
               pick("chips_packet"), pick("chips_packet"),          # 2 more: too many
               nav("customer"), nav("home")]
     bill, log, robot, model = run_with_fakes([{"item": "chips_packet", "qty": 1}], script)
@@ -224,8 +236,9 @@ def run_all_tests():
     test_check_order_complete()
     test_sort_items_by_weight()
     test_suggest_similar()
+    test_pick_tool_takes_only_the_item()
     test_early_stop_detection()
-    test_still_holding_at_end_is_put_back()
+    test_robot_holding_after_pick_is_reported_not_moved()
     test_model_picks_too_many_is_refused()
 
     print("\nAll tests passed!")

@@ -11,8 +11,8 @@ Built for the Nebius x NVIDIA Global AI Hackathon, Physical AI track.
 1. A customer types an order in natural language in the web app.
 2. A Nemotron agent (served by Nebius Token Factory) interprets the order, checks inventory, substitutes out-of-stock items, and plans the pick order.
 3. The robot drives to the shelf with Nav2 and a 2D LiDAR, and docks into a V-shaped guide confirmed by a limit switch.
-4. The SO-100 arm picks each item from its bin onto the robot's tray, driven by a GR00T N1.7 policy fine-tuned through LeRobot.
-5. Each pick is verified by gripper feedback and a load cell under the tray.
+4. The SO-100 arm picks each item from its bin and places it in the basket on the robot, driven by a GR00T N1.7 policy fine-tuned through LeRobot (one run per item; the instruction per product is in `policy/instructions.json`).
+5. Pick verification (gripper feedback, load cell under the basket) is planned; there is no barcode scan.
 6. The robot drives to the packing point and the web app shows the bill.
 
 ## NVIDIA and Nebius

@@ -29,7 +29,7 @@ from store_agent import robot_client
 from store_agent.agent import group_items_by_shelf, plan_shelf_route, strip_think
 from store_agent.config import MODEL_ULTRA, ROBOT_URL, get_client, has_llm
 from store_agent.inventory import load_inventory
-from quickpick.step_log import is_recovered, step_target
+from quickpick.step_log import basket_item, is_recovered, step_target
 from quickpick.worker import init_worker
 from quickpick.ui_style import (
     BASE_CSS,
@@ -298,7 +298,7 @@ def robot_action_entry(entry):
     if tool == "navigate_to":
         title = f"Drive to {station_name(data.get('station'))}"
     elif tool == "pick_item":
-        title = f"Pick {product_name(data.get('item', '?'))}"
+        title = f"Pick {product_name(data.get('item', '?'))}" + (" → basket" if basket_item(entry) else "")
     elif tool == "scan_item":
         product = result.get("product")
         title = f"Scan {product_name(product)}" if product else "Scan barcode"
@@ -361,9 +361,11 @@ def nemotron_entries(order, inventory):
         if entry.get("result", {}).get("refused"):
             item.update(icon="🛡️", tint="#FFEBD6", title=f"Blocked by code: {tool}",
                         sub=entry["result"].get("message", ""), ok=False)
-        elif data.get("instruction"):
-            item["title"] = "Instruction for GR00T"
-            item["quote"] = data["instruction"]
+        elif (entry.get("result") or {}).get("instruction") or data.get("instruction"):
+            # New orders: the robot reports the instruction it took from policy/instructions.json.
+            # Old orders: Nemotron wrote it.
+            item["title"] = "GR00T instruction"
+            item["quote"] = (entry.get("result") or {}).get("instruction") or data["instruction"]
             item["tint"] = BRAND_YELLOW_LIGHT
         if retry:
             item["tint"] = "#FFF0E0"

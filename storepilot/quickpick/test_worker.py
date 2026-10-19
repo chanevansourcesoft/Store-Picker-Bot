@@ -14,37 +14,26 @@ from unittest.mock import patch
 from quickpick import store, worker
 from store_agent.inventory import DEFAULT_INVENTORY
 from quickpick.test_store import reset_inventory, setup_test_db, teardown_test_db
-from store_agent.testing_fakes import BASKET, RETURN, SCAN, FakeRobot, ScriptedModel, nav, pick
+from store_agent.testing_fakes import FakeRobot, ScriptedModel, nav, pick
 
-# The exact tool calls the model made in demo order #3 (it lost count
-# after scan failures and packed 3 chips packets for an order of 2).
+# Demo order #3, replayed with one pick = pick AND place in the basket: the model
+# loses count after failures and keeps asking for more chips packets than ordered.
 ORDER_3_SCRIPT = [
-    nav("shelf_A"), nav("shelf_A"), pick("chips_packet"), SCAN, RETURN,
-    pick("chips_packet"), SCAN, BASKET,
-    pick("chips_packet"), SCAN, RETURN, pick("chips_packet"), pick("chips_packet"), SCAN,
-    nav("shelf_B"), pick("chips_packet"), RETURN, RETURN, pick("chips_packet"),
-    nav("shelf_A"), pick("chips_packet"), SCAN, nav("shelf_A"), SCAN, BASKET,
-    pick("chips_packet"), SCAN, BASKET,
-    nav("shelf_B"), pick("hide_and_seek"), SCAN, BASKET,
-    nav("shelf_B"), pick("frooti"), SCAN, BASKET,
+    nav("shelf_A"), nav("shelf_A"), pick("chips_packet"),
+    pick("chips_packet"), pick("chips_packet"), pick("chips_packet"), pick("chips_packet"),
+    nav("shelf_B"), pick("chips_packet"), pick("hide_and_seek"), pick("hide_and_seek"),
+    nav("shelf_B"), pick("frooti"),
     nav("customer"), nav("home"),
 ]
 
 
-def fake_steps(item, target="basket"):
-    """Steps the agent logs for one item: pick, scan, place."""
-    if target == "basket":
-        place_msg = f"placed {item} in basket"
+def fake_steps(item, ok=True):
+    """Step the agent logs for one unit: one pick that places it in the basket (or fails)."""
+    if ok:
+        result = {"success": True, "message": f"placed {item} in basket", "item": item, "target": "basket"}
     else:
-        place_msg = f"returned {item} to shelf"
-    return [
-        {"tool": "pick_item", "input": {"item": item, "shelf": "shelf_A"},
-         "result": {"success": True, "message": "picked", "item": item}},
-        {"tool": "scan_item", "input": {},
-         "result": {"success": True, "barcode": "123"}},
-        {"tool": "place_item", "input": {"target": target},
-         "result": {"success": True, "message": place_msg, "item": item, "target": target}},
-    ]
+        result = {"success": False, "message": "grasp failed", "item": item}
+    return [{"tool": "pick_item", "input": {"item": item}, "result": result}]
 
 
 def make_fake_agent(steps):
@@ -85,8 +74,8 @@ def test_stock_goes_down_after_order():
         reset_inventory()
 
 
-def test_returned_item_keeps_stock():
-    """An item put back on the shelf ("return") must not reduce stock."""
+def test_failed_pick_keeps_stock():
+    """A failed pick put nothing in the basket: stock must not go down."""
     db_path = setup_test_db()
     reset_inventory()
     try:
@@ -94,13 +83,13 @@ def test_returned_item_keeps_stock():
         order_id, problems = store.create_order([{"item": "chips_packet", "qty": 1}])
         assert order_id, problems
 
-        steps = fake_steps("chips_packet", target="return")
+        steps = fake_steps("chips_packet", ok=False)
         with patch("quickpick.worker.run_agent", make_fake_agent(steps)):
             worker.process_single_order(order_id)
 
         assert store.get_stock()["chips_packet"] == before["chips_packet"]
 
-        print("PASS: test_returned_item_keeps_stock")
+        print("PASS: test_failed_pick_keeps_stock")
 
     finally:
         teardown_test_db(db_path)
@@ -108,7 +97,7 @@ def test_returned_item_keeps_stock():
 
 
 def test_replay_order_3_is_not_overpacked():
-    """Replay order #3 (several scan failures, model loses count). The code must stop
+    """Replay order #3 (navigation and grasp failures, model loses count). The code must stop
     the mistakes: exactly 2 chips packets, bill Rs 85 or less, stock down by exactly 2."""
     db_path = setup_test_db()
     reset_inventory()
@@ -118,8 +107,8 @@ def test_replay_order_3_is_not_overpacked():
         order_id, problems = store.create_order(items)
         assert order_id, problems
 
-        # Same failures as order #3: 1st navigation, 4th grasp, scans 1, 3 and 4
-        robot = FakeRobot(DEFAULT_INVENTORY, nav_fail=[1], pick_fail=[4], scan_fail=[1, 3, 4])
+        # Failures: 1st navigation, 1st grasp
+        robot = FakeRobot(DEFAULT_INVENTORY, nav_fail=[1], pick_fail=[1])
         model = ScriptedModel(ORDER_3_SCRIPT)
         with patch("store_agent.tools.robot_client", robot), patch("store_agent.agent.robot_client", robot), \
                 patch("store_agent.agent.get_client", return_value=model):
@@ -128,9 +117,7 @@ def test_replay_order_3_is_not_overpacked():
         order = store.get_order(order_id)
         bill = order["bill"]
         after = store.get_stock()
-        chips_in_basket = sum(1 for e in order["step_log"] if e["tool"] == "place_item"
-                              and e["input"].get("target") == "basket" and e["result"].get("success")
-                              and e["result"].get("item") == "chips_packet")
+        chips_in_basket = robot.basket.count("chips_packet")
 
         assert chips_in_basket == 2, f"basket has {chips_in_basket} chips packets"
         assert bill["total"] <= 85, bill
@@ -143,9 +130,8 @@ def test_replay_order_3_is_not_overpacked():
         # The mistakes were refused by the code and never reached the robot
         refused = [e for e in order["step_log"] if e["result"].get("refused")]
         assert refused, "Some commands should be refused"
-        assert not any("already holding" in e for e in robot.errors), robot.errors
-        assert not any("cannot return" in e for e in robot.errors), robot.errors
-        assert robot.holding is None
+        assert robot.picks_sent("chips_packet") == 3, "1 failed + 2 good: the extra picks were refused"
+        assert sorted(robot.basket) == ["chips_packet", "chips_packet", "frooti", "hide_and_seek"], robot.basket
 
         print(f"PASS: test_replay_order_3_is_not_overpacked ({len(refused)} commands refused)")
 
@@ -199,7 +185,7 @@ def run_all_tests():
     print("Running worker tests...\n")
 
     test_stock_goes_down_after_order()
-    test_returned_item_keeps_stock()
+    test_failed_pick_keeps_stock()
     test_replay_order_3_is_not_overpacked()
     test_extra_item_does_not_reduce_stock()
     test_stock_uses_item_field_not_message()

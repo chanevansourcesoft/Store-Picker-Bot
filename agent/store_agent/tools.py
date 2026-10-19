@@ -1,14 +1,18 @@
 """
 Step 2.3: Tools that Nemotron can call.
 
-Contract v2: multiple shelves, basket instead of bag.
+Contract v2: multiple shelves, basket.
 
 TOOLS     -> the list we send to Nemotron (name, what it does, inputs)
 run_tool  -> runs the tool Nemotron picked and returns the result as text
 
+pick_item runs ONE GR00T episode on the robot: pick the item and place it in the
+basket. Nemotron only chooses the item id; the robot looks up the GR00T instruction
+in policy/instructions.json. There is no barcode scan.
+
 With an OrderTracker, run_tool first checks the guards (no picking too many,
-no basket for a complete item, return only at the item's own shelf).
-A refused command is NOT sent to the robot: Nemotron gets "REFUSED: ..." back.
+no picking while the robot holds something). A refused command is NOT sent to
+the robot: Nemotron gets "REFUSED: ..." back.
 """
 
 import json
@@ -47,45 +51,19 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "pick_item",
-            "description": "Tell the robot arm to pick ONE unit of a product from its shelf. The arm can hold only one item at a time. Write a short instruction for the GR00T pick policy.",
+            "description": "The robot arm picks ONE unit of a product from its shelf and places it in the customer basket "
+                           "(one complete arm motion). The robot must be at the product's shelf. "
+                           "On success the unit is in the basket. On failure nothing is in the basket and you may retry.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "item": {"type": "string", "description": "Product name from the inventory"},
-                    "instruction": {"type": "string", "description": "Short text instruction for the pick policy, e.g. 'pick up the chips packet'"}
+                    "item": {"type": "string", "description": "Product id from the inventory, e.g. 'chips_packet'"},
                 },
                 "required": ["item"],
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "scan_item",
-            "description": "Scan the barcode of the item the arm is holding. Returns the barcode and which product it belongs to.",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "place_item",
-            "description": "Put the held item in the customer basket ('basket') or back on its shelf ('return').",
-            "parameters": {
-                "type": "object",
-                "properties": {"target": {"type": "string", "enum": ["basket", "return"]}},
-                "required": ["target"],
-            },
-        },
-    },
 ]
-
-
-def _product_for_barcode(barcode, inventory):
-    for name, info in inventory.items():
-        if info["barcode"] == barcode:
-            return name
-    return None
 
 
 def refused(message):
@@ -102,17 +80,10 @@ def run_tool(name, args, tracker=None):
     inventory = load_inventory()
 
     # Guards: stop mistakes before they reach the robot
-    if tracker is not None:
-        if name == "pick_item":
-            reason = tracker.check_pick(args.get("item", ""))
-        elif name == "place_item":
-            reason = tracker.check_place(args.get("target", ""))
-        else:
-            reason = None
+    if tracker is not None and name == "pick_item":
+        reason = tracker.check_pick(args.get("item", ""))
         if reason:
             return json.dumps(refused(reason))
-
-    held = tracker.holding if tracker is not None else None
 
     if name == "get_inventory":
         result = inventory
@@ -123,30 +94,18 @@ def run_tool(name, args, tracker=None):
 
     elif name == "pick_item":
         item = args.get("item", "")
-        instruction = args.get("instruction")
         if item not in inventory:
             result = {"success": False, "message": f"{item} is not in the inventory"}
         else:
-            shelf = inventory[item]["shelf"]
-            result = robot_client.pick(item, shelf, instruction)
-
-    elif name == "scan_item":
-        result = robot_client.scan()
-        if result.get("barcode"):
-            result["product"] = _product_for_barcode(result["barcode"], inventory)
-
-    elif name == "place_item":
-        result = robot_client.place(args.get("target", ""))
+            result = robot_client.pick(item, inventory[item]["shelf"])
 
     else:
         result = {"success": False, "message": f"unknown tool {name}"}
 
-    # Structured result: the bill, the stock and the tracker read "item", never the message text.
-    # An older robot server may not send it: then it is the item we asked for / the robot held.
-    if result.get("success") and name in ("pick_item", "place_item") and not result.get("item"):
-        result["item"] = args.get("item") if name == "pick_item" else held
-    if name == "place_item" and result.get("success"):
-        result.setdefault("target", args.get("target"))
+    # Structured result: the bill, the stock and the tracker read "item" and "target"
+    # (where the unit went), never the message text.
+    if result.get("success") and name == "pick_item" and not result.get("item"):
+        result["item"] = args.get("item")
 
     if tracker is not None:
         tracker.record(name, args, result)
@@ -158,8 +117,6 @@ if __name__ == "__main__":
     print("health   :", robot_client.health())
     print("status   :", robot_client.status())
     print("navigate :", run_tool("navigate_to", {"station": "shelf_A"}))
-    print("pick     :", run_tool("pick_item", {"item": "chips_packet", "instruction": "pick up the chips packet"}))
-    print("scan     :", run_tool("scan_item", {}))
-    print("place    :", run_tool("place_item", {"target": "basket"}))
+    print("pick     :", run_tool("pick_item", {"item": "chips_packet"}))
     print("navigate :", run_tool("navigate_to", {"station": "customer"}))
     print("navigate :", run_tool("navigate_to", {"station": "home"}))

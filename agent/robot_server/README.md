@@ -103,32 +103,35 @@ curl -X POST http://localhost:8000/navigate \
 Stations: `home`, `shelf_A`, `shelf_B`, `shelf_C`, `customer`
 
 ### POST /pick
-Pick an item from a shelf:
+Pick ONE unit of an item and place it in the basket. This is one GR00T run: from the
+arm's rest pose, pick, place in the basket, back to the rest pose. Send only the item id
+and its shelf; the GR00T instruction is looked up in `policy/instructions.json` (an
+`instruction` field in the request is ignored). The robot must be at that shelf.
 ```bash
 curl -X POST http://localhost:8000/pick \
   -H "Content-Type: application/json" \
-  -d '{"item": "chips_packet", "shelf": "shelf_A", "instruction": "pick up the chips packet"}'
+  -d '{"item": "chips_packet", "shelf": "shelf_A"}'
 ```
-
-### POST /scan
-Scan the barcode of held item:
-```bash
-curl -X POST http://localhost:8000/scan
+Success (the unit is in the basket, the arm is empty):
+```json
+{"success": true, "message": "placed chips_packet in basket", "item": "chips_packet", "shelf": "shelf_A",
+ "target": "basket", "instruction": "pick up the chips packet and place it in the basket", "barcode": null}
 ```
+Failure (nothing in the basket, the arm is empty, a retry is allowed):
+`{"success": false, "message": "grasp failed", "item": "chips_packet"}`.
+Callers count a unit as packed only from `"target": "basket"` and `"item"`, never from the message text.
+`barcode` is always `null` for now (no scanning); it is there for a scanner later.
 
 ### POST /place
-Place item in basket or return to shelf:
+Return one unit of an item from the basket to its own shelf (the robot must be at that shelf).
+Putting an item in the basket is part of `/pick`; there is no `/scan`.
 ```bash
-# Put in basket
 curl -X POST http://localhost:8000/place \
   -H "Content-Type: application/json" \
-  -d '{"target": "basket"}'
-
-# Return to shelf
-curl -X POST http://localhost:8000/place \
-  -H "Content-Type: application/json" \
-  -d '{"target": "return"}'
+  -d '{"target": "return", "item": "chips_packet"}'
 ```
+The mock robot does it. The Jetson answers `"success": false` ("not available on the robot yet")
+until there is a GR00T skill for it.
 
 ### POST /stop
 Emergency stop:
@@ -187,60 +190,20 @@ stations:
 - Restart the server after you change the file.
 - Test the file: `python -m robot_server.test_stations` (from `agent/`).
 
-## Implementing the Stubs
+## Connecting the GR00T policy (the one stub left)
 
-The `jetson_server.py` has working Nav2 code but stubs for:
+Navigation is real (Nav2). The arm is the one stub: `arm.py`.
 
-1. **Pick item** - Integrate your GR00T policy or arm controller
-2. **Scan barcode** - Integrate your barcode scanner
-3. **Place item** - Integrate your arm controller
+- `/pick` looks up the instruction for the item in `policy/instructions.json` (`instructions.py`),
+  then calls `arm.run_pick(item, instruction)` in a worker thread.
+- `run_pick` must run ONE GR00T episode (rest pose -> pick -> place in basket -> rest pose) and
+  return `(ok, message)`. Today it waits 1.5 s and returns success without moving anything.
+- Replace its body with the pick function from `policy/`, for example
+  `from policy.pick import pick_item; return pick_item(item, instruction)` (name to be agreed).
+- If it raises, `/pick` answers a failure and the server keeps running.
+- Only after this is real and tested, set `STOREPILOT_MANIPULATION_VERIFIED=1` on the dashboard.
 
-Look for `# TODO:` comments in the code.
-
-### Example: Integrating GR00T Policy
-
-```python
-@app.post("/pick")
-async def pick_item(req: PickRequest):
-    # ... existing checks ...
-
-    # Call your GR00T policy
-    from groot_client import execute_pick_skill
-    success = await execute_pick_skill(
-        item=req.item,
-        shelf=req.shelf,
-        instruction=req.instruction  # Natural language for the policy
-    )
-
-    if success:
-        robot_state.holding = req.item
-        return {"success": True, "message": f"Picked {req.item}"}
-    else:
-        return {"success": False, "message": "Pick failed"}
-```
-
-### Example: Integrating Barcode Scanner
-
-```python
-@app.post("/scan")
-async def scan_item():
-    # ... existing checks ...
-
-    # Call your barcode scanner
-    import cv2
-    from pyzbar import pyzbar
-
-    cap = cv2.VideoCapture(0)
-    ret, frame = cap.read()
-    barcodes = pyzbar.decode(frame)
-    cap.release()
-
-    if barcodes:
-        barcode = barcodes[0].data.decode("utf-8")
-        return {"success": True, "barcode": barcode, "product": item}
-    else:
-        return {"success": False, "message": "No barcode found"}
-```
+Test without the arm: `python -m robot_server.test_jetson_pick` (from `agent/`).
 
 ## Troubleshooting
 

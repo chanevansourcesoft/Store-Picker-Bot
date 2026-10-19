@@ -36,12 +36,13 @@ def test_packs_whole_order():
     print("PASS: test_packs_whole_order")
 
 
-def test_retries_grasp_and_scan_failures():
-    bill, log, robot = run_autopilot([{"item": "frooti", "qty": 1}], pick_fail=(1,), scan_fail=(1,))
+def test_retries_grasp_failures():
+    bill, log, robot = run_autopilot([{"item": "frooti", "qty": 1}], pick_fail=(1,))
     assert bill["status"] == "done", bill
     assert robot.picks_sent("frooti") == 2, robot.commands
-    assert robot.scan_count == 2, robot.commands
-    print("PASS: test_retries_grasp_and_scan_failures")
+    assert robot.basket == ["frooti"]
+    assert all(set(e["input"]) == {"item"} for e in log if e["tool"] == "pick_item"), "item id only"
+    print("PASS: test_retries_grasp_failures")
 
 
 def test_gives_up_and_still_delivers():
@@ -79,7 +80,7 @@ def test_offline_parser():
 def run_all_tests():
     print("Running autopilot tests...\n")
     test_packs_whole_order()
-    test_retries_grasp_and_scan_failures()
+    test_retries_grasp_failures()
     test_gives_up_and_still_delivers()
     test_navigation_retry()
     test_offline_parser()

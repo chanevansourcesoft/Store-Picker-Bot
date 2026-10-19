@@ -13,6 +13,7 @@ from typing import Callable, Optional
 from quickpick import store
 from store_agent import robot_client
 from store_agent.agent import run_agent
+from store_agent.order_tracker import basket_item
 from store_agent.inventory import load_inventory
 
 # Worker state
@@ -24,7 +25,7 @@ _worker_lock = threading.Lock()
 def process_single_order(order_id: int, on_step: Optional[Callable] = None):
     """
     Process one order. Updates the database with status, step_log, etc.
-    Reduces stock only after items are successfully placed in basket,
+    Reduces stock only after the robot reports a unit in the basket,
     and never more than the ordered qty (an extra item is not sold).
     """
     order = store.get_order(order_id)
@@ -67,35 +68,19 @@ def process_single_order(order_id: int, on_step: Optional[Callable] = None):
 
         elif tool == "pick_item":
             item = entry["input"].get("item", "")
-            if result.get("success"):
+            item_name = basket_item(entry)   # structured: the unit the robot put in the basket
+            if item_name:
+                # Reduce stock for it, never more than ordered (an extra unit is not sold)
+                if taken.get(item_name, 0) < ordered.get(item_name, 0):
+                    taken[item_name] = taken.get(item_name, 0) + 1
+                    store.reduce_stock(item_name, 1)
+                    store.update_order_task(order_id, f"Packed {item_name}")
+                else:
+                    store.update_order_task(order_id, f"Extra {item_name} (not charged)")
+            elif result.get("success"):
                 store.update_order_task(order_id, f"Picked {item}")
             else:
                 store.update_order_task(order_id, f"Pick failed: {item}")
-
-        elif tool == "scan_item":
-            if result.get("success"):
-                product = result.get("product", "?")
-                store.update_order_task(order_id, f"Scanned {product}")
-            else:
-                store.update_order_task(order_id, "Scan failed")
-
-        elif tool == "place_item":
-            target = entry["input"].get("target", "")
-            if result.get("success"):
-                if target == "basket":
-                    # Reduce stock for the item the robot put in the basket (structured field)
-                    item_name = result.get("item")
-                    if item_name:
-                        if taken.get(item_name, 0) < ordered.get(item_name, 0):
-                            taken[item_name] = taken.get(item_name, 0) + 1
-                            store.reduce_stock(item_name, 1)
-                            store.update_order_task(order_id, f"Packed {item_name}")
-                        else:
-                            store.update_order_task(order_id, f"Extra {item_name} (not charged)")
-                else:
-                    store.update_order_task(order_id, "Returned item")
-            else:
-                store.update_order_task(order_id, "Place failed")
 
         # Call the external callback if provided
         if on_step:

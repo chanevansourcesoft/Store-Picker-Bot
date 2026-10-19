@@ -1,8 +1,8 @@
 """
 Fakes for tests: a robot with scripted failures and a model that follows a script.
 
-FakeRobot works like the mock robot, but failures happen on chosen attempts
-(not random), so a test gives the same result every time.
+FakeRobot works like the mock robot (one pick = pick AND place in the basket), but
+failures happen on chosen attempts (not random), so a test gives the same result every time.
 
 ScriptedModel is a fake Nemotron client. It sends the given tool calls one by
 one, no matter what the results say (like a model that lost track), then "DONE".
@@ -13,13 +13,14 @@ from types import SimpleNamespace
 
 
 class FakeRobot:
-    def __init__(self, inventory, nav_fail=(), pick_fail=(), scan_fail=()):
-        """nav_fail / pick_fail / scan_fail: attempt numbers (1, 2, ...) that fail."""
+    def __init__(self, inventory, nav_fail=(), pick_fail=()):
+        """nav_fail / pick_fail: attempt numbers (1, 2, ...) that fail."""
         self.inventory = inventory
-        self.nav_fail, self.pick_fail, self.scan_fail = set(nav_fail), set(pick_fail), set(scan_fail)
-        self.nav_count = self.pick_count = self.scan_count = 0
+        self.nav_fail, self.pick_fail = set(nav_fail), set(pick_fail)
+        self.nav_count = self.pick_count = 0
         self.station = "home"
         self.holding = None
+        self.basket = []    # units placed in the basket, in order
         self.commands = []  # every command that reached the robot: (name, args)
         self.errors = []    # every error message the robot answered
 
@@ -43,7 +44,8 @@ class FakeRobot:
         self.station = station
         return {"success": True, "message": f"arrived at {station}"}
 
-    def pick(self, item, shelf, instruction=None):
+    def pick(self, item, shelf):
+        """One GR00T run: pick the item and place it in the basket."""
         self.commands.append(("pick", item))
         if self.holding:
             return self._fail(f"already holding {self.holding}")
@@ -52,28 +54,17 @@ class FakeRobot:
         self.pick_count += 1
         if self.pick_count in self.pick_fail:
             return self._fail("grasp failed")
-        self.holding = item
-        return {"success": True, "message": "picked", "item": item}
+        self.basket.append(item)
+        return {"success": True, "message": f"placed {item} in basket", "item": item, "shelf": shelf,
+                "target": "basket", "barcode": None}
 
-    def scan(self):
-        self.commands.append(("scan", None))
-        if not self.holding:
-            return self._fail("not holding anything")
-        self.scan_count += 1
-        if self.scan_count in self.scan_fail:
-            return {"success": False, "barcode": None, "message": "barcode not readable"}
-        return {"success": True, "barcode": self.inventory[self.holding]["barcode"]}
-
-    def place(self, target):
-        self.commands.append(("place", target))
-        if not self.holding:
-            return self._fail("not holding anything")
-        item = self.holding
-        if target == "return" and self.station != self.inventory[item]["shelf"]:
+    def return_item(self, item):
+        self.commands.append(("return", item))
+        if item not in self.basket:
+            return self._fail(f"no {item} in the basket")
+        if self.station != self.inventory[item]["shelf"]:
             return self._fail(f"cannot return {item} here")
-        self.holding = None
-        if target == "basket":
-            return {"success": True, "message": f"placed {item} in basket", "item": item, "target": "basket"}
+        self.basket.remove(item)
         return {"success": True, "message": f"returned {item} to shelf", "item": item, "target": "return"}
 
     def picks_sent(self, item):
@@ -119,9 +110,4 @@ def nav(station):
 
 
 def pick(item):
-    return ("pick_item", {"item": item, "instruction": f"pick up the {item.replace('_', ' ')}"})
-
-
-SCAN = ("scan_item", {})
-BASKET = ("place_item", {"target": "basket"})
-RETURN = ("place_item", {"target": "return"})
+    return ("pick_item", {"item": item})

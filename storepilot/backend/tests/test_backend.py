@@ -34,7 +34,6 @@ INVENTORY = lambda: DEFAULT_INVENTORY  # noqa: E731
 
 def fast_sim(**kw):
     kw.setdefault("pick_fail", 0)
-    kw.setdefault("scan_fail", 0)
     kw.setdefault("nav_fail", 0)
     return SimRobot(INVENTORY, time_scale=0.02, seed=1, **kw)
 
@@ -80,9 +79,12 @@ def test_sim_moves_and_stops():
     pose = robot.fetch_status()["pose"]
     assert abs(pose["x"] - SIM_STATIONS["shelf_A"]["x"]) < 1e-6
     assert not robot.pick("frooti", "shelf_A")["success"], "must be at the item's own shelf"
-    assert robot.pick("chips_packet", "shelf_A")["success"]
-    assert robot.scan()["barcode"] == DEFAULT_INVENTORY["chips_packet"]["barcode"]
-    assert robot.place("basket")["message"] == "placed chips_packet in basket"
+    result = robot.pick("chips_packet", "shelf_A")   # one GR00T run: pick AND place in the basket
+    assert result["success"] and result["target"] == "basket" and result["item"] == "chips_packet", result
+    assert result["instruction"] == "pick up the chips packet and place it in the basket", result
+    assert robot.fetch_status()["holding"] is None
+    assert not hasattr(robot, "scan")
+    assert robot.return_item("chips_packet")["success"]
 
     slow = SimRobot(INVENTORY, time_scale=1.0, nav_fail=0)
     t = threading.Thread(target=lambda: setattr(slow, "result", slow.navigate("customer")))
@@ -116,7 +118,8 @@ def test_offline_mission_runs_after_confirm_only():
         assert done["packed"] == 3 and done["planner"].startswith("offline autopilot")
         texts = [e["text"] for e in store.recent_events(200, mission_id=draft["id"])]
         assert any(t.startswith("Mission plan validated") for t in texts)
-        assert any(t.startswith("Pick verified") for t in texts)
+        assert sum(" placed in basket (" in t for t in texts) == 3, texts
+        assert any("GR00T instruction “pick up the Frooti" in t for t in texts), texts
         assert any(t.startswith("Mission completed: 3/3") for t in texts)
         tel.shutdown()
     finally:
@@ -155,7 +158,7 @@ def test_stop_aborts_and_never_resumes_mission():
     for p in patches:
         p.start()
     try:
-        robot = SimRobot(INVENTORY, time_scale=0.3, pick_fail=0, scan_fail=0, nav_fail=0)
+        robot = SimRobot(INVENTORY, time_scale=0.3, pick_fail=0, nav_fail=0)
         store, robot, tel, m = services(adapter=robot)
         draft = m.submit_order("3 frooti")
         m.confirm(draft["id"])

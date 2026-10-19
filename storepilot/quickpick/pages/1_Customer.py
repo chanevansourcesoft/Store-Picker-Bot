@@ -22,6 +22,7 @@ from quickpick import store
 from store_agent import robot_client
 from store_agent.inventory import load_inventory
 from store_agent.order_parser import parse_order
+from quickpick.step_log import basket_item
 from quickpick.worker import init_worker
 from quickpick.ui_style import (
     BASE_CSS,
@@ -220,12 +221,8 @@ def matches_search(item, text):
 # ============ Tracking ============
 
 def count_basket_places(step_log):
-    return sum(
-        1 for e in step_log
-        if e.get("tool") == "place_item"
-        and e.get("input", {}).get("target") == "basket"
-        and e.get("result", {}).get("success")
-    )
+    """Units the robot put in the basket (one GR00T pick each)."""
+    return sum(1 for e in step_log if basket_item(e))
 
 
 def reached_customer(step_log):
@@ -297,6 +294,8 @@ def get_status_message(order):
         return "🔁", "Small problem. Nemotron is fixing it, please wait..."
     if tool == "navigate_to":
         return "🗄️", f"Robot reached {data.get('station', 'the shelf').replace('_', ' ').title()}"
+    if tool == "pick_item" and basket_item(last):
+        return "🧺", f"{name} is in your basket"
     if tool == "pick_item":
         return "🦾", f"Robot is picking your {name}"
     if tool == "scan_item":

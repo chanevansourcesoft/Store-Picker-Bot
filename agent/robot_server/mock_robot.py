@@ -18,11 +18,11 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from store_agent.inventory import load_catalog as load_inventory  # shelves and barcodes (no stock)
+from robot_server import instructions
+from store_agent.inventory import load_catalog as load_inventory  # shelves (no stock)
 
 # Chance that a step fails, so the agent can practice handling problems.
 PICK_FAIL_RATE = 0.10
-SCAN_FAIL_RATE = 0.10
 NAV_FAIL_RATE = 0.05
 FAKE_DELAY_SEC = 0.5
 NAV_DELAY_SEC = 1.0
@@ -44,7 +44,6 @@ app = FastAPI(title="Mock Robot Server (Contract v2)")
 state = {
     "busy": False,
     "holding": None,
-    "from_shelf": None,
     "station": "home",
     "pose": {"x": 0.0, "y": 0.0, "theta": 0.0},
     "battery": 100.0,
@@ -66,11 +65,12 @@ class NavigateRequest(BaseModel):
 class PickRequest(BaseModel):
     item: str
     shelf: str  # "shelf_A", "shelf_B", "shelf_C"
-    instruction: Optional[str] = None  # Text instruction for GR00T
+    instruction: Optional[str] = None  # ignored: the instruction comes from policy/instructions.json
 
 
 class PlaceRequest(BaseModel):
-    target: str  # "basket" or "return"
+    target: str  # only "return": one unit of `item` from the basket back to its shelf
+    item: Optional[str] = None
 
 
 def fail(message):
@@ -93,10 +93,9 @@ def count_pick_try(item):
     return state["pick_try"]
 
 
-def log_groot(req, attempt, result):
-    """One line per pick, e.g. [GR00T] pick up the chips packet (try 2) -> picked"""
-    text = req.instruction or f"pick {req.item}"
-    print(f"[GR00T] {text} (try {attempt}) -> {result['message']}", flush=True)
+def log_groot(instruction, attempt, result):
+    """One line per pick, e.g. [GR00T] pick up the chips packet and place it in the basket (try 2) -> ..."""
+    print(f"[GR00T] {instruction} (try {attempt}) -> {result['message']}", flush=True)
 
 
 def drain_battery(amount=0.1):
@@ -187,7 +186,8 @@ def navigate(req: NavigateRequest):
 
 @app.post("/pick")
 def pick(req: PickRequest):
-    """Pick an item. The instruction field is passed to GR00T policy."""
+    """Pick one unit and place it in the basket (one simulated GR00T run).
+    The GR00T instruction is looked up in policy/instructions.json, like on the Jetson."""
     if state["stopped"]:
         return fail("robot is stopped")
     if state["busy"]:
@@ -202,6 +202,11 @@ def pick(req: PickRequest):
         return fail(f"{req.item} is not on {req.shelf}")
     if not state["station"].startswith("shelf"):
         return fail(f"not at a shelf, currently at {state['station']}")
+    if state["station"] != req.shelf:
+        return fail(f"not at {req.shelf}, currently at {state['station']}")
+    instruction, problem = instructions.lookup(req.item, req.shelf)
+    if problem:
+        return fail(problem)
 
     attempt = count_pick_try(req.item)
 
@@ -212,66 +217,39 @@ def pick(req: PickRequest):
 
     if random.random() < PICK_FAIL_RATE:
         result = fail("grasp failed")
+        result.update(item=req.item, instruction=instruction)
     else:
-        state["holding"] = req.item
-        state["from_shelf"] = req.shelf
-        result = succeeded({"success": True, "message": "picked", "item": req.item})
+        state["pick_item"] = None  # this unit is done, next pick is try 1 again
+        result = succeeded({"success": True, "message": f"placed {req.item} in basket", "item": req.item,
+                            "shelf": req.shelf, "target": "basket", "instruction": instruction, "barcode": None})
 
-    log_groot(req, attempt, result)
+    log_groot(instruction, attempt, result)
     return result
-
-
-@app.post("/scan")
-def scan():
-    """Scan the barcode of the held item."""
-    if state["stopped"]:
-        return fail("robot is stopped")
-    if state["busy"]:
-        return fail("busy")
-    if not state["holding"]:
-        return fail("not holding anything")
-
-    time.sleep(FAKE_DELAY_SEC)
-    drain_battery(0.1)
-
-    if random.random() < SCAN_FAIL_RATE:
-        state["last_error"] = "barcode not readable"
-        return {"success": False, "barcode": None, "message": "barcode not readable"}
-
-    inventory = load_inventory()
-    barcode = inventory[state["holding"]]["barcode"]
-    return succeeded({"success": True, "barcode": barcode})
 
 
 @app.post("/place")
 def place(req: PlaceRequest):
-    """Place the held item in basket or return it to shelf."""
+    """Return one unit of an item from the basket to its own shelf."""
     if state["stopped"]:
         return fail("robot is stopped")
     if state["busy"]:
         return fail("busy")
-    if not state["holding"]:
-        return fail("not holding anything")
-    if req.target not in ("basket", "return"):
-        return fail("target must be 'basket' or 'return'")
-    if req.target == "return":
-        # Like a real store: an item goes back only on its own shelf
-        item_shelf = load_inventory().get(state["holding"], {}).get("shelf")
-        if state["station"] != item_shelf:
-            return fail(f"cannot return {state['holding']} here: it belongs on {item_shelf}, "
-                        f"robot is at {state['station']}")
+    if req.target == "basket":
+        return fail("/pick already places the item in the basket")
+    if req.target != "return":
+        return fail("target must be 'return'")
+    item_shelf = load_inventory().get(req.item or "", {}).get("shelf")
+    if not item_shelf:
+        return fail(f"unknown item {req.item}")
+    # Like a real store: an item goes back only on its own shelf
+    if state["station"] != item_shelf:
+        return fail(f"cannot return {req.item} here: it belongs on {item_shelf}, "
+                    f"robot is at {state['station']}")
 
     time.sleep(FAKE_DELAY_SEC)
     drain_battery(0.1)
-
-    item = state["holding"]
-    state["holding"] = None
-    state["from_shelf"] = None
-
-    if req.target == "basket":
-        state["pick_item"] = None  # this unit is done, next pick is try 1 again
-        return succeeded({"success": True, "message": f"placed {item} in basket", "item": item, "target": "basket"})
-    return succeeded({"success": True, "message": f"returned {item} to shelf", "item": item, "target": "return"})
+    return succeeded({"success": True, "message": f"returned {req.item} to shelf", "item": req.item,
+                      "target": "return"})
 
 
 @app.post("/stop")

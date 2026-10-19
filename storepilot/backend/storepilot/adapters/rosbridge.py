@@ -945,14 +945,11 @@ class RosbridgeRobot(RobotAdapter):
             time.sleep(0.2)
         return self._fail("navigation timed out")
 
-    def pick(self, item, shelf, instruction=None):
+    def pick(self, item, shelf):
         return self._fail("pick is not available over this link")
 
-    def scan(self):
-        return self._fail("scan is not available over this link")
-
-    def place(self, target):
-        return self._fail("place is not available over this link")
+    def return_item(self, item):
+        return self._fail("return is not available over this link")
 
     def stop(self):
         """Cancel every Nav2 goal and pause Nav2 (controller and recoveries deactivate), both at once.

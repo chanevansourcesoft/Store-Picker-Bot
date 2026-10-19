@@ -2,17 +2,19 @@
 Jetson Robot Server - Contract v2
 
 FastAPI server for the hardware robot running on NVIDIA Jetson with ROS 2 Humble.
-Uses Nav2 for navigation and stubs for arm/barcode operations.
+Uses Nav2 for navigation. The arm runs one GR00T episode per /pick (pick the item
+AND place it in the basket); see arm.py, the single integration point for the policy.
+The GR00T instruction comes from policy/instructions.json by item id (instructions.py).
 
 Endpoints match mock_robot.py exactly so the AI agent works with both.
 
-Run:
+Run (from agent/):
     # First, source ROS 2 and Nav2
     source /opt/ros/humble/setup.bash
     source ~/nav2_ws/install/setup.bash
 
     # Then run the server
-    uvicorn jetson_server:app --host 0.0.0.0 --port 8000
+    uvicorn robot_server.jetson_server:app --host 0.0.0.0 --port 8000
 
 Station positions:
     Read from robot_server/stations.yaml (copy stations.example.yaml to start).
@@ -37,6 +39,8 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
+from robot_server import arm, instructions
 
 # -----------------------------------------------------------------------------
 # ROS 2 / Nav2 imports (only import if available)
@@ -147,11 +151,12 @@ class NavigateRequest(BaseModel):
 class PickRequest(BaseModel):
     item: str
     shelf: str
-    instruction: str = ""
+    instruction: Optional[str] = None  # ignored: the instruction comes from policy/instructions.json
 
 
 class PlaceRequest(BaseModel):
-    target: str  # "basket" or "return"
+    target: str  # only "return": take one unit of `item` from the basket back to its shelf
+    item: Optional[str] = None
 
 
 # -----------------------------------------------------------------------------
@@ -494,11 +499,11 @@ async def navigate(req: NavigateRequest):
 
 @app.post("/pick")
 async def pick_item(req: PickRequest):
-    """Pick an item from a shelf.
-
-    This is a stub - implement with your GR00T policy or arm controller.
-    The 'instruction' field can be passed to the policy for context.
+    """Pick one unit of an item and place it in the basket: ONE GR00T episode
+    (rest pose -> pick -> basket -> rest pose). The planner sends only the item id;
+    the GR00T instruction is looked up in policy/instructions.json.
     """
+    instruction, problem = instructions.lookup(req.item, req.shelf)
     with robot_state.lock:
         if robot_state.stopped:
             return {"success": False, "message": "Robot is stopped. Call /resume first."}
@@ -506,6 +511,9 @@ async def pick_item(req: PickRequest):
             return {"success": False, "message": "Robot is busy"}
         if robot_state.holding:
             return {"success": False, "message": f"Already holding {robot_state.holding}"}
+        if problem:
+            robot_state.last_error = problem
+            return {"success": False, "message": problem}
 
         # Check we're at the right shelf
         if robot_state.station != req.shelf:
@@ -515,105 +523,48 @@ async def pick_item(req: PickRequest):
             }
 
         robot_state.busy = True
+        robot_state.holding = req.item  # in the gripper while the episode runs
         if robot_state.pick_item != req.item:
             robot_state.pick_item = req.item
             robot_state.pick_try = 0
         robot_state.pick_try += 1
         attempt = robot_state.pick_try
 
-    # TODO: Implement actual pick using GR00T policy or arm controller
-    # Example integration point:
-    # from groot_client import pick_with_policy
-    # success = await pick_with_policy(req.item, req.instruction)
-
-    await asyncio.sleep(1.5)  # Simulate pick time
+    try:
+        loop = asyncio.get_event_loop()
+        ok, message = await loop.run_in_executor(None, arm.run_pick, req.item, instruction)
+    except Exception as e:  # the policy crashed: the pick failed, the server keeps running
+        ok, message = False, f"GR00T error: {e}"
 
     with robot_state.lock:
         robot_state.busy = False
-        robot_state.holding = req.item
+        robot_state.holding = None  # the episode ends in the rest pose: in the basket, or not picked
         robot_state.battery = max(0, robot_state.battery - 0.5)
+        if ok:
+            robot_state.pick_item = None  # this unit is done, next pick is try 1 again
+        else:
+            robot_state.last_error = message
 
-    message = f"Picked {req.item} from {req.shelf}"
-    log_groot(req.instruction or f"pick {req.item}", attempt, message)
-    return succeeded({"success": True, "message": message, "item": req.item})
-
-
-@app.post("/scan")
-async def scan_item():
-    """Scan the barcode of the held item.
-
-    This is a stub - implement with your barcode scanner.
-    """
-    with robot_state.lock:
-        if robot_state.stopped:
-            return {"success": False, "message": "Robot is stopped. Call /resume first."}
-        if not robot_state.holding:
-            return {"success": False, "message": "Not holding any item"}
-
-        item = robot_state.holding
-
-    # TODO: Implement actual barcode scanning
-    # Example integration point:
-    # from barcode_scanner import scan_barcode
-    # barcode = await scan_barcode()
-
-    # For now, return a fake barcode based on item name
-    fake_barcodes = {
-        "chips_packet": "0000000000011",
-        "mentos": "0000000000028",
-        "frooti": "0000000000035",
-        "hide_and_seek": "0000000000042",
-    }
-
-    await asyncio.sleep(0.5)  # Simulate scan time
-
-    barcode = fake_barcodes.get(item, "0000000000000")
-
-    return succeeded({"success": True, "barcode": barcode, "product": item})
+    log_groot(instruction, attempt, message)
+    if not ok:
+        return {"success": False, "message": message, "item": req.item, "instruction": instruction}
+    return succeeded({"success": True, "message": message, "item": req.item, "shelf": req.shelf,
+                      "target": "basket", "instruction": instruction, "barcode": None})
 
 
 @app.post("/place")
 async def place_item(req: PlaceRequest):
-    """Place the held item in basket or return it.
+    """Return one unit of an item from the basket to its shelf.
 
-    This is a stub - implement with your arm controller.
+    There is no GR00T skill for this yet, so the real robot refuses it (honestly)
+    instead of pretending. Putting an item IN the basket is part of /pick.
     """
-    with robot_state.lock:
-        if robot_state.stopped:
-            return {"success": False, "message": "Robot is stopped. Call /resume first."}
-        if not robot_state.holding:
-            return {"success": False, "message": "Not holding any item"}
-
-        item = robot_state.holding
-        robot_state.busy = True
-
     target = req.target.lower()
-    if target not in ["basket", "return"]:
-        with robot_state.lock:
-            robot_state.busy = False
-        return {"success": False, "message": "Target must be 'basket' or 'return'"}
-
-    # TODO: Implement actual place using arm controller
-    # Example integration point:
-    # from arm_controller import place_in_basket, return_to_shelf
-    # if target == "basket":
-    #     success = await place_in_basket()
-    # else:
-    #     success = await return_to_shelf()
-
-    await asyncio.sleep(1.0)  # Simulate place time
-
-    with robot_state.lock:
-        robot_state.busy = False
-        robot_state.holding = None
-        robot_state.battery = max(0, robot_state.battery - 0.3)
-
     if target == "basket":
-        with robot_state.lock:
-            robot_state.pick_item = None  # this unit is done, next pick is try 1 again
-        return succeeded({"success": True, "message": f"placed {item} in basket", "item": item, "target": "basket"})
-    else:
-        return succeeded({"success": True, "message": f"returned {item} to shelf", "item": item, "target": "return"})
+        return {"success": False, "message": "/pick already places the item in the basket"}
+    if target != "return":
+        return {"success": False, "message": "Target must be 'return'"}
+    return {"success": False, "message": "Returning an item to its shelf is not available on the robot yet"}
 
 
 @app.post("/stop")
@@ -671,9 +622,8 @@ if __name__ == "__main__":
     print("  GET  /status   - Robot status (pose, battery, etc.)")
     print("  GET  /map      - Station positions")
     print("  POST /navigate - Navigate to station")
-    print("  POST /pick     - Pick item from shelf")
-    print("  POST /scan     - Scan barcode")
-    print("  POST /place    - Place in basket or return")
+    print("  POST /pick     - Pick item and place it in the basket (one GR00T run)")
+    print("  POST /place    - Return an item to its shelf (not available yet)")
     print("  POST /stop     - Emergency stop")
     print("  POST /resume   - Resume after stop")
     print("  GET  /health   - Health check")

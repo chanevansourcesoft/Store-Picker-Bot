@@ -6,11 +6,15 @@ Contract v2: multiple shelves, basket instead of bag, route planning by shelf.
 The agent:
 1. Plans a route: visit each shelf once (in optimal order).
 2. At each shelf: pick all items from that shelf (heavy first).
-3. For each item: pick -> scan -> if barcode matches, basket; else return and retry.
+3. For each unit: pick_item = ONE GR00T run that picks it AND places it in the basket.
+   A failed pick is retried; after too many failures the unit is skipped.
 4. After all items: navigate to customer, then home.
 5. Returns a bill with items packed, total, and any problems.
 
-The bill is built by CODE from successful place_item(basket) calls, not by the model.
+Nemotron only chooses item ids. The robot looks up the GR00T instruction in
+policy/instructions.json. There is no barcode scan.
+
+The bill is built by CODE from the units the robot reported in the basket, not by the model.
 The CODE keeps the order truth (OrderTracker): it refuses wrong robot commands and
 sends Nemotron a progress line after every tool call, so the model cannot lose count.
 
@@ -32,11 +36,11 @@ from store_agent.autopilot import Autopilot
 from store_agent.config import MODEL_AGENT, get_client
 from store_agent.inventory import load_inventory
 from store_agent.order_parser import parse_order
-from store_agent.order_tracker import OrderTracker
+from store_agent.order_tracker import OrderTracker, basket_item
 from store_agent.tools import TOOLS, run_tool
 
 MAX_STEPS = 60  # Stop the loop after this many tool calls.
-MAX_RETRIES = 2  # Retry pick/scan this many times per item.
+MAX_RETRIES = 2  # Retry a failed pick this many times per unit.
 MAX_CONTINUE_ATTEMPTS = 3  # How many times to continue if order is incomplete.
 
 # Weight order for sorting (heavy first, at bottom of basket).
@@ -139,28 +143,23 @@ YOUR TASK:
 1. Follow the planned route. For each shelf in the route:
    a. Call navigate_to with the shelf name (e.g. "shelf_A").
    b. Pick all items from that shelf (heavy first) before moving to the next shelf.
-   c. For each item:
-      - Call pick_item with the item name and a short instruction for the GR00T policy.
-      - Call scan_item to read the barcode.
-      - If the barcode matches, call place_item with target "basket".
-      - If the barcode does NOT match or scan fails, call place_item with target "return" and retry (max {MAX_RETRIES} retries per unit).
-      - If retries are exhausted, skip that unit and note the problem.
+   c. For each unit: call pick_item with the item id. One pick_item picks ONE unit and
+      places it in the basket. Call it once per unit (2x chips_packet = 2 calls).
+      If it fails, call it again (max {MAX_RETRIES} retries per unit). If retries are
+      exhausted, skip that unit (the system notes the problem).
 2. For unknown items, do NOT pick anything.
 3. After all items are packed, call navigate_to with station "customer" to deliver.
 4. Then call navigate_to with station "home" to return.
 5. When everything is done, say "DONE" (the system will build the bill).
 
 RULES:
-- Only one pick at a time. The arm can hold only one item.
-- Always scan after picking.
-- ALWAYS call place_item (basket or return) before picking the next item or navigating.
+- pick_item takes only the item id. The robot knows how to pick each product.
+- The robot must be at the item's shelf before pick_item.
 - If a tool fails, read the error message and decide what to do.
 - Pack heavy items first at each shelf, then medium, then light.
-- Always write a short instruction for pick_item so the GR00T policy knows what to do.
 - After every tool result the system adds a "Progress:" line. It is the truth.
-  Trust it more than your memory: it says what is packed and what the robot holds.
-- If a command result says "REFUSED", the robot did NOT do it. Read why and follow the advice.
-- Return an item only at ITS OWN shelf (navigate there first)."""
+  Trust it more than your memory: it says what is already in the basket.
+- If a command result says "REFUSED", the robot did NOT do it. Read why and follow the advice."""
 
     if packed_so_far:
         prompt += f"\n\nALREADY PACKED: {packed_so_far}"
@@ -180,7 +179,7 @@ def ordered_counts(order):
 
 
 def build_bill_from_log(log, order, inventory):
-    """Build the bill from the step log. Only count successful place_item(basket) calls.
+    """Build the bill from the step log. Only count units the robot reported in the basket.
 
     Never charge more than the customer paid: each item is billed only up to the
     ordered qty. Extra items are listed as problems ("1 extra chips_packet, not charged").
@@ -188,12 +187,9 @@ def build_bill_from_log(log, order, inventory):
     packed = {}  # item -> count
 
     for entry in log:
-        if entry["tool"] == "place_item":
-            target = entry["input"].get("target")
-            result = entry["result"]
-            if target == "basket" and result.get("success") and result.get("item"):
-                item = result["item"]
-                packed[item] = packed.get(item, 0) + 1
+        item = basket_item(entry)
+        if item:
+            packed[item] = packed.get(item, 0) + 1
 
     ordered = ordered_counts(order)
     bill_items = []
@@ -325,23 +321,6 @@ def run_agent_loop(messages, inventory, log, step_offset=0, client=None, on_step
     return log, "max_steps", step
 
 
-def run_code_step(tool, args, tracker, log, on_step=None):
-    """A robot command sent by the CODE (not the model), logged like the others."""
-    result = json.loads(run_tool(tool, args, tracker))
-    entry = {
-        "step": len(log) + 1,
-        "tool": tool,
-        "input": args,
-        "result": result,
-        "time": datetime.now().isoformat(),
-        "by": "code",
-    }
-    log.append(entry)
-    if on_step:
-        on_step(entry)
-    return result
-
-
 def final_status(tracker, problems):
     """done = exactly as ordered and no problems; done_with_problems = something packed; else failed."""
     if tracker.is_complete() and not problems:
@@ -408,9 +387,7 @@ def run_agent(order, client=None, on_step=None):
         )
         tracker.sync_from_status(robot_client.status())
 
-        if tracker.holding:
-            hint = f"The robot is still holding {tracker.holding}. You must call place_item before finishing."
-        elif tracker.missing():
+        if tracker.missing():
             hint = "Order is not complete. Still need: " + ", ".join(
                 f"{m['qty']}x {m['item']}" for m in tracker.missing()) + ". Continue packing."
         else:
@@ -421,12 +398,10 @@ def run_agent(order, client=None, on_step=None):
             break
         messages.append({"role": "user", "content": hint + "\n" + tracker.progress_line()})
 
-    # Robot still holds something: the code puts it back on its own shelf
+    # A pick always ends with the arm empty. If the robot still reports an item in the
+    # gripper, something went wrong on the arm: report it, do not move the robot.
     if tracker.holding:
-        item = tracker.holding
-        problems.append(f"Robot still holding {item} at end, put back on its shelf.")
-        run_code_step("navigate_to", {"station": tracker.shelf_of(item)}, tracker, log, on_step)
-        run_code_step("place_item", {"target": "return"}, tracker, log, on_step)
+        problems.append(f"Robot reports it still holds {tracker.holding}: the operator must check the arm.")
 
     for m in tracker.missing():
         problems.append(f"Could not pack {m['qty']}x {m['item']}.")

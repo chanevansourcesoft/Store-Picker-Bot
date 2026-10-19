@@ -69,7 +69,7 @@ def make_adapter(stations):
 
             def _fail(self, *a, **k):
                 return {"success": False, "message": "JETSON_URL is not set"}
-            navigate = pick = scan = place = stop = resume = _fail
+            navigate = pick = return_item = stop = resume = _fail
         return NotConfigured()
     return JetsonAdapter(config.JETSON_URL)
 
@@ -170,7 +170,7 @@ def alerts(tel, robot, ai):
         if status.get("battery_v") is not None and status["battery_v"] < 11.1:
             out.append(("warning", f"Battery {status['battery_v']:.2f} V: charge before driving (3S pack)."))
     if config.MODE == "live" and not config.MANIPULATION_VERIFIED:
-        out.append(("info", "Pick, scan and place are unavailable: the Jetson has no verified implementation yet."))
+        out.append(("info", "Picking is unavailable: the GR00T pick on the Jetson is not verified yet."))
     hidden = [f for f in config.TELEMETRY_FIELDS if f not in config.VERIFIED_TELEMETRY]
     if config.MODE == "live" and hidden and not rosbridge:
         out.append(("info", "Not verified, so not shown: " + ", ".join(hidden) +

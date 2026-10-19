@@ -5,11 +5,12 @@ It looks like an OpenAI client (client.chat.completions.create), so the agent
 loop does not change. Instead of a model it follows the same rules the system
 prompt gives Nemotron:
 
-    per item: go to its shelf -> pick -> scan -> basket (or return and retry)
+    per unit: go to its shelf -> pick (one GR00T run: pick AND place in the basket),
+              retry a failed pick, skip the item after MAX_TRIES failures
     then: customer -> home -> DONE
 
-It reads the truth from the OrderTracker (what is packed, held, where the robot is)
-and the last tool result (did the pick / scan / navigation work?).
+It reads the truth from the OrderTracker (what is packed, where the robot is)
+and the last tool result (did the pick / navigation work?).
 The code guards still check every command, exactly as with Nemotron.
 
 Example:
@@ -21,7 +22,6 @@ import json
 from types import SimpleNamespace
 
 MAX_TRIES = 3          # pick tries per unit, navigation tries per station
-MAX_SCAN_TRIES = 2     # scans per held item before it goes back to the shelf
 MAX_REFUSALS = 5       # refused commands before we give up (should never happen)
 
 
@@ -59,8 +59,6 @@ class Autopilot:
         self.tracker = None
         self.last = None            # (tool, args) we sent last
         self.calls = 0
-        self.scanned = None         # held item: None = not scanned yet, True = barcode ok, False = put it back
-        self.scan_tries = 0
         self.pick_tries = {}        # item -> failed tries for the current unit
         self.nav_tries = {}         # station -> failed tries
         self.skipped = set()        # items we gave up on
@@ -93,23 +91,9 @@ class Autopilot:
         elif tool == "pick_item":
             item = args["item"]
             if ok:
-                self.scanned, self.scan_tries = None, 0
+                self.pick_tries[item] = 0     # this unit is in the basket; the next unit starts again
             else:
                 self.pick_tries[item] = self.pick_tries.get(item, 0) + 1
-        elif tool == "scan_item":
-            if ok:
-                self.scanned = result.get("product") == self.tracker.holding
-            else:
-                self.scan_tries += 1
-                if self.scan_tries >= MAX_SCAN_TRIES:
-                    self.scanned = False
-        elif tool == "place_item" and ok:
-            item = result.get("item")
-            if args.get("target") == "basket":
-                self.pick_tries[item] = 0
-            else:  # a returned unit counts as a failed try
-                self.pick_tries[item] = self.pick_tries.get(item, 0) + 1
-            self.scanned, self.scan_tries = None, 0
 
     # ---------- Decide the next call ----------
 
@@ -122,15 +106,7 @@ class Autopilot:
     def _next(self):
         t = self.tracker
         if t.holding:
-            item = t.holding
-            if self.scanned is None:
-                return ("scan_item", {})
-            if self.scanned:
-                return ("place_item", {"target": "basket"})
-            shelf = t.shelf_of(item)
-            if t.station != shelf:
-                return self._go(shelf)
-            return ("place_item", {"target": "return"})
+            return None  # the robot reports an item in the gripper: stop, the operator checks the arm
 
         for entry in t.missing():
             item = entry["item"]
@@ -146,8 +122,7 @@ class Autopilot:
                     self.skipped.add(item)
                     continue
                 return step
-            name = item.replace("_", " ")
-            return ("pick_item", {"item": item, "instruction": f"pick up the {name} and lift it"})
+            return ("pick_item", {"item": item})
 
         if not self.delivered:
             step = self._go("customer")

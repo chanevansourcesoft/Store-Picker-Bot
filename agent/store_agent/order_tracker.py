@@ -2,18 +2,36 @@
 Order tracker: the CODE keeps the truth about an order, not the model.
 
 Per item it knows: ordered qty, packed qty (in the basket), and extra qty
-(put in the basket but not ordered). It also knows what the robot holds now
-and where the robot is.
+(put in the basket but not ordered). It also knows where the robot is, and
+what it holds (normally nothing: one pick_item = pick AND place in the basket).
 
 It changes ONLY from real robot results (record() and sync_from_status()).
-The tools ask it before a robot command (check_pick, check_place). If a command
-would be a mistake, it is refused and the robot never gets it.
+The tools ask it before a robot command (check_pick). If a command would be a
+mistake, it is refused and the robot never gets it.
 
 Example:
     tracker = OrderTracker([{"item": "chips_packet", "qty": 2}], inventory)
     tracker.check_pick("chips_packet")   # None = allowed, or "REFUSED: ..." text
-    tracker.progress_line()          # "Progress: chips_packet 0/2 packed. Holding: nothing. ..."
+    tracker.progress_line()              # "Progress: chips_packet 0/2 packed. Robot at: home. ..."
 """
+
+
+def basket_item(entry):
+    """Item a logged step put in the basket, else None (structured fields only).
+
+    Contract now: a successful pick_item with result target "basket".
+    Older logs: a successful place_item with target "basket" and an "item" field.
+    """
+    result = entry.get("result") or {}
+    if not result.get("success") or result.get("refused"):
+        return None
+    tool = entry.get("tool")
+    if tool == "pick_item" and result.get("target") == "basket":
+        return result.get("item") or (entry.get("input") or {}).get("item")
+    if tool == "place_item" and (entry.get("input") or {}).get("target", result.get("target")) == "basket":
+        return result.get("item")
+    return None
+
 
 class OrderTracker:
     def __init__(self, items, inventory):
@@ -55,31 +73,14 @@ class OrderTracker:
     def check_pick(self, item):
         """Return None if the pick is allowed, else a 'REFUSED: ...' message for Nemotron."""
         if self.holding:
-            return (f"REFUSED: the robot is already holding {self.holding}. "
-                    f"Call scan_item, then place_item first.")
+            return (f"REFUSED: the robot reports it is holding {self.holding}. "
+                    f"Do not pick: the operator must check the arm.")
         ordered = self.ordered.get(item, 0)
         if ordered == 0:
             return f"REFUSED: {item} is not in this order. Do not pick it."
         if self.packed[item] >= ordered:
             return (f"REFUSED: {item} is already complete ({self.packed[item]}/{ordered} packed). "
                     f"Do not pick more {item}.")
-        return None
-
-    def check_place(self, target):
-        """Return None if the place is allowed, else a 'REFUSED: ...' message for Nemotron."""
-        item = self.holding
-        if not item:
-            return None  # the robot itself will answer "not holding anything"
-        if target == "basket":
-            ordered = self.ordered.get(item, 0)
-            if self.packed.get(item, 0) >= ordered:
-                return (f"REFUSED: {item} is already complete ({self.packed.get(item, 0)}/{ordered} packed). "
-                        f"Do not put it in the basket. Return it with place_item('return') at {self.shelf_of(item)}.")
-        if target == "return":
-            shelf = self.shelf_of(item)
-            if self.station != shelf:
-                return (f"REFUSED: {item} belongs on {shelf}, but the robot is at {self.station}. "
-                        f"Call navigate_to('{shelf}') first, then place_item('return').")
         return None
 
     # ---------- Updates (ONLY from real robot results) ----------
@@ -93,22 +94,23 @@ class OrderTracker:
             self.station = status["station"]
 
     def record(self, tool, args, result):
-        """Update after a robot command. Returns 'packed', 'extra' or None (for place in basket)."""
+        """Update after a robot command. Returns 'packed', 'extra' or None (for a unit in the basket)."""
         if not result.get("success"):
             return None
         if tool == "navigate_to":
             self.station = args.get("station")
-        elif tool == "pick_item":
-            self.holding = args.get("item")
-        elif tool == "place_item":
-            item = result.get("item") or self.holding
-            self.holding = None
-            if args.get("target") == "basket" and item:
-                if self.packed.get(item, 0) < self.ordered.get(item, 0):
-                    self.packed[item] += 1
-                    return "packed"
-                self.extra[item] = self.extra.get(item, 0) + 1
-                return "extra"
+            return None
+        entry = {"tool": tool, "input": args, "result": result}
+        item = basket_item(entry)
+        if item:
+            if self.packed.get(item, 0) < self.ordered.get(item, 0):
+                self.packed[item] += 1
+                return "packed"
+            self.extra[item] = self.extra.get(item, 0) + 1
+            return "extra"
+        if tool == "pick_item":
+            # The robot says "picked" but not "in the basket": it still holds it (old contract)
+            self.holding = result.get("item") or args.get("item")
         return None
 
     # ---------- Progress line for Nemotron ----------
@@ -116,7 +118,9 @@ class OrderTracker:
     def progress_line(self):
         parts = [f"{item} {self.packed[item]}/{qty} packed" for item, qty in self.ordered.items()]
         text = "Progress: " + ", ".join(parts) + "."
-        text += f" Holding: {self.holding or 'nothing'}. Robot at: {self.station or 'unknown'}."
+        if self.holding:
+            text += f" Robot reports it HOLDS {self.holding}."
+        text += f" Robot at: {self.station or 'unknown'}."
         if self.extras():
             text += " EXTRA in basket (not ordered): " + ", ".join(f"{e['qty']} {e['item']}" for e in self.extras()) + "."
         if not self.missing() and not self.holding:

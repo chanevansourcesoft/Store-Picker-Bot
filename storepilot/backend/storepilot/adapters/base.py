@@ -1,8 +1,9 @@
 """
 The one boundary between the dashboard and a robot.
 
-Only HIGH-LEVEL commands exist here: go to a named station, pick a named product,
-scan, place in basket / return, stop, resume. There is no way to send wheel
+Only HIGH-LEVEL commands exist here: go to a named station, pick a named product
+(one GR00T run: pick it AND place it in the basket), return a product to its shelf,
+stop, resume. There is no way to send wheel
 velocities, PWM or joint targets from the dashboard.
 
 Two methods are used by the telemetry poller and RAISE on any problem, so a
@@ -39,13 +40,12 @@ class RobotAdapter:
     def navigate(self, station):
         raise NotImplementedError
 
-    def pick(self, item, shelf, instruction=None):
+    def pick(self, item, shelf):
+        """Pick one unit and place it in the basket. Success result: {"item", "target": "basket", ...}."""
         raise NotImplementedError
 
-    def scan(self):
-        raise NotImplementedError
-
-    def place(self, target):
+    def return_item(self, item):
+        """Take one unit of an item from the basket back to its shelf."""
         raise NotImplementedError
 
     def stop(self):

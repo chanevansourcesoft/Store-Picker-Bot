@@ -40,7 +40,9 @@ every event make it impossible to mistake simulated data for the robot.
 ## Safety boundaries (built in)
 
 - The dashboard can only request **high-level** actions (go to a named station, pick a named
-  product, scan, place, stop, resume). There is no API for wheel velocities, PWM or joints.
+  product into the basket, return a product to its shelf, stop, resume). There is no API for
+  wheel velocities, PWM or joints. The planner only chooses product ids; the GR00T instruction
+  comes from `policy/instructions.json` on the robot.
 - The LLM never touches actuators directly: its tool calls go through the shared OrderTracker
   guards (no over-picking, return only at the item's own shelf) and the robot adapter.
 - **Every mission needs an operator confirmation.** In live mode the operator must also tick
@@ -78,7 +80,7 @@ The installer is safe to run again. It:
 | `JETSON_URL` | – | Jetson robot server, e.g. `http://192.168.2.50:8000` (live mode) |
 | `STOREPILOT_ENABLE_MOTION` | `0` | `1` = operators may start missions that move the real robot |
 | `JETSON_STOP_CONFIRMED` | `0` | `1` = you tested that `POST /stop` on the Jetson really halts the robot |
-| `STOREPILOT_MANIPULATION_VERIFIED` | `0` | `1` = pick / scan / place on the Jetson are real and return verified results. Until then live missions cannot start and "Holding" is not shown |
+| `STOREPILOT_MANIPULATION_VERIFIED` | `0` | `1` = the GR00T pick on the Jetson (pick + place in basket, `agent/robot_server/arm.py`) is real and tested. Until then live missions cannot start and "Holding" is not shown |
 | `STOREPILOT_VERIFIED_TELEMETRY` | (empty) | Live fields you checked against the robot: any of `pose,battery,speed`. Others show "Unavailable · not verified yet" |
 | `NEBIUS_API_KEY` | – | Nemotron on Nebius Token Factory. Without it: keyword parser + offline autopilot |
 | `STOREPILOT_PORT` | `8080` | Backend port (kiosk URL uses 8080) |
@@ -275,7 +277,8 @@ appears afterwards, a new `/navigate` is refused until `/resume`, **and** an arm
 
 The live adapter (`backend/storepilot/adapters/jetson.py`) speaks the contract of
 `agent/robot_server/jetson_server.py` (Contract v2): `GET /health /status /map`,
-`POST /navigate /pick /scan /place /stop /resume`. Before switching to live mode, please confirm:
+`POST /navigate /pick /place /stop /resume` (`/pick` = pick + place in basket; see
+`agent/robot_server/README.md`). Before switching to live mode, please confirm:
 
 1. **Address:** the Jetson's IP on the robot network and that `jetson_server.py` runs on port 8000
    and is reachable from the Pi (`curl http://<jetson>:8000/health`).
@@ -287,8 +290,9 @@ The live adapter (`backend/storepilot/adapters/jetson.py`) speaks the contract o
    there a continuous pose (AMCL / `map→base_link` TF) we can expose when idle?
 5. **Battery and speed:** `/status.battery` stays at its default 100 unless `/battery_state` is
    published, and `speed` is a constant 0.3 while navigating. Which topics give real values?
-6. **Pick / scan / place:** these are still timed stubs on the Jetson. Which service will run the
-   GR00T pick and barcode / load-cell verification, and will it report failures in the same JSON?
+6. **Pick:** `/pick` is still a timed stub on the Jetson (`agent/robot_server/arm.py`). It must call
+   the GR00T pick function from `policy/` and report failures in the same JSON. There is no barcode
+   scan; load-cell verification is not connected either.
 7. **Stations:** is `agent/robot_server/stations.yaml` filled with the real store positions? The map
    draws exactly what `/map` returns.
 8. **Map image (optional):** to draw the real occupancy grid, the Jetson would need to serve it

@@ -4,7 +4,7 @@ Adapter for the Jetson robot server (agent/robot_server/jetson_server.py, Contra
     GET  /health  -> {"status": "ok", "ros_available": bool, "ros_connected": bool}  (older servers: "healthy")
     GET  /status  -> busy, holding, station, pose, battery, speed, nav_state, obstacle, last_error, stopped
     GET  /map     -> {"stations": {name: {x, y, theta}}}
-    POST /navigate {station} | /pick {item, shelf, instruction} | /scan | /place {target}
+    POST /navigate {station} | /pick {item, shelf} (pick + place in basket) | /place {target: "return", item}
     POST /stop | /resume
 
 Nothing here falls back to simulated data: a failed request is a failure.
@@ -85,16 +85,11 @@ class JetsonAdapter(RobotAdapter):
             return {"success": False, "message": f"unknown station {station!r}"}
         return self._post("/navigate", {"station": station})
 
-    def pick(self, item, shelf, instruction=None):
-        return self._post("/pick", {"item": item, "shelf": shelf, "instruction": instruction or ""})
+    def pick(self, item, shelf):
+        return self._post("/pick", {"item": item, "shelf": shelf})
 
-    def scan(self):
-        return self._post("/scan")
-
-    def place(self, target):
-        if target not in ("basket", "return"):
-            return {"success": False, "message": "target must be 'basket' or 'return'"}
-        return self._post("/place", {"target": target})
+    def return_item(self, item):
+        return self._post("/place", {"target": "return", "item": item})
 
     def stop(self):
         return self._post("/stop", timeout=STOP_TIMEOUT)

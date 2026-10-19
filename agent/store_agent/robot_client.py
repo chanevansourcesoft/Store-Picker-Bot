@@ -6,7 +6,9 @@ Demo mode: if DEMO_MODE=1, or ROBOT_URL does not answer at startup, we use
 the mock robot inside this Python process (no robot server needed).
 Good for Streamlit Community Cloud. The choice is made once per process.
 
-Contract v2: supports multiple shelves, basket, emergency stop, pose, battery.
+Contract v2: multiple shelves, basket, emergency stop, pose, battery.
+/pick runs one GR00T episode that picks the item AND places it in the basket.
+The planner sends only the item id: the robot looks up the GR00T instruction.
 """
 
 import threading
@@ -63,7 +65,6 @@ def _call_mock(method, path, body):
         ("GET", "/map"): lambda: mock.get_map(),
         ("POST", "/navigate"): lambda: mock.navigate(mock.NavigateRequest(**body)),
         ("POST", "/pick"): lambda: mock.pick(mock.PickRequest(**body)),
-        ("POST", "/scan"): lambda: mock.scan(),
         ("POST", "/place"): lambda: mock.place(mock.PlaceRequest(**body)),
         ("POST", "/stop"): lambda: mock.stop(),
         ("POST", "/resume"): lambda: mock.resume(),
@@ -114,22 +115,14 @@ def navigate(station):
     return _call("POST", "/navigate", {"station": station})
 
 
-def pick(item, shelf, instruction=None):
-    """Pick an item from a shelf. The instruction is passed to GR00T policy."""
-    body = {"item": item, "shelf": shelf}
-    if instruction:
-        body["instruction"] = instruction
-    return _call("POST", "/pick", body)
+def pick(item, shelf):
+    """Pick one unit of an item from its shelf and place it in the basket (one GR00T run)."""
+    return _call("POST", "/pick", {"item": item, "shelf": shelf})
 
 
-def scan():
-    """Scan the barcode of the held item."""
-    return _call("POST", "/scan")
-
-
-def place(target):
-    """Place the held item in basket or return it to shelf."""
-    return _call("POST", "/place", {"target": target})
+def return_item(item):
+    """Take one unit of an item from the basket back to its own shelf (robot must be there)."""
+    return _call("POST", "/place", {"target": "return", "item": item})
 
 
 def stop():
@@ -160,9 +153,7 @@ if __name__ == "__main__":
     print("/map:", get_map())
 
     print("\nNavigate to shelf_A:", navigate("shelf_A"))
-    print("Pick chips_packet:", pick("chips_packet", "shelf_A", "pick up the chips packet"))
-    print("Scan:", scan())
-    print("Place in basket:", place("basket"))
+    print("Pick chips_packet:", pick("chips_packet", "shelf_A"))
 
     print("\nNavigate to customer:", navigate("customer"))
     print("Navigate to home:", navigate("home"))
