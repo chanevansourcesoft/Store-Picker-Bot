@@ -1,7 +1,7 @@
 """
 Adapter for the Jetson robot server (agent/robot_server/jetson_server.py, Contract v2).
 
-    GET  /health  -> {"status": "healthy" | "ok", "ros_available": bool, "ros_connected": bool}
+    GET  /health  -> {"status": "ok", "ros_available": bool, "ros_connected": bool}  (older servers: "healthy")
     GET  /status  -> busy, holding, station, pose, battery, speed, nav_state, obstacle, last_error, stopped
     GET  /map     -> {"stations": {name: {x, y, theta}}}
     POST /navigate {station} | /pick {item, shelf, instruction} | /scan | /place {target}
@@ -49,7 +49,7 @@ class JetsonAdapter(RobotAdapter):
 
     def fetch_health(self):
         data = self._get("/health")
-        # jetson_server.py says "healthy", the mock robot says "ok": accept both
+        # the contract says "ok"; jetson_server.py before the fix said "healthy": accept both
         if data.get("status") not in ("healthy", "ok"):
             raise AdapterError(f"/health: status {data.get('status')!r}")
         return data

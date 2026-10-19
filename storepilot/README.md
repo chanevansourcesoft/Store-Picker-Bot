@@ -280,7 +280,7 @@ The live adapter (`backend/storepilot/adapters/jetson.py`) speaks the contract o
 1. **Address:** the Jetson's IP on the robot network and that `jetson_server.py` runs on port 8000
    and is reachable from the Pi (`curl http://<jetson>:8000/health`).
 2. **Which server runs:** is it `jetson_server.py` from this repo, unchanged? Its `/health` says
-   `"healthy"` (the adapter accepts that and `"ok"`).
+   `"ok"` (the adapter also accepts `"healthy"` from older versions).
 3. **Stop:** does `POST /stop` really halt the base (Nav2 cancel + zero velocity) and the arm?
    Only then set `JETSON_STOP_CONFIRMED=1`.
 4. **Pose source and frame:** `/status.pose` comes from Nav2 feedback only while navigating. Is
@@ -293,6 +293,3 @@ The live adapter (`backend/storepilot/adapters/jetson.py`) speaks the contract o
    draws exactly what `/map` returns.
 8. **Map image (optional):** to draw the real occupancy grid, the Jetson would need to serve it
    (for example `GET /map/image` + resolution / origin), or allow rosbridge from the Pi.
-
-Note: the QuickPick Streamlit app (`quickpick/`) checks `/health` for `"ok"` only, so against the real
-Jetson (`"healthy"`) it would fall back to its simulator. StorePilot does not have this problem.

@@ -31,6 +31,7 @@ Tests (no robot, no API key):
 ```bash
 cd agent
 python -m store_agent.test_inventory
+python -m store_agent.test_robot_client
 python -m store_agent.test_agent
 python -m store_agent.test_order_tracker
 python -m store_agent.test_autopilot

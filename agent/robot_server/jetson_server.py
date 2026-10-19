@@ -616,9 +616,9 @@ async def resume():
 # -----------------------------------------------------------------------------
 @app.get("/health")
 def health_check():
-    """Health check endpoint."""
+    """Health check endpoint. "ok" like mock_robot.py (the contract)."""
     return {
-        "status": "healthy",
+        "status": "ok",
         "ros_available": ROS_AVAILABLE,
         "ros_connected": nav2_client is not None,
     }

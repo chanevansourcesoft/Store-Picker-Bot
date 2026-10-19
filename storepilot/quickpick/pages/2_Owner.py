@@ -109,7 +109,7 @@ def get_robot_status():
     }
     try:
         health = robot_client.health()
-        if health.get("status") != "ok":
+        if not robot_client.is_healthy(health):
             return offline
         status = robot_client.status()
         return {

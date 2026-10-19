@@ -39,10 +39,15 @@ def is_demo_mode():
         return _demo_mode
 
 
+def is_healthy(answer):
+    """True for a good /health answer. The contract says "ok"; older jetson_server.py said "healthy"."""
+    return isinstance(answer, dict) and answer.get("status") in ("ok", "healthy")
+
+
 def _robot_reachable():
     try:
         r = requests.get(f"{ROBOT_URL}/health", timeout=STARTUP_CHECK_SEC)
-        return r.ok and r.json().get("status") == "ok"
+        return r.ok and is_healthy(r.json())
     except Exception:
         return False
 
