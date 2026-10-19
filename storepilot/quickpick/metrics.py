@@ -14,6 +14,8 @@ import csv
 import io
 from datetime import datetime
 
+from quickpick.step_log import basket_item
+
 CHARGED = ("done", "done_with_problems")
 
 
@@ -79,10 +81,8 @@ def order_progress(order):
         needed[entry["item"]] = needed.get(entry["item"], 0) + entry.get("qty", 1)
     packed = {}
     for entry in order.get("step_log") or []:
-        result = entry.get("result") or {}
-        message = result.get("message") or ""
-        if entry.get("tool") == "place_item" and result.get("success") and message.startswith("placed "):
-            item = message.split(" ")[1]
+        item = basket_item(entry)
+        if item:
             packed[item] = packed.get(item, 0) + 1
     done = sum(min(packed.get(item, 0), qty) for item, qty in needed.items())
     return done, sum(needed.values())

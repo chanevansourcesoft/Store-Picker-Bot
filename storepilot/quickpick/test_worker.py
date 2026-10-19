@@ -3,7 +3,7 @@ Tests for quickpick/worker.py
 
 The agent is replaced with a fake one, so these tests need no Nemotron key
 and no robot. The fake agent sends the same steps and robot messages as the
-mock robot and the Jetson server ("placed chips_packet in basket").
+mock robot and the Jetson server (structured "item" and "target" fields).
 
 Run:
     python -m quickpick.test_worker
@@ -39,11 +39,11 @@ def fake_steps(item, target="basket"):
         place_msg = f"returned {item} to shelf"
     return [
         {"tool": "pick_item", "input": {"item": item, "shelf": "shelf_A"},
-         "result": {"success": True, "message": "picked"}},
+         "result": {"success": True, "message": "picked", "item": item}},
         {"tool": "scan_item", "input": {},
          "result": {"success": True, "barcode": "123"}},
         {"tool": "place_item", "input": {"target": target},
-         "result": {"success": True, "message": place_msg}},
+         "result": {"success": True, "message": place_msg, "item": item, "target": target}},
     ]
 
 
@@ -128,8 +128,9 @@ def test_replay_order_3_is_not_overpacked():
         order = store.get_order(order_id)
         bill = order["bill"]
         after = store.get_stock()
-        chips_in_basket = sum(1 for e in order["step_log"]
-                              if e["result"].get("message") == "placed chips_packet in basket")
+        chips_in_basket = sum(1 for e in order["step_log"] if e["tool"] == "place_item"
+                              and e["input"].get("target") == "basket" and e["result"].get("success")
+                              and e["result"].get("item") == "chips_packet")
 
         assert chips_in_basket == 2, f"basket has {chips_in_basket} chips packets"
         assert bill["total"] <= 85, bill
@@ -174,6 +175,25 @@ def test_extra_item_does_not_reduce_stock():
         reset_inventory()
 
 
+def test_stock_uses_item_field_not_message():
+    """Stock follows the structured "item" field, whatever the robot's message says."""
+    db_path = setup_test_db()
+    reset_inventory()
+    try:
+        before = store.get_stock()
+        order_id, problems = store.create_order([{"item": "frooti", "qty": 1}])
+        assert order_id, problems
+        steps = fake_steps("frooti")
+        steps[-1] = dict(steps[-1], result=dict(steps[-1]["result"], message="done"))
+        with patch("quickpick.worker.run_agent", make_fake_agent(steps)):
+            worker.process_single_order(order_id)
+        assert before["frooti"] - store.get_stock()["frooti"] == 1
+        print("PASS: test_stock_uses_item_field_not_message")
+    finally:
+        teardown_test_db(db_path)
+        reset_inventory()
+
+
 def run_all_tests():
     """Run all worker tests."""
     print("Running worker tests...\n")
@@ -182,6 +202,7 @@ def run_all_tests():
     test_returned_item_keeps_stock()
     test_replay_order_3_is_not_overpacked()
     test_extra_item_does_not_reduce_stock()
+    test_stock_uses_item_field_not_message()
 
     print("\nAll worker tests passed!")
 

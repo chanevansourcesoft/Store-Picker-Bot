@@ -53,7 +53,7 @@ class FakeRobot:
         if self.pick_count in self.pick_fail:
             return self._fail("grasp failed")
         self.holding = item
-        return {"success": True, "message": "picked"}
+        return {"success": True, "message": "picked", "item": item}
 
     def scan(self):
         self.commands.append(("scan", None))
@@ -73,8 +73,8 @@ class FakeRobot:
             return self._fail(f"cannot return {item} here")
         self.holding = None
         if target == "basket":
-            return {"success": True, "message": f"placed {item} in basket"}
-        return {"success": True, "message": f"returned {item} to shelf"}
+            return {"success": True, "message": f"placed {item} in basket", "item": item, "target": "basket"}
+        return {"success": True, "message": f"returned {item} to shelf", "item": item, "target": "return"}
 
     def picks_sent(self, item):
         return sum(1 for name, arg in self.commands if name == "pick" and arg == item)

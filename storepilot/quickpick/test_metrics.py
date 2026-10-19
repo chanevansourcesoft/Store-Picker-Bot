@@ -47,6 +47,13 @@ def test_pick_stats_skips_refused():
 def test_order_progress():
     assert metrics.order_progress(ORDER) == (2, 2)
     assert metrics.order_progress({"items": [{"item": "chips_packet", "qty": 3}], "step_log": []}) == (0, 3)
+    # New logs: the structured "item" field counts, the message text does not matter
+    placed = {"tool": "place_item", "input": {"target": "basket"},
+              "result": {"success": True, "message": "done", "item": "frooti", "target": "basket"}}
+    returned = {"tool": "place_item", "input": {"target": "return"},
+                "result": {"success": True, "message": "done", "item": "frooti", "target": "return"}}
+    order = {"items": [{"item": "frooti", "qty": 2}], "step_log": [placed, returned]}
+    assert metrics.order_progress(order) == (1, 2)
     print("PASS: test_order_progress")
 
 

@@ -611,9 +611,9 @@ async def place_item(req: PlaceRequest):
     if target == "basket":
         with robot_state.lock:
             robot_state.pick_item = None  # this unit is done, next pick is try 1 again
-        return succeeded({"success": True, "message": f"placed {item} in basket"})
+        return succeeded({"success": True, "message": f"placed {item} in basket", "item": item, "target": "basket"})
     else:
-        return succeeded({"success": True, "message": f"returned {item} to shelf"})
+        return succeeded({"success": True, "message": f"returned {item} to shelf", "item": item, "target": "return"})
 
 
 @app.post("/stop")

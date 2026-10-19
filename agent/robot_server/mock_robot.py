@@ -215,7 +215,7 @@ def pick(req: PickRequest):
     else:
         state["holding"] = req.item
         state["from_shelf"] = req.shelf
-        result = succeeded({"success": True, "message": "picked"})
+        result = succeeded({"success": True, "message": "picked", "item": req.item})
 
     log_groot(req, attempt, result)
     return result
@@ -270,8 +270,8 @@ def place(req: PlaceRequest):
 
     if req.target == "basket":
         state["pick_item"] = None  # this unit is done, next pick is try 1 again
-        return succeeded({"success": True, "message": f"placed {item} in basket"})
-    return succeeded({"success": True, "message": f"returned {item} to shelf"})
+        return succeeded({"success": True, "message": f"placed {item} in basket", "item": item, "target": "basket"})
+    return succeeded({"success": True, "message": f"returned {item} to shelf", "item": item, "target": "return"})
 
 
 @app.post("/stop")

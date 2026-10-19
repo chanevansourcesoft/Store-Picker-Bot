@@ -170,7 +170,7 @@ class SimRobot(RobotAdapter):
         with self.lock:
             self.state["holding"] = item
             self.state["battery"] = max(0.0, self.state["battery"] - 0.05)
-        return self._ok({"success": True, "message": "picked"})
+        return self._ok({"success": True, "message": "picked", "item": item})
 
     def scan(self):
         problem = self._check_ready()
@@ -208,8 +208,8 @@ class SimRobot(RobotAdapter):
         with self.lock:
             self.state["holding"] = None
         if target == "basket":
-            return self._ok({"success": True, "message": f"placed {item} in basket"})
-        return self._ok({"success": True, "message": f"returned {item} to shelf"})
+            return self._ok({"success": True, "message": f"placed {item} in basket", "item": item, "target": "basket"})
+        return self._ok({"success": True, "message": f"returned {item} to shelf", "item": item, "target": "return"})
 
     def stop(self):
         with self.lock:

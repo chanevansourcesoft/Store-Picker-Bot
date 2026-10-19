@@ -83,12 +83,9 @@ def process_single_order(order_id: int, on_step: Optional[Callable] = None):
             target = entry["input"].get("target", "")
             if result.get("success"):
                 if target == "basket":
-                    # Extract item name and reduce stock
-                    msg = result.get("message", "")
-                    import re
-                    match = re.search(r"placed (\S+) in basket", msg)
-                    if match:
-                        item_name = match.group(1)
+                    # Reduce stock for the item the robot put in the basket (structured field)
+                    item_name = result.get("item")
+                    if item_name:
                         if taken.get(item_name, 0) < ordered.get(item_name, 0):
                             taken[item_name] = taken.get(item_name, 0) + 1
                             store.reduce_stock(item_name, 1)

@@ -7,6 +7,21 @@ A failed step is "recovered" when the same action on the same target
 """
 
 
+def basket_item(entry):
+    """Item a successful place_item(basket) step put in the basket, else None.
+    Reads the structured "item" field; orders saved before it existed only have the
+    robot's message ("placed X in basket")."""
+    result = entry.get("result") or {}
+    if entry.get("tool") != "place_item" or not result.get("success"):
+        return None
+    if (entry.get("input") or {}).get("target", result.get("target")) != "basket":
+        return None
+    if result.get("item"):
+        return result["item"]
+    message = result.get("message") or ""
+    return message.split(" ")[1] if message.startswith("placed ") and " " in message else None
+
+
 def held_item(log, index):
     """Item the robot holds at step `index` (from the last successful pick before it)."""
     for entry in reversed(log[:index]):

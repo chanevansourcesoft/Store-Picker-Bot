@@ -52,7 +52,8 @@ def test_build_bill_from_log():
     log_complete = [
         {"tool": "pick_item", "input": {"item": "chips_packet"}, "result": {"success": True}},
         {"tool": "scan_item", "input": {}, "result": {"success": True, "barcode": "123"}},
-        {"tool": "place_item", "input": {"target": "basket"}, "result": {"success": True, "message": "placed chips_packet in basket"}},
+        {"tool": "place_item", "input": {"target": "basket"},
+         "result": {"success": True, "message": "placed chips_packet in basket", "item": "chips_packet"}},
     ]
 
     bill = build_bill_from_log(log_complete, order, inventory)
@@ -64,7 +65,8 @@ def test_build_bill_from_log():
     log_returned = [
         {"tool": "pick_item", "input": {"item": "chips_packet"}, "result": {"success": True}},
         {"tool": "scan_item", "input": {}, "result": {"success": True, "barcode": "123"}},
-        {"tool": "place_item", "input": {"target": "return"}, "result": {"success": True, "message": "returned chips_packet"}},
+        {"tool": "place_item", "input": {"target": "return"},
+         "result": {"success": True, "message": "returned chips_packet", "item": "chips_packet"}},
     ]
 
     bill = build_bill_from_log(log_returned, order, inventory)
@@ -74,11 +76,19 @@ def test_build_bill_from_log():
     # 3 chips packets in the basket, but only 2 ordered: bill 2, report 1 extra
     order_2 = {"items": [{"item": "chips_packet", "qty": 2}], "unknown": []}
     placed = {"tool": "place_item", "input": {"target": "basket"},
-              "result": {"success": True, "message": "placed chips_packet in basket"}}
+              "result": {"success": True, "message": "placed chips_packet in basket", "item": "chips_packet"}}
     bill = build_bill_from_log([placed, placed, placed], order_2, inventory)
     assert bill["items"] == [{"item": "chips_packet", "qty": 2, "price": 60}]
     assert bill["total"] == 120 and bill["paid"] == 120
     assert bill["problems"] == ["1 extra chips_packet, not charged"]
+
+    # The bill reads the structured "item" field, never the robot's message text
+    wording = {"tool": "place_item", "input": {"target": "basket"},
+               "result": {"success": True, "message": "ok, done", "item": "chips_packet"}}
+    assert build_bill_from_log([wording], order, inventory)["total"] == 60
+    text_only = {"tool": "place_item", "input": {"target": "basket"},
+                 "result": {"success": True, "message": "placed chips_packet in basket"}}
+    assert build_bill_from_log([text_only], order, inventory)["total"] == 0
 
     print("PASS: test_build_bill_from_log")
 

@@ -104,8 +104,7 @@ class Autopilot:
                 if self.scan_tries >= MAX_SCAN_TRIES:
                     self.scanned = False
         elif tool == "place_item" and ok:
-            item = (result.get("message") or "").split(" ")[1:2]
-            item = item[0] if item else None
+            item = result.get("item")
             if args.get("target") == "basket":
                 self.pick_tries[item] = 0
             else:  # a returned unit counts as a failed try

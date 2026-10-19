@@ -191,13 +191,9 @@ def build_bill_from_log(log, order, inventory):
         if entry["tool"] == "place_item":
             target = entry["input"].get("target")
             result = entry["result"]
-            if target == "basket" and result.get("success"):
-                # Extract item name from the message "placed X in basket"
-                msg = result.get("message", "")
-                match = re.search(r"placed (\S+) in basket", msg)
-                if match:
-                    item = match.group(1)
-                    packed[item] = packed.get(item, 0) + 1
+            if target == "basket" and result.get("success") and result.get("item"):
+                item = result["item"]
+                packed[item] = packed.get(item, 0) + 1
 
     ordered = ordered_counts(order)
     bill_items = []

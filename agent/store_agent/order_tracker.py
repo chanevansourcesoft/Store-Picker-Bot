@@ -15,9 +15,6 @@ Example:
     tracker.progress_line()          # "Progress: chips_packet 0/2 packed. Holding: nothing. ..."
 """
 
-import re
-
-
 class OrderTracker:
     def __init__(self, items, inventory):
         self.inventory = inventory
@@ -104,7 +101,7 @@ class OrderTracker:
         elif tool == "pick_item":
             self.holding = args.get("item")
         elif tool == "place_item":
-            item = _item_from_message(result.get("message", "")) or self.holding
+            item = result.get("item") or self.holding
             self.holding = None
             if args.get("target") == "basket" and item:
                 if self.packed.get(item, 0) < self.ordered.get(item, 0):
@@ -126,8 +123,3 @@ class OrderTracker:
             text += " All items are packed. Next: navigate_to customer, then home, then say DONE."
         return text
 
-
-def _item_from_message(message):
-    """'placed chips_packet in basket' / 'returned chips_packet to shelf' -> 'chips_packet'."""
-    match = re.search(r"(?:placed|returned) (\S+) (?:in|to)", message)
-    return match.group(1) if match else None

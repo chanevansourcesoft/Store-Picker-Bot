@@ -112,6 +112,8 @@ def run_tool(name, args, tracker=None):
         if reason:
             return json.dumps(refused(reason))
 
+    held = tracker.holding if tracker is not None else None
+
     if name == "get_inventory":
         result = inventory
 
@@ -138,6 +140,13 @@ def run_tool(name, args, tracker=None):
 
     else:
         result = {"success": False, "message": f"unknown tool {name}"}
+
+    # Structured result: the bill, the stock and the tracker read "item", never the message text.
+    # An older robot server may not send it: then it is the item we asked for / the robot held.
+    if result.get("success") and name in ("pick_item", "place_item") and not result.get("item"):
+        result["item"] = args.get("item") if name == "pick_item" else held
+    if name == "place_item" and result.get("success"):
+        result.setdefault("target", args.get("target"))
 
     if tracker is not None:
         tracker.record(name, args, result)
