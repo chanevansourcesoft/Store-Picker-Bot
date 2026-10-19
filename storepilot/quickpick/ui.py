@@ -2,7 +2,7 @@
 Step 3: Streamlit web UI for the Dark Store Order Picker.
 
 Run:
-    streamlit run app/ui.py
+    streamlit run ui.py   (from storepilot/quickpick)
 """
 
 import sys

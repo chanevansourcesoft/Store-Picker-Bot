@@ -10,7 +10,7 @@ import time
 import traceback
 from typing import Callable, Optional
 
-from app import store
+from quickpick import store
 from store_agent import robot_client
 from store_agent.agent import run_agent
 from store_agent.config import load_inventory
@@ -185,7 +185,7 @@ def init_worker():
 
         @st.cache_resource
         def get_worker():
-            from app.worker import init_worker
+            from quickpick.worker import init_worker
             return init_worker()
     """
     store.init_db()                # creates data/ and the SQLite file, seeds inventory if empty

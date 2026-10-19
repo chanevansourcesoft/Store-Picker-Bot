@@ -13,17 +13,17 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-# Fix imports when running from project root
+# Streamlit runs this file as a script: put storepilot/ on the path so "import quickpick" works
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 import streamlit as st
 
-from app import store
+from quickpick import store
 from store_agent import robot_client
 from store_agent.config import load_inventory
 from store_agent.order_parser import parse_order
-from app.worker import init_worker
-from app.ui_style import (
+from quickpick.worker import init_worker
+from quickpick.ui_style import (
     BASE_CSS,
     CUSTOMER_CSS,
     CATEGORIES,

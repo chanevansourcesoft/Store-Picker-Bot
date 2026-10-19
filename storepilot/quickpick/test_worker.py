@@ -1,19 +1,19 @@
 """
-Tests for app/worker.py
+Tests for quickpick/worker.py
 
 The agent is replaced with a fake one, so these tests need no Nemotron key
 and no robot. The fake agent sends the same steps and robot messages as the
 mock robot and the Jetson server ("placed soup_can in basket").
 
 Run:
-    python -m app.test_worker
+    python -m quickpick.test_worker
 """
 
 from unittest.mock import patch
 
-from app import store, worker
+from quickpick import store, worker
 from store_agent.config import DEFAULT_INVENTORY
-from app.test_store import reset_inventory, setup_test_db, teardown_test_db
+from quickpick.test_store import reset_inventory, setup_test_db, teardown_test_db
 from store_agent.testing_fakes import BASKET, RETURN, SCAN, FakeRobot, ScriptedModel, nav, pick
 
 # The exact tool calls the model made in demo order #3 (it lost count
@@ -69,7 +69,7 @@ def test_stock_goes_down_after_order():
         assert order_id, problems
 
         steps = fake_steps("soup_can") + fake_steps("soup_can") + fake_steps("chips_pack")
-        with patch("app.worker.run_agent", make_fake_agent(steps)):
+        with patch("quickpick.worker.run_agent", make_fake_agent(steps)):
             worker.process_single_order(order_id)
 
         after = store.get_stock()
@@ -95,7 +95,7 @@ def test_returned_item_keeps_stock():
         assert order_id, problems
 
         steps = fake_steps("soup_can", target="return")
-        with patch("app.worker.run_agent", make_fake_agent(steps)):
+        with patch("quickpick.worker.run_agent", make_fake_agent(steps)):
             worker.process_single_order(order_id)
 
         assert store.get_stock()["soup_can"] == before["soup_can"]
@@ -163,7 +163,7 @@ def test_extra_item_does_not_reduce_stock():
         assert order_id, problems
 
         steps = fake_steps("soup_can") * 3  # 3 soups placed, 2 ordered
-        with patch("app.worker.run_agent", make_fake_agent(steps)):
+        with patch("quickpick.worker.run_agent", make_fake_agent(steps)):
             worker.process_single_order(order_id)
 
         assert before["soup_can"] - store.get_stock()["soup_can"] == 2

@@ -1,8 +1,8 @@
 """
-Tests for app/store.py
+Tests for quickpick/store.py
 
 Run:
-    python -m app.test_store
+    python -m quickpick.test_store
 """
 
 import json
@@ -10,7 +10,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from app import store
+from quickpick import store
 from store_agent.config import INVENTORY_FILE
 
 

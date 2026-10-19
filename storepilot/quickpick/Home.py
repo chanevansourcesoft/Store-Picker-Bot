@@ -2,19 +2,19 @@
 QuickPick - Home Page
 
 Entry point for the Streamlit multipage app.
-Run: streamlit run app/Home.py
+Run (from storepilot/quickpick): streamlit run Home.py
 """
 
 import sys
 from pathlib import Path
 
-# Fix imports when running from project root
+# Streamlit runs this file as a script: put storepilot/ on the path so "import quickpick" works
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st
 
-from app.worker import init_worker
-from app.ui_style import (
+from quickpick.worker import init_worker
+from quickpick.ui_style import (
     BASE_CSS,
     HOME_CSS,
     BRAND_GREEN_LIGHT,

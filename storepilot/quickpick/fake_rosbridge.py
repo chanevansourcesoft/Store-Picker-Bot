@@ -7,8 +7,8 @@ Sends a sample store map, a robot that drives between our stations,
 The throttle_rate in "subscribe" is respected, like the real rosbridge.
 
 Run:
-    python -m app.fake_rosbridge                 # ws://localhost:9090
-    python -m app.fake_rosbridge --host 0.0.0.0  # other PCs can connect too
+    python -m quickpick.fake_rosbridge                 # ws://localhost:9090
+    python -m quickpick.fake_rosbridge --host 0.0.0.0  # other PCs can connect too
 Then set ROSBRIDGE_URL=ws://localhost:9090 for the Streamlit app.
 """
 

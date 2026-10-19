@@ -1,11 +1,11 @@
 """
-Tests for app/fake_rosbridge.py and app/live_map.py.
+Tests for quickpick/fake_rosbridge.py and quickpick/live_map.py.
 
 Starts the fake rosbridge on a free port, subscribes like roslib.js does,
 and checks the messages and the throttle.
 
 Run:
-    python -m app.test_fake_rosbridge
+    python -m quickpick.test_fake_rosbridge
 """
 
 import asyncio
@@ -16,8 +16,8 @@ import time
 
 from websockets.asyncio.client import connect
 
-from app import live_map
-from app import fake_rosbridge as fake
+from quickpick import live_map
+from quickpick import fake_rosbridge as fake
 
 
 def free_port():

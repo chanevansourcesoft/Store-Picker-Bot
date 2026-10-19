@@ -18,19 +18,19 @@ The live ROS map is NOT inside a fragment: it keeps its own websocket open.
 import sys
 from pathlib import Path
 
-# Fix imports when running from project root
+# Streamlit runs this file as a script: put storepilot/ on the path so "import quickpick" works
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 import streamlit as st
 
-from app import live_map, metrics, store
-from app.settings import LASER_OFFSET, ROSBRIDGE_URL
+from quickpick import live_map, metrics, store
+from quickpick.settings import LASER_OFFSET, ROSBRIDGE_URL
 from store_agent import robot_client
 from store_agent.agent import group_items_by_shelf, plan_shelf_route, strip_think
 from store_agent.config import MODEL_ULTRA, ROBOT_URL, get_client, has_llm, load_inventory
-from app.step_log import is_recovered, step_target
-from app.worker import init_worker
-from app.ui_style import (
+from quickpick.step_log import is_recovered, step_target
+from quickpick.worker import init_worker
+from quickpick.ui_style import (
     BASE_CSS,
     OWNER_CSS,
     PRODUCT_INFO,

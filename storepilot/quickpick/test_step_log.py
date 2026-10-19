@@ -1,11 +1,11 @@
 """
-Tests for app/step_log.py
+Tests for quickpick/step_log.py
 
 Run:
-    python -m app.test_step_log
+    python -m quickpick.test_step_log
 """
 
-from app.step_log import is_recovered, step_target
+from quickpick.step_log import is_recovered, step_target
 
 
 def step(tool, data, success, message=""):

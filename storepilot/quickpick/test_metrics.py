@@ -1,13 +1,13 @@
 """
-Tests for app/metrics.py (owner dashboard numbers).
+Tests for quickpick/metrics.py (owner dashboard numbers).
 
 Run:
-    python -m app.test_metrics
+    python -m quickpick.test_metrics
 """
 
 from datetime import datetime
 
-from app import metrics
+from quickpick import metrics
 
 
 def step(tool, ok=True, time="2026-10-15T10:00:10", message="", refused=False, **inp):

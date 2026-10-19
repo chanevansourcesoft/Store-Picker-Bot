@@ -4,7 +4,7 @@ The browser talks to rosbridge on the Jetson directly (websocket + roslib.js).
 This file only builds the HTML for st.iframe. The app does NOT need ROS 2.
 
 Settings (in config.py): ROSBRIDGE_URL, LASER_OFFSET.
-If app/static/roslib.min.js exists, we put it inside the page (works without internet).
+If quickpick/static/roslib.min.js exists, we put it inside the page (works without internet).
 Otherwise the page loads roslib.js from a CDN.
 """
 
