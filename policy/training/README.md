@@ -9,5 +9,6 @@ GR00T N1.7 training on the training PC (2× RTX 5090). Guide: [TRAINING.md](../d
 | `resume_groot.sh` | Continues an interrupted run from its last checkpoint |
 | `merge_datasets.sh` | Merges several datasets into a new one |
 | `set_episode_file_indices.py` | Sets the episode-metadata file numbers of a merged dataset (run by `merge_datasets.sh`) |
+| `merge_episode_logs.py` | Combines the episode logs (product and round per episode) of merged datasets (run by `merge_datasets.sh`) |
 
 Runs are saved in `outputs/` (not stored in Git).

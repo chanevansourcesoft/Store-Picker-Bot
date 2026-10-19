@@ -1,28 +1,33 @@
 """
-Record teleoperated demonstrations on the real SO-100 arms, controlled with keys.
+Record teleoperated demonstrations on the real SO-100 arms, following a recording plan.
+
+A plan is: which products, how many rounds, and how many episodes per product per round.
+A round is one base position in front of the shelf. The robot stops a little differently
+every time it drives to a shelf, so each round puts the base at a different small offset
+(the script says which), and every product on that shelf is recorded there. Order:
+shelf -> round -> product, so the base moves once per round.
 
 LeRobot does the recording (same loop, units and dataset format as `lerobot-record`).
-This script only changes how episodes start and end, so it works like the sim teleop
-of the SO-101 project:
+Keys (read from the terminal), like the sim teleop of the SO-101 project:
 
-    Space  start recording an episode      (while waiting)
-    N      save the episode                (while recording)
-    X      cancel the episode, nothing is saved (while recording)
-    Q      quit; an unsaved episode is dropped
+    Space  start recording an episode                 (while waiting)
+    N      save the episode                           (while recording)
+    X      cancel the episode, nothing is saved       (while recording)
+    B      mark the last saved episode bad            (while waiting; it is recorded again)
+    Q      quit; an unsaved episode is dropped        (Ctrl+C does the same)
 
 Between episodes nothing is recorded, but the follower still copies the leader, so you
-can put the item back and move the arm to its rest pose. Keys are read from the terminal.
+can put the item back and move the arm to its rest pose.
 
-Each new dataset goes to dataset/<DDMMYYYY_HHMMSS>_<name>/ next to this script.
---resume <folder> adds episodes to an existing one.
+The GR00T instruction of each product comes from policy/instructions.json. The plan
+(with each product's instruction) is saved in the dataset's meta/plan.json, and every saved
+episode is listed in meta/episode_log.json with its round and product. --resume continues
+the plan where it stopped. Episodes marked bad are removed later with remove_bad_episodes.py.
 
-The GR00T instruction comes from policy/instructions.json (--item <id>), so recording and
-the robot at run time use exactly the same text. --task sets a custom text instead.
-
-Usage (from policy/, on the Jetson):
-    docker compose run --rm policy python3 data_collection/record.py --name soup_can --item soup_can
-    docker compose run --rm policy python3 data_collection/record.py \
-        --resume 12102026_153045_soup_can --item soup_can
+Usage (from policy/):
+    docker compose run --rm policy python3 data_collection/record.py --name store_v1    # Jetson (Docker)
+    python data_collection/record.py --name store_v1                                    # PC, after `source env.sh`
+    python data_collection/record.py --resume 12102026_153045_store_v1
 
 Guide: policy/docs/DATA_COLLECTION.md
 """
@@ -33,6 +38,9 @@ import math
 import os
 import re
 import select
+import _thread
+import shutil
+import subprocess
 import sys
 import termios
 import threading
@@ -40,6 +48,12 @@ import time
 import tty
 from datetime import datetime
 from pathlib import Path
+
+# Keep the terminal readable: no video-encoder banner or progress bars at every save.
+os.environ.setdefault("SVT_LOG", "2")  # SVT-AV1 encoder: warnings and errors only
+os.environ.setdefault("HF_DATASETS_DISABLE_PROGRESS_BARS", "1")
+# Arm calibration from policy/calibration/ (also set by compose.yaml and env.sh).
+os.environ.setdefault("HF_LEROBOT_CALIBRATION", str(Path(__file__).resolve().parent.parent / "calibration"))
 
 from lerobot.cameras.opencv import OpenCVCameraConfig
 from lerobot.common.control_utils import sanity_check_dataset_robot_compatibility
@@ -58,9 +72,14 @@ from lerobot.teleoperators.so_leader import SO100LeaderConfig
 from lerobot.utils.feature_utils import combine_feature_dicts
 from lerobot.utils.utils import init_logging
 
-DATASET_DIR = Path(__file__).resolve().parent / "dataset"
-# Item id (as in webapp/app/inventory.json) -> GR00T instruction. Shared with the robot at run time.
-INSTRUCTIONS_FILE = Path(__file__).resolve().parent.parent / "instructions.json"
+HERE = Path(__file__).resolve().parent
+DATASET_DIR = HERE / "dataset"
+# Item id (as in webapp/app/inventory.json) -> shelf and GR00T instruction. Shared with the robot at run time.
+INSTRUCTIONS_FILE = HERE.parent / "instructions.json"
+# Fixed camera controls (v4l2-ctl names), applied at every start. See docs/CAMERA_SETUP.md.
+CAMERA_SETTINGS_FILE = HERE / "camera_settings.json"
+PLAN_FILE = "plan.json"  # in the dataset's meta/
+LOG_FILE = "episode_log.json"  # in the dataset's meta/
 
 # Fixed for the whole project: training and the pick service rely on these names.
 FOLLOWER_ID = "picker_follower"
@@ -68,20 +87,42 @@ LEADER_ID = "picker_leader"
 GRIPPER_CAM = "gripper_cam"
 SCENE_CAM = "scene_cam"
 
+# Base position of each round, seen from behind the robot facing the shelf.
+# Up to 5 rounds the turns are combined with closer/further; 6 or 7 rounds give them their own round.
+POSITIONS_5 = ["centre", "left", "right", "closer, turned left", "further, turned right"]
+POSITIONS_7 = ["centre", "left", "right", "closer", "further", "turned left", "turned right"]
+
+
+def round_positions(rounds):
+    if rounds <= len(POSITIONS_5):
+        return POSITIONS_5[:rounds]
+    return POSITIONS_7[:rounds]
+
+
+def describe_position(position, offset_cm, turn_deg):
+    if position == "centre":
+        return "at the normal stop point"
+    words = {"left": f"{offset_cm:g} cm left", "right": f"{offset_cm:g} cm right",
+             "closer": f"{offset_cm:g} cm closer to the shelf", "further": f"{offset_cm:g} cm further from the shelf",
+             "turned left": f"turned {turn_deg:g} deg left", "turned right": f"turned {turn_deg:g} deg right"}
+    return ", ".join(words[part] for part in position.split(", ")) + " of the normal stop point"
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Record SO-100 demonstrations with LeRobot, controlled with keys.",
+        description="Record SO-100 demonstrations with LeRobot, following a plan of products and rounds.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--name", help="Name for a new dataset (letters, digits, - and _)")
-    target.add_argument("--resume", help="Existing dataset folder in dataset/ to add episodes to")
-    instruction = parser.add_mutually_exclusive_group(required=True)
-    instruction.add_argument("--item",
-                             help=f"Item id; its instruction is read from {INSTRUCTIONS_FILE.name}")
-    instruction.add_argument("--task",
-                             help="Custom instruction for every episode of this run (instead of --item)")
+    target.add_argument("--resume", help="Existing dataset folder in dataset/ to continue")
+    plan = parser.add_argument_group("plan of a new dataset (asked in the terminal when not given)")
+    plan.add_argument("--products", help="Comma-separated item ids from instructions.json, or 'all'")
+    plan.add_argument("--rounds", type=int, help=f"Base positions per shelf (1-{len(POSITIONS_7)})")
+    plan.add_argument("--per_round", type=int, help="Episodes per product per round")
+    plan.add_argument("--offset_cm", type=float, default=3.0, help="Base offset of the left/right/closer/further rounds")
+    plan.add_argument("--turn_deg", type=float, default=3.0, help="Base turn of the turned rounds")
+    parser.add_argument("--note", default="", help="Note for this session, saved in the episode log")
     parser.add_argument("--follower_port", default=os.environ.get("FOLLOWER_PORT"),
                         help="Follower serial port (default: FOLLOWER_PORT from .env)")
     parser.add_argument("--leader_port", default=os.environ.get("LEADER_PORT"),
@@ -107,13 +148,148 @@ def parse_args():
                      + " (pass them or set them in the repo root .env)")
     if args.name is not None and not re.fullmatch(r"[A-Za-z0-9_-]+", args.name):
         parser.error("--name may only contain letters, digits, '-' and '_'")
-    if args.item is not None:
-        instructions = json.loads(INSTRUCTIONS_FILE.read_text())
-        if args.item not in instructions:
-            parser.error(f"unknown --item '{args.item}'. Items in {INSTRUCTIONS_FILE}: "
-                         + ", ".join(instructions))
-        args.task = instructions[args.item]
+    if args.resume and (args.products or args.rounds or args.per_round):
+        parser.error("--products, --rounds and --per_round are for a new dataset; --resume uses its saved plan")
     return args
+
+
+# ---------------------------------------------------------------------------------------------
+# Plan and episode log
+
+
+def ask(question, default):
+    answer = input(f"{question} [{default}]: ").strip()
+    return answer or str(default)
+
+
+def make_plan(args):
+    """Products, rounds and episodes per round for a new dataset, from the options or asked."""
+    catalog = json.loads(INSTRUCTIONS_FILE.read_text())
+    ids = list(catalog)
+    if args.products is None:
+        print("Products (from instructions.json):")
+        for i, item in enumerate(ids, 1):
+            print(f"  {i}) {item:<14} {catalog[item]['shelf']:<10} \"{catalog[item]['instruction']}\"")
+        args.products = ask("Products to record (numbers or ids, comma-separated, or all)", "all")
+    if args.products.strip().lower() == "all":
+        products = ids
+    else:
+        products = []
+        for part in args.products.split(","):
+            part = part.strip()
+            item = ids[int(part) - 1] if part.isdigit() and 1 <= int(part) <= len(ids) else part
+            if item not in catalog:
+                sys.exit(f"Unknown product '{part}'. Products in {INSTRUCTIONS_FILE}: {', '.join(ids)}")
+            if item not in products:
+                products.append(item)
+    if args.rounds is None:
+        args.rounds = int(ask(f"Rounds (base positions per shelf, 1-{len(POSITIONS_7)})", 5))
+    if not 1 <= args.rounds <= len(POSITIONS_7):
+        sys.exit(f"Rounds must be 1 to {len(POSITIONS_7)}.")
+    if args.per_round is None:
+        args.per_round = int(ask("Episodes per product per round", 10))
+    if args.per_round < 1:
+        sys.exit("Episodes per round must be at least 1.")
+
+    plan = {
+        "products": {item: catalog[item] for item in products},
+        "rounds": args.rounds,
+        "per_round": args.per_round,
+        "positions": round_positions(args.rounds),
+        "offset_cm": args.offset_cm,
+        "turn_deg": args.turn_deg,
+    }
+    total = len(products) * args.rounds * args.per_round
+    print(f"\nPlan: {len(products)} product(s) x {args.rounds} round(s) x {args.per_round} episodes = {total} episodes")
+    for shelf, items in shelves(plan):
+        print(f"  {shelf}: {', '.join(items)}")
+    if ask("Start?", "Y").lower() not in ("y", "yes"):
+        sys.exit("Nothing recorded.")
+    return plan
+
+
+def check_plan_instructions(plan):
+    """Refuse to continue when instructions.json changed a planned product's text since the plan was made."""
+    catalog = json.loads(INSTRUCTIONS_FILE.read_text())
+    changed = [item for item, entry in plan["products"].items()
+               if catalog.get(item, {}).get("instruction") != entry["instruction"]]
+    if changed:
+        sys.exit("instructions.json changed the instruction of " + ", ".join(changed) + " since this dataset was "
+                 "started.\nOne dataset must use one text per product: put the old text back, or start a new dataset.")
+
+
+def shelves(plan):
+    """[(shelf, [items...]), ...] in the order the products were chosen."""
+    order = {}
+    for item, entry in plan["products"].items():
+        order.setdefault(entry["shelf"], []).append(item)
+    return list(order.items())
+
+
+def write_json(path, data):
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    tmp.replace(path)
+
+
+class EpisodeLog:
+    """meta/episode_log.json: sessions, and per saved episode its round, product and bad flag."""
+
+    def __init__(self, root):
+        self.path = root / "meta" / LOG_FILE
+        self.data = json.loads(self.path.read_text()) if self.path.exists() else {"sessions": [], "episodes": []}
+
+    def start_session(self, note):
+        self.data["sessions"].append({"started": datetime.now().isoformat(timespec="seconds"), "note": note})
+        self.save()
+
+    def add(self, episode_index, item, shelf, round_, position):
+        self.data["episodes"].append({
+            "episode_index": episode_index, "item": item, "shelf": shelf, "round": round_,
+            "position": position, "session": len(self.data["sessions"]) - 1, "bad": False,
+        })
+        self.save()
+
+    def mark_last_bad(self):
+        """Mark the newest episode bad. Returns its entry, or None when there is none to mark."""
+        if not self.data["episodes"]:
+            return None
+        last = max(self.data["episodes"], key=lambda e: e["episode_index"])
+        if last["bad"]:
+            return None
+        last["bad"] = True
+        self.save()
+        return last
+
+    def good_count(self, item, round_):
+        return sum(1 for e in self.data["episodes"]
+                   if e["item"] == item and e["round"] == round_ and not e["bad"])
+
+    def bad_count(self):
+        return sum(1 for e in self.data["episodes"] if e["bad"])
+
+    def save(self):
+        write_json(self.path, self.data)
+
+
+def next_slot(plan, log):
+    """The (shelf, round, item) to record next, or None when the plan is complete."""
+    for shelf, items in shelves(plan):
+        for round_ in range(1, plan["rounds"] + 1):
+            for item in items:
+                if log.good_count(item, round_) < plan["per_round"]:
+                    return shelf, round_, item
+    return None
+
+
+def plan_progress(plan, log):
+    done = sum(min(plan["per_round"], log.good_count(item, r))
+               for item in plan["products"] for r in range(1, plan["rounds"] + 1))
+    return done, len(plan["products"]) * plan["rounds"] * plan["per_round"]
+
+
+# ---------------------------------------------------------------------------------------------
+# Hardware
 
 
 def camera_config(device, args):
@@ -123,15 +299,46 @@ def camera_config(device, args):
     )
 
 
+def apply_camera_settings(devices):
+    """Set the fixed camera controls from camera_settings.json with v4l2-ctl (they reset on unplug or reboot)."""
+    if not CAMERA_SETTINGS_FILE.exists():
+        print(f"WARNING: no {CAMERA_SETTINGS_FILE.name}: camera exposure, white balance and focus are automatic "
+              "(see CAMERA_SETUP.md, step 4).")
+        return
+    if shutil.which("v4l2-ctl") is None:
+        sys.exit("v4l2-ctl not found: it is needed to apply camera_settings.json.")
+    settings = json.loads(CAMERA_SETTINGS_FILE.read_text())
+    for name, device in devices.items():
+        controls = settings.get(name)
+        if not controls:
+            print(f"WARNING: {CAMERA_SETTINGS_FILE.name} has no settings for {name}: its image settings are automatic.")
+            continue
+        # Order matters: auto modes must be off before their manual values are accepted.
+        for control, value in controls.items():
+            result = subprocess.run(["v4l2-ctl", "-d", device, f"--set-ctrl={control}={value}"],
+                                    capture_output=True, text=True)
+            if result.returncode != 0:
+                sys.exit(f"Could not set {control}={value} on {name} ({device}): {result.stderr.strip()}\n"
+                         f"Check the control names with: v4l2-ctl -d {device} --list-ctrls")
+        print(f"Camera settings applied to {name}: " + ", ".join(f"{k}={v}" for k, v in controls.items()))
+
+
+# ---------------------------------------------------------------------------------------------
+# Keys and status line
+
+
 class KeyControl:
     """Reads single keys from the terminal in a background thread and shows a status line.
 
     A key ends the running record_loop by setting events["exit_early"]; the main thread
     then reads the command with take(). Keys that do not fit the current state are ignored.
+    Ctrl+C asks to quit like Q: the main thread finishes what it is doing (also a save) first.
+    The terminal does not turn Ctrl+C into a signal meanwhile, so no process is interrupted
+    in the middle of writing an episode; a second Ctrl+C stops at once.
     """
 
     KEYS = {
-        "waiting": {" ": "start", "q": "quit"},
+        "waiting": {" ": "start", "b": "bad", "q": "quit"},
         "recording": {"n": "save", "x": "discard", "q": "quit"},
     }
 
@@ -141,32 +348,48 @@ class KeyControl:
         self.lock = threading.Lock()
         self.state = None
         self.command = None
-        self.episode = 0
-        self.saved = 0
+        self.quit_requested = False
+        self.where = ""
         self.started_at = 0.0
         self.running = True
         self.fd = sys.stdin.fileno()
         self.old_term = termios.tcgetattr(self.fd)
-        tty.setcbreak(self.fd)  # one key at a time, no echo; Ctrl+C still works
+        tty.setcbreak(self.fd)  # one key at a time, no echo
+        attrs = termios.tcgetattr(self.fd)
+        attrs[3] &= ~termios.ISIG  # Ctrl+C arrives as a key ("\x03") instead of a signal
+        termios.tcsetattr(self.fd, termios.TCSANOW, attrs)
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
-    def set_state(self, state, episode, saved):
+    def _on_ctrl_c(self):
+        if self.quit_requested:  # second Ctrl+C: stop right away
+            _thread.interrupt_main()
+            return
+        self.quit_requested = True
+        self.events["exit_early"] = True
+        say("Ctrl+C: quitting after the current step (press Ctrl+C again to stop at once).")
+
+    def set_state(self, state, where):
         with self.lock:
-            self.state, self.episode, self.saved = state, episode, saved
+            self.state, self.where = state, where
             self.command = None
             self.started_at = time.monotonic()
+        if self.quit_requested:
+            self.events["exit_early"] = True
 
     def take(self):
         with self.lock:
             command, self.command, self.state = self.command, None, None
-            return command
+        return "quit" if self.quit_requested and command != "save" else command
 
     def _run(self):
         while self.running:
             ready, _, _ = select.select([sys.stdin], [], [], 0.2)
             if ready:
                 key = os.read(self.fd, 1).decode(errors="ignore").lower()
+                if key == "\x03":
+                    self._on_ctrl_c()
+                    continue
                 with self.lock:
                     command = self.KEYS.get(self.state, {}).get(key)
                     if command and self.command is None:
@@ -176,12 +399,12 @@ class KeyControl:
 
     def _show_status(self):
         with self.lock:
-            state, episode, saved = self.state, self.episode, self.saved
+            state, where = self.state, self.where
             elapsed = time.monotonic() - self.started_at
         if state == "waiting":
-            line = f"WAITING   next episode {episode} | saved this run: {saved} | Space = record, Q = quit"
+            line = f"WAITING   {where} | Space = record, B = last one was bad, Q = quit"
         elif state == "recording":
-            line = f"RECORDING episode {episode} | {elapsed:5.1f} s | N = save, X = cancel, Q = quit"
+            line = f"RECORDING {where} | {elapsed:5.1f} s | N = save, X = cancel, Q = quit"
             if elapsed > self.warn_after_s:
                 line += "  << long episode: press N or X"
         else:
@@ -201,12 +424,46 @@ def say(text):
     sys.stdout.flush()
 
 
+def announce(plan, slot, previous):
+    """Tell the operator what changes for the next episode: shelf, base position, product."""
+    shelf, round_, item = slot
+    prev_shelf, prev_round, prev_item = previous or (None, None, None)
+    if shelf != prev_shelf:
+        say(f"\n=== {shelf}: drive the robot to {shelf} ===")
+    if (shelf, round_) != (prev_shelf, prev_round):
+        position = plan["positions"][round_ - 1]
+        say(f"--- Round {round_}/{plan['rounds']} at {shelf}: put the base "
+            f"{describe_position(position, plan['offset_cm'], plan['turn_deg'])} ({position}) ---")
+    if slot != previous:
+        say(f"Product: {item}  \"{plan['products'][item]['instruction']}\"  "
+            f"({plan['per_round']} episodes this round)")
+
+
+# ---------------------------------------------------------------------------------------------
+
+
 def main():
     args = parse_args()
     init_logging()
     if not sys.stdin.isatty():
         sys.exit("Run this in a terminal: the keys are read from it.")
 
+    # Plan first, so typos are caught before the hardware is touched.
+    if args.resume:
+        root = DATASET_DIR / Path(args.resume).name
+        if not (root / "meta" / "info.json").exists():
+            sys.exit(f"{root} is not a dataset. Existing datasets: "
+                     + ", ".join(sorted(p.name for p in DATASET_DIR.glob("*") if p.is_dir())))
+        if not (root / "meta" / PLAN_FILE).exists():
+            sys.exit(f"{root} has no {PLAN_FILE}: it was not recorded with a plan.")
+        plan = json.loads((root / "meta" / PLAN_FILE).read_text())
+        check_plan_instructions(plan)
+    else:
+        root = DATASET_DIR / f"{datetime.now().strftime('%d%m%Y_%H%M%S')}_{args.name}"
+        plan = make_plan(args)
+    repo_id = f"{os.environ.get('HF_USER') or 'local'}/{root.name}"
+
+    apply_camera_settings({GRIPPER_CAM: args.gripper_cam, SCENE_CAM: args.scene_cam})
     robot = make_robot_from_config(SO100FollowerConfig(
         port=args.follower_port,
         id=FOLLOWER_ID,
@@ -229,15 +486,6 @@ def main():
             use_videos=True,
         ),
     )
-
-    if args.resume:
-        root = DATASET_DIR / Path(args.resume).name
-        if not (root / "meta" / "info.json").exists():
-            sys.exit(f"{root} is not a dataset. Existing datasets: "
-                     + ", ".join(sorted(p.name for p in DATASET_DIR.glob("*") if p.is_dir())))
-    else:
-        root = DATASET_DIR / f"{datetime.now().strftime('%d%m%Y_%H%M%S')}_{args.name}"
-    repo_id = f"{os.environ.get('HF_USER') or 'local'}/{root.name}"
     writer_kwargs = dict(
         image_writer_processes=0,
         image_writer_threads=4 * len(robot.cameras),
@@ -254,11 +502,11 @@ def main():
         robot_observation_processor=robot_observation_processor,
         teleop=teleop,
         control_time_s=math.inf,  # episodes end only with a key
-        single_task=args.task,
     )
 
     keys = None
     dataset = None
+    log = None
     saved = 0
     try:
         # Leader first so the follower is not left idle (same order as lerobot-record).
@@ -270,38 +518,67 @@ def main():
         if args.resume:
             dataset = LeRobotDataset.resume(repo_id, root=root, **writer_kwargs)
             sanity_check_dataset_robot_compatibility(dataset, robot, args.fps, features)
-            print(f"Adding episodes to {root} ({dataset.num_episodes} already saved)")
         else:
             DATASET_DIR.mkdir(parents=True, exist_ok=True)
             dataset = LeRobotDataset.create(
                 repo_id, args.fps, root=root, robot_type=robot.name, features=features, use_videos=True,
                 **writer_kwargs,
             )
-            print(f"New dataset: {root}")
-        print(f"Task: {args.task}")
+            write_json(root / "meta" / PLAN_FILE, plan)
+        log = EpisodeLog(root)
+        if len(log.data["episodes"]) != dataset.num_episodes:
+            say(f"WARNING: {LOG_FILE} lists {len(log.data['episodes'])} episodes but the dataset has "
+                f"{dataset.num_episodes}: the plan progress may be wrong.")
+        log.start_session(args.note)
+        done, total = plan_progress(plan, log)
+        print(f"Dataset: {root} ({dataset.num_episodes} episodes saved, plan {done}/{total})")
 
         keys = KeyControl(events, args.warn_after_s)
+        previous = None
 
         with VideoEncodingManager(dataset):
             while True:
-                keys.set_state("waiting", dataset.num_episodes, saved)
-                record_loop(dataset=None, **loop_kwargs)
-                if keys.take() == "quit":
+                slot = next_slot(plan, log)
+                if slot is None:
+                    say("Plan complete: every product has all its episodes in every round.")
                     break
+                shelf, round_, item = slot
+                announce(plan, slot, previous)
+                previous = slot
+                loop_kwargs["single_task"] = plan["products"][item]["instruction"]
+                done, total = plan_progress(plan, log)
+                where = (f"{shelf} round {round_}/{plan['rounds']} | {item} "
+                         f"{log.good_count(item, round_) + 1}/{plan['per_round']} | plan {done}/{total}")
 
-                keys.set_state("recording", dataset.num_episodes, saved)
+                keys.set_state("waiting", where)
+                record_loop(dataset=None, **loop_kwargs)
+                command = keys.take()
+                if command == "quit":
+                    break
+                if command == "bad":
+                    entry = log.mark_last_bad()
+                    if entry is None:
+                        say("No saved episode to mark (or it is already marked).")
+                    else:
+                        say(f"Episode {entry['episode_index']} ({entry['item']}, round {entry['round']}) marked bad: "
+                            "it will be recorded again.")
+                    continue
+
+                keys.set_state("recording", f"{item} round {round_}/{plan['rounds']}")
                 record_loop(dataset=dataset, **loop_kwargs)
                 command = keys.take()
 
                 if command == "save" and dataset.has_pending_frames():
-                    say(f"Saving episode {dataset.num_episodes}...")
+                    index = dataset.num_episodes
+                    say(f"Saving episode {index}...")
                     dataset.save_episode()
+                    log.add(index, item, shelf, round_, plan["positions"][round_ - 1])
                     saved += 1
-                    say(f"Saved episode {dataset.num_episodes - 1}.")
+                    say(f"Saved episode {index} ({item}, round {round_}).")
                 else:
                     dataset.clear_episode_buffer()
                     say(f"Episode {dataset.num_episodes} cancelled, nothing saved.")
-                if command == "quit":
+                if command == "quit" or keys.quit_requested:
                     break
     finally:
         if keys is not None:
@@ -310,8 +587,15 @@ def main():
             robot.disconnect()
         if teleop.is_connected:
             teleop.disconnect()
-        if dataset is not None:
-            print(f"Saved {saved} episode(s) this run. Dataset: {root} ({dataset.num_episodes} episodes)")
+        if dataset is not None and log is not None:
+            done, total = plan_progress(plan, log)
+            print(f"Saved {saved} episode(s) this run. Dataset: {root} ({dataset.num_episodes} episodes, "
+                  f"plan {done}/{total}).")
+            if log.bad_count():
+                print(f"{log.bad_count()} episode(s) marked bad: remove them with "
+                      f"python3 data_collection/remove_bad_episodes.py {root.name}")
+            if done < total:
+                print(f"Continue with: python3 data_collection/record.py --resume {root.name}")
 
 
 if __name__ == "__main__":

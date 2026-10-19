@@ -5,7 +5,7 @@
 #
 # Usage:
 #   ./merge_datasets.sh <name> <dataset folder> <dataset folder> [...]
-#   ./merge_datasets.sh all_products 12102026_153045_soup_can 12102026_161200_chips_pack
+#   ./merge_datasets.sh all_products 12102026_153045_store_v1 14102026_100000_store_v2
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -33,6 +33,7 @@ fi
 
 REPO_IDS=()
 ROOTS=()
+PATHS=()
 for dataset in "$@"; do
   dataset="$(basename "$dataset")"
   if [[ ! -f "$DATASET_DIR/$dataset/meta/info.json" ]]; then
@@ -41,6 +42,7 @@ for dataset in "$@"; do
   fi
   REPO_IDS+=("'local/$dataset'")
   ROOTS+=("'$DATASET_DIR/$dataset'")
+  PATHS+=("$DATASET_DIR/$dataset")
 done
 
 OUT_NAME="$(date +%d%m%Y_%H%M%S)_${NAME}"
@@ -55,5 +57,7 @@ lerobot-edit-dataset \
 
 # Make the episode-metadata file numbers match the merged files (see set_episode_file_indices.py).
 python "$SCRIPT_DIR/set_episode_file_indices.py" "$DATASET_DIR/$OUT_NAME"
+# Carry over each episode's round and product from record.py's logs (see merge_episode_logs.py).
+python "$SCRIPT_DIR/merge_episode_logs.py" "$DATASET_DIR/$OUT_NAME" "${PATHS[@]}"
 
 echo "Merged dataset: $DATASET_DIR/$OUT_NAME"

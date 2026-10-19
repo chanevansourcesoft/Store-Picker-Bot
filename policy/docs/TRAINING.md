@@ -43,17 +43,18 @@ folder names ([DATA_COLLECTION.md](DATA_COLLECTION.md), step 8).
 
 ## 3. Merge datasets (optional)
 
-GR00T trains on one dataset. To train on several (for example one per product), merge them first:
+GR00T trains on one dataset. To train on several (for example several recording plans), merge them first:
 
 ```bash
 cd training
-./merge_datasets.sh all_products 12102026_153045_soup_can 12102026_161200_chips_pack
+./merge_datasets.sh all_products 12102026_153045_store_v1 14102026_100000_store_v2
 ```
 
 This creates a new folder such as `data_collection/dataset/13102026_090000_all_products/`. The inputs are not changed.
 The script then runs `set_episode_file_indices.py`, which sets the file numbers in the merged episode metadata.
 LeRobot 0.6.1 copies them from the inputs, and they do not match for datasets recorded in several sessions (`--resume`).
 Dataset edits such as deleting episodes need them to match.
+It also combines the inputs' episode logs (product and round of each episode, from `record.py`) into the merged dataset.
 All inputs must have the same cameras and FPS, which is always true for datasets made with `record.py`.
 
 ## 4. Train

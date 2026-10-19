@@ -15,6 +15,7 @@ Kept out of the ROS 2 build by `COLCON_IGNORE`.
 | `training/` | GR00T training scripts for the training PC (2× RTX 5090) |
 | `instructions.json` | GR00T instruction per item id, used when recording and when picking |
 | `docs/` | Step-by-step guides |
+| `env.sh` | Environment for running without Docker on a PC (`source policy/env.sh`) |
 
 ## Versions
 
@@ -28,7 +29,7 @@ Kept out of the ROS 2 build by `COLCON_IGNORE`.
 
 ## Guides
 
-1. Getting started (below): Hugging Face access and the Jetson container
+1. Getting started (below): Hugging Face access, then the Jetson container or a PC without Docker
 2. [ARM_SETUP.md](docs/ARM_SETUP.md): ports, servo IDs, calibration
 3. [TELEOP_TEST.md](docs/TELEOP_TEST.md): checking that the follower mirrors the leader
 4. [CAMERA_SETUP.md](docs/CAMERA_SETUP.md): mounting, device paths, formats, exposure
@@ -77,16 +78,46 @@ docker compose run --rm policy lerobot-record --help
 
 Arm serial ports and cameras are available inside the container, including after re-plugging.
 
-## Other machines: uv
+## Getting started without Docker (PC, e.g. Ubuntu 24.04)
 
-The training PC is set up with one script: see [TRAINING.md](docs/TRAINING.md).
-On other Linux machines, install the same environment with uv (needs a C compiler, e.g. `build-essential`):
+The arms, cameras and data collection also work on a normal Linux PC, without Docker. Every guide shows
+both ways: the Docker command for the Jetson, and the same command without the
+`docker compose run --rm policy` prefix for a PC. The training PC is set up with its own script
+instead: see [TRAINING.md](docs/TRAINING.md).
 
-```bash
-cd policy
-uv sync --managed-python
-uv run lerobot-record --help
-```
+1. System packages: a C compiler (one package is built from source) and `v4l2-ctl` for the cameras:
+   ```bash
+   sudo apt install build-essential v4l-utils libsndfile1 curl
+   ```
+2. Allow your user to use the arm serial ports, then log out and back in:
+   ```bash
+   sudo usermod -aG dialout $USER
+   ```
+3. A Python environment with LeRobot 0.6.1. Either:
+   - **uv (recommended):** the exact locked versions, in `policy/.venv`, separate from other projects:
+     ```bash
+     curl -LsSf https://astral.sh/uv/0.12.23/install.sh | sh
+     cd policy
+     uv sync --frozen --managed-python
+     ```
+   - **An existing conda env** with LeRobot 0.6.1, e.g. the sim project's `lerobot_env`. Add the servo
+     library once (it only adds `feetech-servo-sdk` and `pyserial`):
+     ```bash
+     conda activate lerobot_env
+     pip install feetech-servo-sdk
+     ```
+4. Fill in the repo root `.env` as described in "Hugging Face access" above, plus the arm ports and
+   cameras once you know them ([DATA_COLLECTION.md](docs/DATA_COLLECTION.md), step 2).
+5. In every new terminal, load the environment (with conda, run `conda activate lerobot_env` first):
+   ```bash
+   source policy/env.sh
+   ```
+   It prints the environment it uses and `LeRobot 0.6.1`. A GPU is not needed for the arms or recording.
+
+`env.sh` does what the container does on the Jetson: it uses the active conda env if it has LeRobot,
+otherwise `policy/.venv`, loads `.env` (so
+`$FOLLOWER_PORT`, `$SCENE_CAM` etc. can be typed in commands), keeps the arm calibration in
+`policy/calibration/`, and changes to the `policy/` folder, where all commands run.
 
 ## Changing dependencies
 

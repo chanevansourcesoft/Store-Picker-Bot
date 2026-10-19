@@ -4,5 +4,7 @@ Recording teleoperated demonstrations on the real SO-100 arms. Guide: [DATA_COLL
 
 | File / folder | What it is |
 |---|---|
-| `record.py` | Records episodes with LeRobot, controlled with keys (Space, N, X, Q) |
+| `record.py` | Records episodes with LeRobot following a plan of products and rounds, controlled with keys (Space, N, X, B, Q) |
+| `remove_bad_episodes.py` | Removes the episodes marked bad (key B) from a dataset |
+| `camera_settings.json` | Fixed exposure, white balance and focus, applied by `record.py` (start from `camera_settings.example.json`) |
 | `dataset/` | Recorded datasets, one folder each: `<DDMMYYYY_HHMMSS>_<name>/` (not stored in Git) |

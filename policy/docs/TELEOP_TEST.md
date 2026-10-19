@@ -2,10 +2,11 @@
 
 Check that the follower mirrors the leader before setting up cameras and recording.
 Complete [ARM_SETUP.md](ARM_SETUP.md) first (both arms calibrated). All commands run from the `policy/` folder.
+Commands are shown for both setups: **with Docker** on the Jetson, and **without Docker** on a PC after `source env.sh` (see [README.md](../README.md)).
 
 ## 1. Before you start
 
-- Both controller boards are connected to the Jetson, and both arms are powered.
+- Both controller boards are connected to the Jetson (or the PC), and both arms are powered.
 - Both calibration files exist:
   ```bash
   ls calibration/robots/so_follower/picker_follower.json \
@@ -22,7 +23,13 @@ Complete [ARM_SETUP.md](ARM_SETUP.md) first (both arms calibrated). All commands
 ## 2. Run
 
 ```bash
+# With Docker (Jetson)
 docker compose run --rm policy lerobot-teleoperate \
+  --robot.type=so100_follower --robot.port=FOLLOWER_PORT --robot.id=picker_follower \
+  --teleop.type=so100_leader --teleop.port=LEADER_PORT --teleop.id=picker_leader
+
+# Without Docker (after `source env.sh`, see README.md)
+lerobot-teleoperate \
   --robot.type=so100_follower --robot.port=FOLLOWER_PORT --robot.id=picker_follower \
   --teleop.type=so100_leader --teleop.port=LEADER_PORT --teleop.id=picker_leader
 ```

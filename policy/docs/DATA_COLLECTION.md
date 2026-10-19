@@ -1,11 +1,12 @@
 # Data collection
 
-How to record teleoperated demonstrations for GR00T on the Jetson.
+How to record teleoperated demonstrations for GR00T on the Jetson or a PC.
+Commands are shown for both setups: **with Docker** on the Jetson, and **without Docker** on a PC after `source env.sh` (see [README.md](../README.md)).
 Complete [ARM_SETUP.md](ARM_SETUP.md), [TELEOP_TEST.md](TELEOP_TEST.md) and [CAMERA_SETUP.md](CAMERA_SETUP.md) first (container built, both arms calibrated, teleoperation working, cameras checked).
 
 Recording uses `data_collection/record.py`. LeRobot does the recording, exactly like `lerobot-record`
-(same units and dataset format), but **you control every episode with keys**: an episode starts and
-ends only when you press a key, and a bad episode can be cancelled at once.
+(same units and dataset format), but **you control every episode with keys**, and the script follows a
+**recording plan**: which products, how many rounds, and how many episodes of each.
 
 All commands run from the `policy/` folder.
 
@@ -18,16 +19,25 @@ Keep these fixed for the whole project. Training and the pick service depend on 
 | Arms | SO-100 follower `picker_follower`, SO-100 leader `picker_leader` |
 | Camera names | `gripper_cam`, `scene_cam` |
 | Resolution / FPS | 640×480 at 30 FPS |
-| Task text | From `policy/instructions.json`, one per item, e.g. `soup_can` → `pick up the soup can and place it in the basket` |
+| Products | `policy/instructions.json`: item id → shelf and GR00T instruction |
 
-The task text is the language instruction GR00T is trained on. It is fixed per item in
-`instructions.json`, so every episode of a product gets the same sentence, and the pick service reads
-the same file when it runs the trained model.
+The instruction is the sentence GR00T is trained on. It is fixed per product in `instructions.json`:
 
-## 2. One-time setup: devices in `.env`
+```json
+"soup_can": {"shelf": "shelf_A", "instruction": "pick up the soup can and place it in the basket"}
+```
 
-Add the arm ports and camera paths to the repo root `.env`, so you don't have to type them each time
-(values from [ARM_SETUP.md](ARM_SETUP.md) and [CAMERA_SETUP.md](CAMERA_SETUP.md)):
+The item ids are the same as in the store's `inventory.json`. The pick service reads the same file when
+it runs the trained model, so the text it sends to GR00T always matches the one it was trained with.
+
+- **To add a product,** add one line before recording it.
+- **Never change the text of a product that already has recordings:** models trained on them would no
+  longer match. `record.py` refuses to continue a dataset whose texts changed.
+
+## 2. One-time setup
+
+**Devices in `.env`.** Add the arm ports and camera paths to the repo root `.env`, so you don't have to
+type them each time (values from [ARM_SETUP.md](ARM_SETUP.md) and [CAMERA_SETUP.md](CAMERA_SETUP.md)):
 
 ```
 FOLLOWER_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_<serial>-if00
@@ -36,72 +46,132 @@ GRIPPER_CAM=/dev/v4l/by-id/<gripper camera>-video-index0
 SCENE_CAM=/dev/v4l/by-id/<scene camera>-video-index0
 ```
 
+**Camera settings.** Create `data_collection/camera_settings.json` ([CAMERA_SETUP.md](CAMERA_SETUP.md), step 4).
+`record.py` applies it at every start, so exposure, white balance and focus are the same in every session.
+Without it, the script warns and the cameras stay automatic.
+
+**Floor marks.** Mark the robot's normal stop point in front of each shelf with tape, plus the round offsets
+(see "Rounds" below), so every base position can be repeated exactly.
+
 ## 3. Before each session
 
-- If the camera exposure and focus were set manually, apply the settings again ([CAMERA_SETUP.md](CAMERA_SETUP.md), step 4).
-- Check that lighting, the shelf, and the dock position match previous sessions.
+- Check that lighting, the shelves, the products and the basket look like in previous sessions.
 - Put both arms in a similar pose: when the script starts, the follower moves straight to the leader's position.
 
 ## 4. Record
 
-Start a **new dataset** by giving it a name and the item you pick:
+### Start a new dataset
 
 ```bash
-docker compose run --rm policy python3 data_collection/record.py \
-  --name soup_can \
-  --item soup_can
+# With Docker (Jetson)
+docker compose run --rm policy python3 data_collection/record.py --name store_v1
+
+# Without Docker (after `source env.sh`, see README.md)
+python data_collection/record.py --name store_v1
 ```
+
+It asks for the plan. Press Enter to accept a default in brackets:
+
+```
+Products (from instructions.json):
+  1) soup_can       shelf_A    "pick up the soup can and place it in the basket"
+  2) chips_pack     shelf_B    "pick up the chips pack and place it in the basket"
+  ...
+Products to record (numbers or ids, comma-separated, or all) [all]:
+Rounds (base positions per shelf, 1-7) [5]:
+Episodes per product per round [10]:
+
+Plan: 4 product(s) x 5 round(s) x 10 episodes = 200 episodes
+Start? [Y]:
+```
+
+The same choices can be given as options, without questions:
+`--products soup_can,chips_pack --rounds 5 --per_round 10`.
 
 The dataset is saved in `data_collection/dataset/<DDMMYYYY_HHMMSS>_<name>/`, for example
-`data_collection/dataset/12102026_153045_soup_can/`. The name may contain letters, digits, `-` and `_`.
+`data_collection/dataset/12102026_153045_store_v1/`. The name may contain letters, digits, `-` and `_`.
 
-`--item` takes an item id (the same ids as the store's `inventory.json`) and reads the GR00T
-instruction for it from `policy/instructions.json`, for example `soup_can` → "pick up the soup can and place it in the basket".
-The robot uses the same file when it picks, so the text it sends to GR00T always matches the one it
-was trained with. To add a product, add one line to that file before recording it. Do not change
-the text of a product that already has recordings: retrained models would no longer match them.
-`--task "..."` sets a custom text instead of `--item`, for experiments.
+### Rounds
 
-Each episode is one full pick and place: from the rest pose, grasp the item, put it in the basket,
-return to the rest pose, then press N.
+The robot never stops at exactly the same spot in front of a shelf, so the demos must show the shelf
+from slightly different base positions. A **round** is one base position. At each shelf the script goes
+through the rounds in order, and in each round records every product of that shelf:
 
-To **add episodes to an existing dataset** (after a break, or another day), give its folder name instead of `--name`:
-
-```bash
-docker compose run --rm policy python3 data_collection/record.py \
-  --resume 12102026_153045_soup_can \
-  --item soup_can
+```
+shelf_A:  round 1 (centre)  -> soup_can x 10, tea_box x 10
+          round 2 (left)    -> soup_can x 10, tea_box x 10
+          ...
+shelf_B:  round 1 (centre)  -> ...
 ```
 
-Episode numbers continue where the dataset stopped. The script refuses to resume if the cameras,
-FPS or arm differ from the ones the dataset was recorded with.
+So the base moves only once per round. The script says where to put it, seen from behind the robot facing the shelf:
 
-Use one dataset per product or per session as you like; datasets can be merged before training
-([TRAINING.md](TRAINING.md)).
+| Rounds | Base positions |
+|---|---|
+| 1–5 | centre, 3 cm left, 3 cm right, 3 cm closer and turned 3° left, 3 cm further and turned 3° right |
+| 6–7 | centre, left, right, closer, further, turned left, turned right |
+
+Change the distances with `--offset_cm` and `--turn_deg` when starting a dataset. Set them to the robot's real stop error:
+drive it to a shelf about 10 times and measure how far apart the stops are.
+
+### What one episode is
+
+One full pick and place: from the rest pose, grasp the product, put it in the basket, return to the
+rest pose, then press N. Every episode, for every product and shelf, starts and ends in the same rest pose.
 
 ### Keys
 
-Press these in the terminal running the script. The last line of the terminal always shows the state.
+Press these in the terminal running the script. The last line of the terminal always shows the state,
+for example `WAITING  shelf_A round 2/5 | soup_can 4/10 | plan 14/200`.
 
 | Key | When | What it does |
 |---|---|---|
 | **Space** | Waiting | Start recording an episode |
 | **N** | Recording | Save the episode |
-| **X** | Recording | Cancel the episode: nothing is saved, the episode number stays the same |
-| **Q** | Any time | Quit. An episode that is still recording is dropped, never saved |
+| **X** | Recording | Cancel the episode: nothing is saved |
+| **B** | Waiting | The episode just saved was bad: mark it, and it is recorded again |
+| **Q** or **Ctrl+C** | Any time | Quit. An episode that is still recording is dropped. A save that is running finishes first. Ctrl+C twice stops at once |
 
-> When the script ends (Q or Ctrl+C), the follower's motors are switched off and the arm drops.
+> When the script ends, the follower's motors are switched off and the arm drops.
 > Move the arm to its rest pose, or hold it, before you quit.
 
 The cycle is: **Waiting → Space → Recording → N or X → Waiting** …
 
-- While waiting, nothing is recorded, but the follower still copies the leader: put the item back
+- While waiting, nothing is recorded, but the follower still copies the leader: put the product back
   and move the arm to its rest pose, then press Space.
+- When the shelf, the round or the product changes, the script prints what to do (drive to the shelf,
+  move the base, which product) before the next episode.
 - Episodes have no time limit. After 60 s the status line warns you to press N or X
   (change it with `--warn_after_s`).
-- Saving takes a while (the two videos are encoded on the Jetson's CPU; longer episodes take longer).
+- Saving takes a while (the two videos are encoded on the CPU; longer episodes take longer).
   Wait for "Saved episode …" before pressing Space. `--streaming_encoding` encodes during the episode
   instead, so saving is almost instant, but it uses more CPU while recording.
+- `--note "..."` saves a note for the session (operator, lighting, anything unusual).
+
+### Continue later
+
+Quit at any time, and continue on another day with the dataset's folder name:
+
+```bash
+# With Docker (Jetson)
+docker compose run --rm policy python3 data_collection/record.py --resume 12102026_153045_store_v1
+
+# Without Docker (after `source env.sh`, see README.md)
+python data_collection/record.py --resume 12102026_153045_store_v1
+```
+
+It continues the plan exactly where it stopped. The script refuses to resume if the cameras, FPS or arm
+differ from the ones the dataset was recorded with, or if a planned product's instruction changed.
+When every product has all its episodes, it says "Plan complete" and ends.
+
+### What is saved
+
+Besides the LeRobot dataset itself:
+
+- `meta/plan.json`: the plan, with each product's instruction at the time.
+- `meta/episode_log.json`: for every saved episode, its product, shelf, round, base position, session
+  and bad mark. It shows how many demos each base position has, and later which positions the
+  trained model handles badly.
 
 ### Other options
 
@@ -114,32 +184,51 @@ The cycle is: **Waiting → Space → Recording → N or X → Waiting** …
 
 ## 5. How to record good demonstrations
 
-- Start every episode from the same arm rest pose and end it the same way, after the item is on the tray.
+- Start every episode from the same arm rest pose and end it the same way, after the product is in the basket.
 - Press Space just before you start moving, and N as soon as the arm is back at rest, so episodes have no long idle parts.
-- Vary the item's position and orientation inside its bin between episodes; this is what the policy has to handle.
-- Move smoothly and at a steady speed; avoid pauses and corrections mid-grasp.
-- Keep lighting, camera mounts, the shelf, and the dock position unchanged between sessions.
-- Cancel (X) any episode with a failed grasp, a dropped item, or a person in the camera view.
-- Record in sessions of about 10 episodes and check them before continuing.
+- Within a round, vary the product's position and orientation on the shelf a little between episodes.
+  The rounds cover the base position; the episodes cover the product position.
+- If other products sit on the same shelf in the store, keep them there while recording: GR00T must
+  learn that the instruction decides which product to take.
+- Move smoothly and at a similar speed every time, with the same grasp for the same product. If several
+  people record, practise together first.
+- A calm re-grasp after a slip is a useful demo; keep it. Cancel (X) a chaotic one, a dropped product,
+  or a person in the camera view. If you notice only after saving, press B.
+- If the light changes during the day, spread the recording over the day.
 
 ## 6. Check the recording
 
 Replay an episode on the follower arm (here episode 0 of one dataset):
 
 ```bash
+# With Docker (Jetson)
 docker compose run --rm policy lerobot-replay \
   --robot.type=so100_follower --robot.port=FOLLOWER_PORT --robot.id=picker_follower \
-  --dataset.repo_id=local/12102026_153045_soup_can \
-  --dataset.root=data_collection/dataset/12102026_153045_soup_can \
+  --dataset.repo_id=local/12102026_153045_store_v1 \
+  --dataset.root=data_collection/dataset/12102026_153045_store_v1 \
+  --dataset.episode=0
+
+# Without Docker (after `source env.sh`, see README.md)
+lerobot-replay \
+  --robot.type=so100_follower --robot.port=FOLLOWER_PORT --robot.id=picker_follower \
+  --dataset.repo_id=local/12102026_153045_store_v1 \
+  --dataset.root=data_collection/dataset/12102026_153045_store_v1 \
   --dataset.episode=0
 ```
 
 Print the dataset summary (episodes, frames, tasks):
 
 ```bash
+# With Docker (Jetson)
 docker compose run --rm policy lerobot-edit-dataset \
-  --repo_id=local/12102026_153045_soup_can \
-  --root=data_collection/dataset/12102026_153045_soup_can \
+  --repo_id=local/12102026_153045_store_v1 \
+  --root=data_collection/dataset/12102026_153045_store_v1 \
+  --operation.type=info
+
+# Without Docker (after `source env.sh`, see README.md)
+lerobot-edit-dataset \
+  --repo_id=local/12102026_153045_store_v1 \
+  --root=data_collection/dataset/12102026_153045_store_v1 \
   --operation.type=info
 ```
 
@@ -147,35 +236,39 @@ Episode videos can also be watched directly in `data_collection/dataset/<folder>
 
 ## 7. Remove bad episodes
 
-If a bad episode was saved by mistake (here episodes 3 and 7):
+Episodes marked with B stay in the dataset until you remove them, best once a recording day is done:
 
 ```bash
-docker compose run --rm policy lerobot-edit-dataset \
-  --repo_id=local/12102026_153045_soup_can \
-  --root=data_collection/dataset/12102026_153045_soup_can \
-  --new_root=data_collection/dataset/12102026_153045_soup_can \
-  --operation.type=delete_episodes \
-  --operation.episode_indices="[3, 7]"
+# With Docker (Jetson)
+docker compose run --rm policy python3 data_collection/remove_bad_episodes.py 12102026_153045_store_v1
+
+# Without Docker (after `source env.sh`, see README.md)
+python data_collection/remove_bad_episodes.py 12102026_153045_store_v1
 ```
 
-`--new_root` must be the same as `--root`, otherwise LeRobot writes the result somewhere else.
-The original is kept as `12102026_153045_soup_can_old/` next to it: check the new dataset, then delete
-the `_old` folder. The remaining episodes are renumbered from 0.
+It lists the marked episodes and asks before removing them. The remaining episodes are renumbered from 0,
+and the episode log is updated to match. The original is kept as `12102026_153045_store_v1_old/` next
+to it: check the new dataset, then delete the `_old` folder.
 
 ## 8. Move the dataset to the training machine
 
 Datasets are not stored in Git. Copy the folder to the same place on the training machine:
 
 ```bash
-rsync -a --progress data_collection/dataset/12102026_153045_soup_can \
+rsync -a --progress data_collection/dataset/12102026_153045_store_v1 \
   <user>@<training-pc>:<repo>/policy/data_collection/dataset/
 ```
 
 Or upload it to the Hugging Face Hub (needs `HF_TOKEN` in the repo root `.env`, see "Getting started" in [README.md](../README.md)):
 
 ```bash
-docker compose run --rm policy hf upload <hf-user>/12102026_153045_soup_can \
-  /workspace/policy/data_collection/dataset/12102026_153045_soup_can --repo-type=dataset
+# With Docker (Jetson)
+docker compose run --rm policy hf upload <hf-user>/12102026_153045_store_v1 \
+  /workspace/policy/data_collection/dataset/12102026_153045_store_v1 --repo-type=dataset
+
+# Without Docker (after `source env.sh`, see README.md)
+hf upload <hf-user>/12102026_153045_store_v1 \
+  /workspace/policy/data_collection/dataset/12102026_153045_store_v1 --repo-type=dataset
 ```
 
 Next: [TRAINING.md](TRAINING.md).

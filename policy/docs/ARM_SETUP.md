@@ -1,14 +1,19 @@
 # Arm setup
 
-Set up and calibrate the SO-100 follower (on the robot) and leader (for teleoperation) on the Jetson.
+Set up and calibrate the SO-100 follower (on the robot) and leader (for teleoperation) on the Jetson or a PC.
+Commands are shown for both setups: **with Docker** on the Jetson, and **without Docker** on a PC after `source env.sh` (see [README.md](../README.md)).
 Complete "Getting started" in [README.md](../README.md) first. All commands run from the `policy/` folder.
 
 ## 1. Find the arm ports
 
-Power both arms and connect their USB cables to the Jetson.
+Power both arms and connect their USB cables to the Jetson (or the PC).
 
 ```bash
+# With Docker (Jetson)
 docker compose run --rm policy lerobot-find-port
+
+# Without Docker (after `source env.sh`, see README.md)
+lerobot-find-port
 ```
 
 Unplug one arm's USB when asked and press Enter; it prints that arm's port. Repeat for the other arm.
@@ -26,10 +31,18 @@ Use those paths (e.g. `/dev/serial/by-id/usb-1a86_USB_Single_Serial_<serial>-if0
 Skip this if the arms have already been set up.
 
 ```bash
+# With Docker (Jetson)
 docker compose run --rm policy lerobot-setup-motors \
   --robot.type=so100_follower --robot.port=FOLLOWER_PORT
 
 docker compose run --rm policy lerobot-setup-motors \
+  --teleop.type=so100_leader --teleop.port=LEADER_PORT
+
+# Without Docker (after `source env.sh`, see README.md)
+lerobot-setup-motors \
+  --robot.type=so100_follower --robot.port=FOLLOWER_PORT
+
+lerobot-setup-motors \
   --teleop.type=so100_leader --teleop.port=LEADER_PORT
 ```
 
@@ -40,7 +53,14 @@ Connect one servo at a time when prompted (gripper first, down to the shoulder p
 Follower:
 
 ```bash
+# With Docker (Jetson)
 docker compose run --rm policy lerobot-calibrate \
+  --robot.type=so100_follower \
+  --robot.port=FOLLOWER_PORT \
+  --robot.id=picker_follower
+
+# Without Docker (after `source env.sh`, see README.md)
+lerobot-calibrate \
   --robot.type=so100_follower \
   --robot.port=FOLLOWER_PORT \
   --robot.id=picker_follower
@@ -49,7 +69,14 @@ docker compose run --rm policy lerobot-calibrate \
 Leader:
 
 ```bash
+# With Docker (Jetson)
 docker compose run --rm policy lerobot-calibrate \
+  --teleop.type=so100_leader \
+  --teleop.port=LEADER_PORT \
+  --teleop.id=picker_leader
+
+# Without Docker (after `source env.sh`, see README.md)
+lerobot-calibrate \
   --teleop.type=so100_leader \
   --teleop.port=LEADER_PORT \
   --teleop.id=picker_leader
@@ -70,8 +97,13 @@ the follower spins away when the leader passes it. This script measures the trav
 exactly in its middle, so the jump sits behind the stop where it can never be reached:
 
 ```bash
+# With Docker (Jetson)
 docker compose run --rm policy python3 calibration/calibrate_wrist_roll.py --arm follower
 docker compose run --rm policy python3 calibration/calibrate_wrist_roll.py --arm leader
+
+# Without Docker (after `source env.sh`, see README.md)
+python calibration/calibrate_wrist_roll.py --arm follower
+python calibration/calibrate_wrist_roll.py --arm leader
 ```
 
 For each arm, the wrist roll motor turns off (hold the arm), then:

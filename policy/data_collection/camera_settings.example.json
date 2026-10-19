@@ -1,0 +1,18 @@
+{
+  "gripper_cam": {
+    "auto_exposure": 1,
+    "exposure_time_absolute": 157,
+    "white_balance_automatic": 0,
+    "white_balance_temperature": 4600,
+    "focus_automatic_continuous": 0,
+    "focus_absolute": 0
+  },
+  "scene_cam": {
+    "auto_exposure": 1,
+    "exposure_time_absolute": 157,
+    "white_balance_automatic": 0,
+    "white_balance_temperature": 4600,
+    "focus_automatic_continuous": 0,
+    "focus_absolute": 0
+  }
+}

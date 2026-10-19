@@ -17,9 +17,10 @@ This script fixes that for one arm:
 Run it after lerobot-calibrate, for both arms, and again whenever lerobot-calibrate is run.
 The other joints are not changed.
 
-Usage (from policy/, on the Jetson):
-    docker compose run --rm policy python3 calibration/calibrate_wrist_roll.py --arm follower
-    docker compose run --rm policy python3 calibration/calibrate_wrist_roll.py --arm leader
+Usage (from policy/):
+    docker compose run --rm policy python3 calibration/calibrate_wrist_roll.py --arm follower   # Jetson (Docker)
+    python calibration/calibrate_wrist_roll.py --arm follower                                  # PC, after `source env.sh`
+    python calibration/calibrate_wrist_roll.py --arm leader
 
 Guide: policy/docs/ARM_SETUP.md
 """
@@ -29,6 +30,10 @@ import os
 import select
 import sys
 import time
+from pathlib import Path
+
+# Calibration files live next to this script (also set by compose.yaml and env.sh).
+os.environ.setdefault("HF_LEROBOT_CALIBRATION", str(Path(__file__).resolve().parent))
 
 from lerobot.motors import MotorCalibration
 from lerobot.robots import make_robot_from_config

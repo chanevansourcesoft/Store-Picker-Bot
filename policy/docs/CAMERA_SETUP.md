@@ -1,6 +1,8 @@
 # Camera setup
 
-Set up the gripper and scene cameras on the Jetson. Only the policy process opens the cameras.
+Set up the gripper and scene cameras on the Jetson or a PC.
+Commands are shown for both setups: **with Docker** on the Jetson, and **without Docker** on a PC after `source env.sh` (see [README.md](../README.md)).
+Only the policy process opens the cameras.
 Complete "Getting started" in [README.md](../README.md) first. All commands run from the `policy/` folder.
 
 ## 1. Mount the cameras
@@ -15,10 +17,14 @@ Once mounted, do not move them: a policy trained on one camera position degrades
 
 ## 2. Find the cameras
 
-Connect both cameras to the Jetson, then:
+Connect both cameras to the Jetson (or the PC), then:
 
 ```bash
+# With Docker (Jetson)
 docker compose run --rm policy lerobot-find-cameras opencv
+
+# Without Docker (after `source env.sh`, see README.md)
+lerobot-find-cameras opencv
 ```
 
 It lists the cameras and saves a test image from each to `policy/outputs/captured_images` (ignored by Git).
@@ -38,8 +44,13 @@ and put them in the repo root `.env` ([DATA_COLLECTION.md](DATA_COLLECTION.md), 
 Both cameras must support 640×480 at 30 FPS:
 
 ```bash
+# With Docker (Jetson)
 docker compose run --rm policy v4l2-ctl -d GRIPPER_CAM --list-formats-ext
 docker compose run --rm policy v4l2-ctl -d SCENE_CAM --list-formats-ext
+
+# Without Docker (after `source env.sh`, see README.md)
+v4l2-ctl -d GRIPPER_CAM --list-formats-ext
+v4l2-ctl -d SCENE_CAM --list-formats-ext
 ```
 
 Look for `640x480` with `30.000 fps`, ideally under `MJPG`, which uses less USB bandwidth when both cameras run together.
@@ -50,27 +61,55 @@ If a camera only reaches 30 FPS with MJPG, record with `--fourcc MJPG` ([DATA_CO
 Automatic exposure, white balance, and focus make the images change between episodes. List a camera's controls:
 
 ```bash
+# With Docker (Jetson)
 docker compose run --rm policy v4l2-ctl -d SCENE_CAM --list-ctrls
+
+# Without Docker (after `source env.sh`, see README.md)
+v4l2-ctl -d SCENE_CAM --list-ctrls
 ```
 
 If the camera has them, switch to manual and set values that look good under the shelf lighting, for example:
 
 ```bash
+# With Docker (Jetson)
 docker compose run --rm policy v4l2-ctl -d SCENE_CAM \
+  --set-ctrl=auto_exposure=1 \
+  --set-ctrl=white_balance_automatic=0 \
+  --set-ctrl=focus_automatic_continuous=0
+
+# Without Docker (after `source env.sh`, see README.md)
+v4l2-ctl -d SCENE_CAM \
   --set-ctrl=auto_exposure=1 \
   --set-ctrl=white_balance_automatic=0 \
   --set-ctrl=focus_automatic_continuous=0
 ```
 
 Control names and values differ between camera models; use the names printed by `--list-ctrls`.
-These settings reset when the camera is unplugged or the Jetson reboots, so apply them before each recording session.
+Try values until the image looks good, then check it in step 5.
+
+These settings reset when the camera is unplugged or the computer reboots. To have them applied
+automatically, save them in `data_collection/camera_settings.json`: `record.py` sets them on both
+cameras at every start, in the order written (put each `..._automatic` or `auto_...` control before the
+manual value it unlocks). Start from the example:
+
+```bash
+cp data_collection/camera_settings.example.json data_collection/camera_settings.json
+```
+
+Then edit the values (and remove controls your cameras don't have). Commit the file: it belongs to these
+cameras, like the arm calibration. If a control name is wrong, `record.py` stops before it starts and
+says which one.
 
 ## 5. Check the views
 
 Take new test images with the arm in its rest pose and an item in each bin:
 
 ```bash
+# With Docker (Jetson)
 docker compose run --rm policy lerobot-find-cameras opencv
+
+# Without Docker (after `source env.sh`, see README.md)
+lerobot-find-cameras opencv
 ```
 
 Check in `policy/outputs/captured_images` that:
