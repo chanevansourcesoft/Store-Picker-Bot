@@ -27,7 +27,8 @@ from quickpick import live_map, metrics, store
 from quickpick.settings import LASER_OFFSET, ROSBRIDGE_URL
 from store_agent import robot_client
 from store_agent.agent import group_items_by_shelf, plan_shelf_route, strip_think
-from store_agent.config import MODEL_ULTRA, ROBOT_URL, get_client, has_llm, load_inventory
+from store_agent.config import MODEL_ULTRA, ROBOT_URL, get_client, has_llm
+from store_agent.inventory import load_inventory
 from quickpick.step_log import is_recovered, step_target
 from quickpick.worker import init_worker
 from quickpick.ui_style import (
@@ -239,7 +240,7 @@ def get_location_text(station, nav_state):
 
 
 def pretty_task(text):
-    """'Picked soup_can' -> 'Picked Tomato Soup', 'At shelf_A' -> 'At Shelf A'."""
+    """'Picked chips_packet' -> 'Picked Chips Packet', 'At shelf_A' -> 'At Shelf A'."""
     for item in PRODUCT_INFO:
         text = text.replace(item, product_name(item))
     for station in ("shelf_A", "shelf_B", "shelf_C"):

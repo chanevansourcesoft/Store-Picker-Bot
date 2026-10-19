@@ -27,7 +27,7 @@ from storepilot.health import AIStatus
 from storepilot.missions import MissionError, MissionManager, mentioned
 from storepilot.telemetry import Telemetry
 
-from store_agent.config import DEFAULT_INVENTORY
+from store_agent.inventory import DEFAULT_INVENTORY
 
 INVENTORY = lambda: DEFAULT_INVENTORY  # noqa: E731
 
@@ -79,10 +79,10 @@ def test_sim_moves_and_stops():
     assert robot.navigate("shelf_A")["success"]
     pose = robot.fetch_status()["pose"]
     assert abs(pose["x"] - SIM_STATIONS["shelf_A"]["x"]) < 1e-6
-    assert not robot.pick("juice_box", "shelf_C")["success"], "must be at the item's own shelf"
-    assert robot.pick("soup_can", "shelf_A")["success"]
-    assert robot.scan()["barcode"] == DEFAULT_INVENTORY["soup_can"]["barcode"]
-    assert robot.place("basket")["message"] == "placed soup_can in basket"
+    assert not robot.pick("frooti", "shelf_A")["success"], "must be at the item's own shelf"
+    assert robot.pick("chips_packet", "shelf_A")["success"]
+    assert robot.scan()["barcode"] == DEFAULT_INVENTORY["chips_packet"]["barcode"]
+    assert robot.place("basket")["message"] == "placed chips_packet in basket"
 
     slow = SimRobot(INVENTORY, time_scale=1.0, nav_fail=0)
     t = threading.Thread(target=lambda: setattr(slow, "result", slow.navigate("customer")))
@@ -103,9 +103,9 @@ def test_offline_mission_runs_after_confirm_only():
         p.start()
     try:
         store, robot, tel, m = services()
-        draft = m.submit_order("2 tomato soups and 1 juice please, and a pizza")
+        draft = m.submit_order("2 chips and 1 frooti please, and a pizza")
         assert draft["status"] == "awaiting_confirmation", draft
-        assert [(i["item"], i["qty"]) for i in draft["items"]] == [("soup_can", 2), ("juice_box", 1)]
+        assert [(i["item"], i["qty"]) for i in draft["items"]] == [("chips_packet", 2), ("frooti", 1)]
         assert draft["unknown"] == ["pizza"]
         time.sleep(0.3)
         assert robot.fetch_status()["station"] == "home", "nothing moves before confirmation"
@@ -138,7 +138,7 @@ def test_rejected_and_discarded():
             raise AssertionError("a rejected mission must not start")
         except MissionError:
             pass
-        too_many = m.submit_order("11 soups")
+        too_many = m.submit_order("11 chips")
         assert too_many["status"] == "rejected"
         ok = m.submit_order("1 chips")
         m.discard(ok["id"])
@@ -157,7 +157,7 @@ def test_stop_aborts_and_never_resumes_mission():
     try:
         robot = SimRobot(INVENTORY, time_scale=0.3, pick_fail=0, scan_fail=0, nav_fail=0)
         store, robot, tel, m = services(adapter=robot)
-        draft = m.submit_order("3 juice")
+        draft = m.submit_order("3 frooti")
         m.confirm(draft["id"])
         time.sleep(0.4)
         assert m.stop()["success"]
@@ -206,7 +206,7 @@ def test_live_safety_switches():
         p.start()
     try:
         store, robot, tel, m = services()
-        draft = m.submit_order("1 soup")
+        draft = m.submit_order("1 chips")
         try:
             m.confirm(draft["id"], area_clear=True)
             raise AssertionError("motion disabled must block the start")
@@ -436,10 +436,11 @@ def test_rosbridge_drive():
 
 
 def test_mentioned():
-    assert mentioned("soup_can", "2 tomato soups please")
-    assert mentioned("chips_pack", "one chips")
-    assert not mentioned("chips_pack", "2 packets of Maggi")
-    assert not mentioned("juice_box", "a coke bottle")
+    assert mentioned("hide_and_seek", "2 hide and seek please")
+    assert mentioned("chips_packet", "one chips")
+    assert not mentioned("chips_packet", "2 packets of Maggi")
+    assert not mentioned("hide_and_seek", "2 chips and 1 frooti"), "'and' alone does not name Hide and Seek"
+    assert not mentioned("frooti", "a coke bottle")
     print("PASS: test_mentioned")
 
 

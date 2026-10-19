@@ -200,7 +200,7 @@ def succeeded(result):
 
 
 def log_groot(text, attempt, message):
-    """One line per pick, e.g. [GR00T] pick up the soup can (try 2) -> picked"""
+    """One line per pick, e.g. [GR00T] pick up the chips packet (try 2) -> picked"""
     print(f"[GR00T] {text} (try {attempt}) -> {message}", flush=True)
 
 
@@ -528,9 +528,10 @@ async def scan_item():
 
     # For now, return a fake barcode based on item name
     fake_barcodes = {
-        "soup_can": "8901000000011",
-        "chips_pack": "8901000000028",
-        "juice_box": "8901000000035",
+        "chips_packet": "0000000000011",
+        "mentos": "0000000000028",
+        "frooti": "0000000000035",
+        "hide_and_seek": "0000000000042",
     }
 
     await asyncio.sleep(0.5)  # Simulate scan time

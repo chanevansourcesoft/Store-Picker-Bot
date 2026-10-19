@@ -6,9 +6,7 @@ If a setting is not there, we look in Streamlit secrets (.streamlit/secrets.toml
 or the "Secrets" box on Streamlit Community Cloud).
 """
 
-import json
 import os
-from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 from openai import OpenAI
@@ -42,34 +40,6 @@ MODEL_FAST = "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B"
 MODEL_AGENT = "nvidia/nemotron-3-super-120b-a12b"
 # Large model for summaries and reports (expensive, use sparingly)
 MODEL_ULTRA = "nvidia/Nemotron-3-Ultra-550b-a55b"
-
-INVENTORY_FILE = Path(__file__).resolve().parent / "inventory.json"
-
-# Starting stock for a fresh server (used when inventory.json is missing or empty)
-DEFAULT_INVENTORY = {
-    "soup_can": {"shelf": "shelf_A", "bin": "A1", "barcode": "8901000000011",
-                 "price": 60, "weight": "heavy", "stock": 10},
-    "chips_pack": {"shelf": "shelf_B", "bin": "B1", "barcode": "8901000000028",
-                   "price": 20, "weight": "light", "stock": 15},
-    "juice_box": {"shelf": "shelf_C", "bin": "C1", "barcode": "8901000000035",
-                  "price": 35, "weight": "medium", "stock": 12},
-}
-
-
-def load_inventory():
-    return json.loads(INVENTORY_FILE.read_text())
-
-
-def ensure_inventory():
-    """Write the starting inventory if inventory.json is missing or empty.
-    Call this once at startup (not on every read). Returns True if it seeded."""
-    try:
-        if json.loads(INVENTORY_FILE.read_text()):
-            return False
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
-    INVENTORY_FILE.write_text(json.dumps(DEFAULT_INVENTORY, indent=2) + "\n")
-    return True
 
 
 def has_llm():

@@ -10,9 +10,9 @@ The tools ask it before a robot command (check_pick, check_place). If a command
 would be a mistake, it is refused and the robot never gets it.
 
 Example:
-    tracker = OrderTracker([{"item": "soup_can", "qty": 2}], inventory)
-    tracker.check_pick("soup_can")   # None = allowed, or "REFUSED: ..." text
-    tracker.progress_line()          # "Progress: soup_can 0/2 packed. Holding: nothing. ..."
+    tracker = OrderTracker([{"item": "chips_packet", "qty": 2}], inventory)
+    tracker.check_pick("chips_packet")   # None = allowed, or "REFUSED: ..." text
+    tracker.progress_line()          # "Progress: chips_packet 0/2 packed. Holding: nothing. ..."
 """
 
 import re
@@ -128,6 +128,6 @@ class OrderTracker:
 
 
 def _item_from_message(message):
-    """'placed soup_can in basket' / 'returned soup_can to shelf' -> 'soup_can'."""
+    """'placed chips_packet in basket' / 'returned chips_packet to shelf' -> 'chips_packet'."""
     match = re.search(r"(?:placed|returned) (\S+) (?:in|to)", message)
     return match.group(1) if match else None

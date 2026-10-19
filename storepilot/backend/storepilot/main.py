@@ -39,7 +39,7 @@ from .missions import MissionError, MissionManager
 from .stations import StationStore
 from .telemetry import Telemetry
 
-from store_agent.config import load_inventory  # shared inventory, agent/store_agent/inventory.json
+from store_agent.inventory import load_inventory  # catalog (agent/store_agent/catalog.json) + live stock
 
 log = logging.getLogger("storepilot")
 PUSH_SEC = 0.25

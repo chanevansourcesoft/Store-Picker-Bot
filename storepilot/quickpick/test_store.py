@@ -5,13 +5,14 @@ Run:
     python -m quickpick.test_store
 """
 
-import json
 import os
 import tempfile
 from pathlib import Path
 
 from quickpick import store
-from store_agent.config import INVENTORY_FILE
+from store_agent import inventory as stock_store
+
+TEST_STOCK_FILE = Path(tempfile.mkdtemp()) / "stock.json"
 
 
 def setup_test_db():
@@ -34,14 +35,9 @@ def teardown_test_db(path):
 
 
 def reset_inventory():
-    """Reset inventory to default stock levels."""
-    inventory_path = INVENTORY_FILE
-    inventory = {
-        "soup_can": {"shelf": "shelf_A", "bin": "A1", "barcode": "8901000000011", "price": 60, "weight": "heavy", "stock": 10},
-        "chips_pack": {"shelf": "shelf_B", "bin": "B1", "barcode": "8901000000028", "price": 20, "weight": "light", "stock": 15},
-        "juice_box": {"shelf": "shelf_C", "bin": "C1", "barcode": "8901000000035", "price": 35, "weight": "medium", "stock": 12},
-    }
-    inventory_path.write_text(json.dumps(inventory, indent=2) + "\n")
+    """Fresh stock (the catalog's initial_stock) in a temporary stock file: the real one is never touched."""
+    stock_store.STOCK_FILE = TEST_STOCK_FILE
+    TEST_STOCK_FILE.unlink(missing_ok=True)
 
 
 def test_check_stock():
@@ -49,13 +45,13 @@ def test_check_stock():
     reset_inventory()
 
     # Should pass: enough stock
-    items = [{"item": "soup_can", "qty": 2}]
+    items = [{"item": "chips_packet", "qty": 2}]
     ok, problems = store.check_stock(items)
     assert ok, f"Should have enough stock: {problems}"
     assert len(problems) == 0
 
     # Should fail: not enough stock
-    items = [{"item": "soup_can", "qty": 100}]
+    items = [{"item": "chips_packet", "qty": 100}]
     ok, problems = store.check_stock(items)
     assert not ok, "Should not have enough stock"
     assert len(problems) == 1
@@ -77,23 +73,23 @@ def test_reduce_stock():
 
     # Get initial stock
     initial = store.get_stock()
-    assert initial["soup_can"] == 10
+    assert initial["chips_packet"] == 10
 
     # Reduce by 1
-    ok = store.reduce_stock("soup_can", 1)
+    ok = store.reduce_stock("chips_packet", 1)
     assert ok, "Should reduce stock"
 
     # Check new stock
     after = store.get_stock()
-    assert after["soup_can"] == 9, f"Stock should be 9, got {after['soup_can']}"
+    assert after["chips_packet"] == 9, f"Stock should be 9, got {after['chips_packet']}"
 
     # Try to reduce more than available
-    ok = store.reduce_stock("soup_can", 100)
+    ok = store.reduce_stock("chips_packet", 100)
     assert not ok, "Should not reduce stock below 0"
 
     # Stock should be unchanged
     after2 = store.get_stock()
-    assert after2["soup_can"] == 9, f"Stock should still be 9, got {after2['soup_can']}"
+    assert after2["chips_packet"] == 9, f"Stock should still be 9, got {after2['chips_packet']}"
 
     # Reset for other tests
     reset_inventory()
@@ -108,7 +104,7 @@ def test_create_order():
 
     try:
         # Should succeed: enough stock
-        items = [{"item": "soup_can", "qty": 2}]
+        items = [{"item": "chips_packet", "qty": 2}]
         order_id, problems = store.create_order(items)
         assert order_id is not None, f"Should create order: {problems}"
         assert problems is None
@@ -120,7 +116,7 @@ def test_create_order():
         assert order["items"] == items
 
         # Should fail: not enough stock
-        items = [{"item": "soup_can", "qty": 1000}]
+        items = [{"item": "chips_packet", "qty": 1000}]
         order_id, problems = store.create_order(items)
         assert order_id is None, "Should not create order"
         assert problems is not None
@@ -140,7 +136,7 @@ def test_order_status_flow():
 
     try:
         # Create an order
-        items = [{"item": "chips_pack", "qty": 1}]
+        items = [{"item": "hide_and_seek", "qty": 1}]
         order_id, _ = store.create_order(items)
         assert order_id is not None
 
@@ -163,7 +159,7 @@ def test_order_status_flow():
         assert order["step_log"][0]["tool"] == "pick_item"
 
         # Complete the order
-        bill = {"items": [{"item": "chips_pack", "qty": 1, "price": 20}], "total": 20}
+        bill = {"items": [{"item": "hide_and_seek", "qty": 1, "price": 20}], "total": 20}
         store.complete_order(order_id, bill)
         order = store.get_order(order_id)
         assert order["status"] == "done"
@@ -184,7 +180,7 @@ def test_fail_order():
 
     try:
         # Create an order
-        items = [{"item": "juice_box", "qty": 1}]
+        items = [{"item": "frooti", "qty": 1}]
         order_id, _ = store.create_order(items)
 
         # Fail the order
@@ -208,9 +204,9 @@ def test_get_orders():
 
     try:
         # Create multiple orders
-        store.create_order([{"item": "soup_can", "qty": 1}])
-        store.create_order([{"item": "chips_pack", "qty": 1}])
-        order_id3, _ = store.create_order([{"item": "juice_box", "qty": 1}])
+        store.create_order([{"item": "chips_packet", "qty": 1}])
+        store.create_order([{"item": "hide_and_seek", "qty": 1}])
+        order_id3, _ = store.create_order([{"item": "frooti", "qty": 1}])
 
         # Mark one as packing
         store.update_order_status(order_id3, "packing")
@@ -242,9 +238,9 @@ def test_get_next_queued_order():
 
     try:
         # Create orders in sequence
-        id1, _ = store.create_order([{"item": "soup_can", "qty": 1}])
-        id2, _ = store.create_order([{"item": "chips_pack", "qty": 1}])
-        id3, _ = store.create_order([{"item": "juice_box", "qty": 1}])
+        id1, _ = store.create_order([{"item": "chips_packet", "qty": 1}])
+        id2, _ = store.create_order([{"item": "hide_and_seek", "qty": 1}])
+        id3, _ = store.create_order([{"item": "frooti", "qty": 1}])
 
         # Should get the first one
         next_order = store.get_next_queued_order()
@@ -269,15 +265,15 @@ def test_cancel_order():
     db_path = setup_test_db()
     try:
         reset_inventory()
-        first, _ = store.create_order([{"item": "soup_can", "qty": 1}])
-        second, _ = store.create_order([{"item": "chips_pack", "qty": 1}])
+        first, _ = store.create_order([{"item": "chips_packet", "qty": 1}])
+        second, _ = store.create_order([{"item": "hide_and_seek", "qty": 1}])
         store.update_order_status(first, "packing")
 
         assert not store.cancel_order(first), "a packing order cannot be cancelled"
         assert store.cancel_order(second)
         assert store.get_order(second)["status"] == "cancelled"
         assert store.get_next_queued_order() is None, "the worker must not pick a cancelled order"
-        assert store.get_stock()["chips_pack"] == 15
+        assert store.get_stock()["hide_and_seek"] == 10
         assert store.get_stats_today()["cancelled"] == 1
         print("PASS: test_cancel_order")
     finally:

@@ -22,23 +22,23 @@ def reset_robot():
     mock.state.update(holding=None, from_shelf=None, station="home", pick_item=None, pick_try=0)
 
 
-def pick_soup(fail):
-    """Pick a soup can. fail=True forces 'grasp failed'. Returns (result, printed text)."""
+def pick_chips(fail):
+    """Pick a chips packet. fail=True forces 'grasp failed'. Returns (result, printed text)."""
     mock.PICK_FAIL_RATE = 1.0 if fail else 0.0
     out = io.StringIO()
     with contextlib.redirect_stdout(out):
-        result = mock.pick(mock.PickRequest(item="soup_can", shelf="shelf_A", instruction="pick up the soup can"))
+        result = mock.pick(mock.PickRequest(item="chips_packet", shelf="shelf_A", instruction="pick up the chips packet"))
     return result, out.getvalue().strip()
 
 
 def test_error_cleared_after_success():
     reset_robot()
     mock.navigate(mock.NavigateRequest(station="shelf_A"))
-    result, _ = pick_soup(fail=True)
+    result, _ = pick_chips(fail=True)
     assert not result["success"]
     assert mock.status()["last_error"] == "grasp failed"
 
-    result, _ = pick_soup(fail=False)
+    result, _ = pick_chips(fail=False)
     assert result["success"]
     assert mock.status()["last_error"] is None
     print("PASS: test_error_cleared_after_success")
@@ -47,23 +47,23 @@ def test_error_cleared_after_success():
 def test_groot_print_shows_try_and_result():
     reset_robot()
     mock.navigate(mock.NavigateRequest(station="shelf_A"))
-    _, line1 = pick_soup(fail=True)
-    _, line2 = pick_soup(fail=False)
-    assert line1 == "[GR00T] pick up the soup can (try 1) -> grasp failed", line1
-    assert line2 == "[GR00T] pick up the soup can (try 2) -> picked", line2
+    _, line1 = pick_chips(fail=True)
+    _, line2 = pick_chips(fail=False)
+    assert line1 == "[GR00T] pick up the chips packet (try 1) -> grasp failed", line1
+    assert line2 == "[GR00T] pick up the chips packet (try 2) -> picked", line2
 
     # Next unit (after it is in the basket) starts at try 1 again
     mock.scan()
     mock.place(mock.PlaceRequest(target="basket"))
-    _, line3 = pick_soup(fail=False)
-    assert line3 == "[GR00T] pick up the soup can (try 1) -> picked", line3
+    _, line3 = pick_chips(fail=False)
+    assert line3 == "[GR00T] pick up the chips packet (try 1) -> picked", line3
     print("PASS: test_groot_print_shows_try_and_result")
 
 
 def test_one_print_per_pick():
     reset_robot()
     mock.navigate(mock.NavigateRequest(station="shelf_A"))
-    _, text = pick_soup(fail=False)
+    _, text = pick_chips(fail=False)
     assert text.count("[GR00T]") == 1, text
     print("PASS: test_one_print_per_pick")
 
@@ -71,11 +71,11 @@ def test_one_print_per_pick():
 def test_return_only_at_own_shelf():
     reset_robot()
     mock.navigate(mock.NavigateRequest(station="shelf_A"))
-    pick_soup(fail=False)
+    pick_chips(fail=False)
     mock.navigate(mock.NavigateRequest(station="shelf_B"))
     result = mock.place(mock.PlaceRequest(target="return"))
     assert not result["success"] and "belongs on shelf_A" in result["message"], result
-    assert mock.state["holding"] == "soup_can", "Still holding after a refused return"
+    assert mock.state["holding"] == "chips_packet", "Still holding after a refused return"
 
     mock.navigate(mock.NavigateRequest(station="shelf_A"))
     assert mock.place(mock.PlaceRequest(target="return"))["success"]

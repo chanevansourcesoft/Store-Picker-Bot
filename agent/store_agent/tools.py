@@ -14,7 +14,7 @@ A refused command is NOT sent to the robot: Nemotron gets "REFUSED: ..." back.
 import json
 
 from store_agent import robot_client
-from store_agent.config import load_inventory
+from store_agent.inventory import load_inventory
 
 TOOLS = [
     {
@@ -52,7 +52,7 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "item": {"type": "string", "description": "Product name from the inventory"},
-                    "instruction": {"type": "string", "description": "Short text instruction for the pick policy, e.g. 'pick up the soup can'"}
+                    "instruction": {"type": "string", "description": "Short text instruction for the pick policy, e.g. 'pick up the chips packet'"}
                 },
                 "required": ["item"],
             },
@@ -149,7 +149,7 @@ if __name__ == "__main__":
     print("health   :", robot_client.health())
     print("status   :", robot_client.status())
     print("navigate :", run_tool("navigate_to", {"station": "shelf_A"}))
-    print("pick     :", run_tool("pick_item", {"item": "soup_can", "instruction": "pick up the soup can"}))
+    print("pick     :", run_tool("pick_item", {"item": "chips_packet", "instruction": "pick up the chips packet"}))
     print("scan     :", run_tool("scan_item", {}))
     print("place    :", run_tool("place_item", {"target": "basket"}))
     print("navigate :", run_tool("navigate_to", {"station": "customer"}))

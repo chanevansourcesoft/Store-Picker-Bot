@@ -3,7 +3,7 @@ Helpers to read an order's step log (used by the owner dashboard).
 
 A failed step is "recovered" when the same action on the same target
 (same item, or same station) worked later, for example:
-    pick soup_can -> grasp failed, then pick soup_can -> picked
+    pick chips_packet -> grasp failed, then pick chips_packet -> picked
 """
 
 

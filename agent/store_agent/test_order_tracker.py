@@ -5,14 +5,14 @@ Run:
     python -m store_agent.test_order_tracker
 """
 
-from store_agent.config import DEFAULT_INVENTORY
+from store_agent.inventory import DEFAULT_INVENTORY
 from store_agent.order_tracker import OrderTracker
 
 OK = {"success": True}
 
 
 def new_tracker():
-    items = [{"item": "soup_can", "qty": 2}, {"item": "chips_pack", "qty": 1}, {"item": "juice_box", "qty": 1}]
+    items = [{"item": "chips_packet", "qty": 2}, {"item": "hide_and_seek", "qty": 1}, {"item": "frooti", "qty": 1}]
     tracker = OrderTracker(items, DEFAULT_INVENTORY)
     tracker.sync_from_status({"holding": None, "station": "home"})
     return tracker
@@ -27,27 +27,27 @@ def pack(tracker, item):
 def test_pick_guards():
     t = new_tracker()
     t.record("navigate_to", {"station": "shelf_A"}, OK)
-    assert t.check_pick("soup_can") is None
-    t.record("pick_item", {"item": "soup_can"}, OK)
-    assert "already holding soup_can" in t.check_pick("soup_can")
-    t.record("place_item", {"target": "basket"}, {"success": True, "message": "placed soup_can in basket"})
-    pack(t, "soup_can")
-    assert "already complete (2/2 packed)" in t.check_pick("soup_can")
+    assert t.check_pick("chips_packet") is None
+    t.record("pick_item", {"item": "chips_packet"}, OK)
+    assert "already holding chips_packet" in t.check_pick("chips_packet")
+    t.record("place_item", {"target": "basket"}, {"success": True, "message": "placed chips_packet in basket"})
+    pack(t, "chips_packet")
+    assert "already complete (2/2 packed)" in t.check_pick("chips_packet")
     assert "not in this order" in t.check_pick("milk")
     print("PASS: test_pick_guards")
 
 
 def test_failed_pick_changes_nothing():
     t = new_tracker()
-    t.record("pick_item", {"item": "soup_can"}, {"success": False, "message": "grasp failed"})
-    assert t.holding is None and t.check_pick("soup_can") is None
+    t.record("pick_item", {"item": "chips_packet"}, {"success": False, "message": "grasp failed"})
+    assert t.holding is None and t.check_pick("chips_packet") is None
     print("PASS: test_failed_pick_changes_nothing")
 
 
 def test_place_guards():
     t = new_tracker()
     t.record("navigate_to", {"station": "shelf_A"}, OK)
-    t.record("pick_item", {"item": "soup_can"}, OK)
+    t.record("pick_item", {"item": "chips_packet"}, OK)
     assert t.check_place("basket") is None
     assert t.check_place("return") is None  # at its own shelf
 
@@ -57,20 +57,20 @@ def test_place_guards():
 
     # Basket refused when the item is already complete
     t2 = new_tracker()
-    pack(t2, "chips_pack")
-    t2.record("pick_item", {"item": "chips_pack"}, OK)  # e.g. robot picked it before the guard existed
+    pack(t2, "hide_and_seek")
+    t2.record("pick_item", {"item": "hide_and_seek"}, OK)  # e.g. robot picked it before the guard existed
     assert "already complete (1/1 packed)" in t2.check_place("basket")
     print("PASS: test_place_guards")
 
 
 def test_extra_and_complete():
     t = new_tracker()
-    assert pack(t, "soup_can") == "packed"
-    assert pack(t, "soup_can") == "packed"
-    assert pack(t, "soup_can") == "extra"
-    assert t.extras() == [{"item": "soup_can", "qty": 1}]
-    pack(t, "chips_pack")
-    pack(t, "juice_box")
+    assert pack(t, "chips_packet") == "packed"
+    assert pack(t, "chips_packet") == "packed"
+    assert pack(t, "chips_packet") == "extra"
+    assert t.extras() == [{"item": "chips_packet", "qty": 1}]
+    pack(t, "hide_and_seek")
+    pack(t, "frooti")
     assert t.missing() == []
     assert not t.is_complete(), "extra item -> not complete"
     print("PASS: test_extra_and_complete")
@@ -79,15 +79,15 @@ def test_extra_and_complete():
 def test_progress_line():
     t = new_tracker()
     t.record("navigate_to", {"station": "shelf_A"}, OK)
-    pack(t, "soup_can")
-    t.record("pick_item", {"item": "soup_can"}, OK)
+    pack(t, "chips_packet")
+    t.record("pick_item", {"item": "chips_packet"}, OK)
     line = t.progress_line()
-    assert line.startswith("Progress: soup_can 1/2 packed, chips_pack 0/1 packed, juice_box 0/1 packed."), line
-    assert "Holding: soup_can. Robot at: shelf_A." in line, line
+    assert line.startswith("Progress: chips_packet 1/2 packed, hide_and_seek 0/1 packed, frooti 0/1 packed."), line
+    assert "Holding: chips_packet. Robot at: shelf_A." in line, line
 
-    t.record("place_item", {"target": "basket"}, {"success": True, "message": "placed soup_can in basket"})
-    pack(t, "chips_pack")
-    pack(t, "juice_box")
+    t.record("place_item", {"target": "basket"}, {"success": True, "message": "placed chips_packet in basket"})
+    pack(t, "hide_and_seek")
+    pack(t, "frooti")
     assert "All items are packed" in t.progress_line()
     assert t.is_complete()
     print("PASS: test_progress_line")

@@ -16,6 +16,8 @@ from datetime import datetime
 
 import streamlit as st
 
+from store_agent.inventory import load_catalog
+
 # --- Brand colors ---
 BRAND_GREEN = "#14A85A"
 BRAND_GREEN_DARK = "#0E8446"
@@ -37,39 +39,33 @@ STATUS_INFO = "#3B82F6"
 
 LOW_STOCK = 3  # "Only N left" when stock is this or less
 
-# Category chips on the customer page (None = show everything)
-CATEGORIES = {
-    "All": None,
-    "Snacks": ["chips_pack"],
-    "Drinks": ["juice_box"],
-    "Soups": ["soup_can"],
+# Look of each product category (names, sizes and categories come from the shared catalog)
+CATEGORY_STYLE = {
+    "Snacks": {"emoji": "🍿", "bg": "#FFF1D2"},
+    "Sweets": {"emoji": "🍬", "bg": "#FDE8F1"},
+    "Drinks": {"emoji": "🧃", "bg": "#E3EEFD"},
+    "Biscuits": {"emoji": "🍪", "bg": "#FDE8E4"},
 }
-CATEGORY_ICONS = {"All": "🛒", "Snacks": "🍿", "Drinks": "🧃", "Soups": "🥫"}
+
+
+def _product_info():
+    """{item: {"name", "size", "category", "emoji", "bg"}} from agent/store_agent/catalog.json."""
+    info = {}
+    for item, product in load_catalog().items():
+        style = CATEGORY_STYLE.get(product.get("category"), {"emoji": "📦", "bg": "#EEF1EF"})
+        info[item] = {"name": product["name"], "size": product.get("size", ""),
+                      "category": product.get("category", "Other"), **style}
+    return info
+
 
 # How each product looks in the app
-PRODUCT_INFO = {
-    "soup_can": {
-        "emoji": "🥫",
-        "name": "Tomato Soup",
-        "size": "400 g",
-        "category": "Soups",
-        "bg": "#FDE8E4",
-    },
-    "chips_pack": {
-        "emoji": "🍿",
-        "name": "Classic Chips",
-        "size": "150 g",
-        "category": "Snacks",
-        "bg": "#FFF1D2",
-    },
-    "juice_box": {
-        "emoji": "🧃",
-        "name": "Orange Juice",
-        "size": "200 ml",
-        "category": "Drinks",
-        "bg": "#E3EEFD",
-    },
-}
+PRODUCT_INFO = _product_info()
+
+# Category chips on the customer page (None = show everything)
+CATEGORIES = {"All": None}
+for _item, _info in PRODUCT_INFO.items():
+    CATEGORIES.setdefault(_info["category"], []).append(_item)
+CATEGORY_ICONS = {"All": "🛒", **{c: style["emoji"] for c, style in CATEGORY_STYLE.items()}}
 
 
 # ============ Small helpers ============

@@ -107,7 +107,7 @@ Pick an item from a shelf:
 ```bash
 curl -X POST http://localhost:8000/pick \
   -H "Content-Type: application/json" \
-  -d '{"item": "soup_can", "shelf": "shelf_A", "instruction": "Pick the red can from bin A1"}'
+  -d '{"item": "chips_packet", "shelf": "shelf_A", "instruction": "pick up the chips packet"}'
 ```
 
 ### POST /scan

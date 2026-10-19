@@ -19,15 +19,15 @@ def step(tool, ok=True, time="2026-10-15T10:00:10", message="", refused=False, *
 
 ORDER = {
     "id": 1, "status": "done", "created_at": "2026-10-15T10:00:00",
-    "items": [{"item": "soup_can", "qty": 2}],
+    "items": [{"item": "chips_packet", "qty": 2}],
     "bill": {"total": 120}, "problems": [],
     "step_log": [
         step("navigate_to", time="2026-10-15T10:00:05", station="shelf_A"),
-        step("pick_item", ok=False, time="2026-10-15T10:00:20", item="soup_can"),
-        step("pick_item", time="2026-10-15T10:00:30", item="soup_can"),
-        step("pick_item", refused=True, ok=False, time="2026-10-15T10:00:31", item="soup_can"),
-        step("place_item", message="placed soup_can in basket", time="2026-10-15T10:00:40", target="basket"),
-        step("place_item", message="placed soup_can in basket", time="2026-10-15T10:01:05", target="basket"),
+        step("pick_item", ok=False, time="2026-10-15T10:00:20", item="chips_packet"),
+        step("pick_item", time="2026-10-15T10:00:30", item="chips_packet"),
+        step("pick_item", refused=True, ok=False, time="2026-10-15T10:00:31", item="chips_packet"),
+        step("place_item", message="placed chips_packet in basket", time="2026-10-15T10:00:40", target="basket"),
+        step("place_item", message="placed chips_packet in basket", time="2026-10-15T10:01:05", target="basket"),
     ],
 }
 
@@ -46,7 +46,7 @@ def test_pick_stats_skips_refused():
 
 def test_order_progress():
     assert metrics.order_progress(ORDER) == (2, 2)
-    assert metrics.order_progress({"items": [{"item": "soup_can", "qty": 3}], "step_log": []}) == (0, 3)
+    assert metrics.order_progress({"items": [{"item": "chips_packet", "qty": 3}], "step_log": []}) == (0, 3)
     print("PASS: test_order_progress")
 
 
@@ -84,7 +84,7 @@ def test_orders_csv():
     text = metrics.orders_csv([ORDER])
     lines = text.strip().splitlines()
     assert lines[0].startswith("order_id,created_at,status")
-    assert lines[1].startswith("1,2026-10-15T10:00:00,done,2x soup_can,120,5,60"), lines[1]
+    assert lines[1].startswith("1,2026-10-15T10:00:00,done,2x chips_packet,120,5,60"), lines[1]
     print("PASS: test_orders_csv")
 
 

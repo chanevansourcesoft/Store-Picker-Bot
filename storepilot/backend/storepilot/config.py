@@ -84,13 +84,6 @@ STATION_LABELS = {
     "customer": "Packing area",
 }
 
-# Display names for products in agent/store_agent/inventory.json
-PRODUCT_LABELS = {
-    "soup_can": "Tomato Soup",
-    "chips_pack": "Classic Chips",
-    "juice_box": "Orange Juice",
-}
-
 MAX_UNITS_PER_MISSION = 10   # sanity limit for one order
 
 
@@ -99,4 +92,6 @@ def station_label(station):
 
 
 def product_label(item):
-    return PRODUCT_LABELS.get(item, str(item or "?").replace("_", " ").title())
+    """Display name from the shared catalog (agent/store_agent/catalog.json)."""
+    from store_agent.inventory import product_name   # after .env is loaded above
+    return product_name(item)

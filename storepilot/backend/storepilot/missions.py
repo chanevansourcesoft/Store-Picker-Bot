@@ -25,7 +25,8 @@ from .db import now_iso
 import store_agent.agent as shared_agent
 import store_agent.tools as shared_tools
 from store_agent.agent import group_items_by_shelf, plan_shelf_route, run_agent
-from store_agent.config import MODEL_AGENT, MODEL_FAST, has_llm, load_inventory
+from store_agent.config import MODEL_AGENT, MODEL_FAST, has_llm
+from store_agent.inventory import load_inventory
 from store_agent.order_parser import parse_order, parse_order_offline
 
 RESULT_STATUS = {"done": "completed", "done_with_problems": "completed_with_issues", "failed": "failed"}
@@ -45,7 +46,7 @@ def mentioned(item, text):
     """True if the order text names this product (id word or display-name word, singular or plural).
     A parsed item that is not mentioned was inferred by the model and needs the operator's eye."""
     words = set(item.lower().split("_")) | set(config.product_label(item).lower().split())
-    words -= {"can", "pack", "box", "packet", "bottle"}   # container words alone prove nothing
+    words -= {"can", "pack", "box", "packet", "bottle", "and", "the"}   # container and filler words prove nothing
     text = text.lower()
     return any(w in text or w + "s" in text or w.rstrip("s") in text.split() for w in words if len(w) > 2)
 

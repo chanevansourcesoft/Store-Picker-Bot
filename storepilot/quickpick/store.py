@@ -12,7 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from store_agent.config import INVENTORY_FILE, ensure_inventory, load_inventory
+from store_agent import inventory as stock_store
+from store_agent.inventory import ensure_stock, load_inventory
 
 # Order statuses: queued -> packing -> one of FINISHED_STATUSES (or queued -> cancelled)
 FINISHED_STATUSES = ("done", "done_with_problems", "failed", "cancelled")
@@ -27,7 +28,7 @@ _local = threading.local()
 # Lock for write operations
 _write_lock = threading.Lock()
 
-# True after we checked inventory.json once (see init_db)
+# True after we checked the stock file once (see init_db)
 _inventory_checked = False
 
 
@@ -59,12 +60,12 @@ def _transaction():
 
 def init_db():
     """Create data/, the SQLite file and the orders table if missing.
-    Also writes the starting inventory if inventory.json is missing or empty."""
+    Also writes the starting stock if the stock file is missing."""
     global _inventory_checked
     if not _inventory_checked:  # only once: init_db() is called on every page load
         _inventory_checked = True
-        if ensure_inventory():
-            print("[Store] Inventory was empty, wrote the starting stock.")
+        if ensure_stock():
+            print("[Store] No stock file yet, wrote the starting stock.")
     conn = _get_connection()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS orders (
@@ -100,9 +101,8 @@ def _row_to_dict(row):
 # --- Stock functions ---
 
 def get_stock():
-    """Get current stock levels from inventory.json."""
-    inventory = load_inventory()
-    return {name: info.get("stock", 0) for name, info in inventory.items()}
+    """Current stock levels (live stock file, see store_agent.inventory)."""
+    return stock_store.get_stock()
 
 
 def check_stock(items):
@@ -129,43 +129,14 @@ def check_stock(items):
 def reduce_stock(item, qty=1):
     """
     Reduce stock for an item. Called ONLY after item is placed in basket.
-    Updates inventory.json file.
     Returns True if successful, False if not enough stock.
     """
-    inventory_path = INVENTORY_FILE
-
-    with _write_lock:
-        # Read current inventory
-        inventory = json.loads(inventory_path.read_text())
-
-        if item not in inventory:
-            return False
-
-        current_stock = inventory[item].get("stock", 0)
-        if current_stock < qty:
-            return False
-
-        # Reduce stock
-        inventory[item]["stock"] = current_stock - qty
-
-        # Write back
-        inventory_path.write_text(json.dumps(inventory, indent=2) + "\n")
-
-    return True
+    return stock_store.take_stock(item, qty)
 
 
 def restore_stock(item, qty=1):
     """Restore stock for an item (e.g., when order is cancelled)."""
-    inventory_path = INVENTORY_FILE
-
-    with _write_lock:
-        inventory = json.loads(inventory_path.read_text())
-        if item not in inventory:
-            return False
-        inventory[item]["stock"] = inventory[item].get("stock", 0) + qty
-        inventory_path.write_text(json.dumps(inventory, indent=2) + "\n")
-
-    return True
+    return stock_store.add_stock(item, qty)
 
 
 # --- Order functions ---
@@ -402,13 +373,4 @@ def get_current_packing_order():
 
 def add_stock(item, qty=10):
     """Add stock to an item (for restocking)."""
-    inventory_path = INVENTORY_FILE
-
-    with _write_lock:
-        inventory = json.loads(inventory_path.read_text())
-        if item not in inventory:
-            return False
-        inventory[item]["stock"] = inventory[item].get("stock", 0) + qty
-        inventory_path.write_text(json.dumps(inventory, indent=2) + "\n")
-
-    return True
+    return stock_store.add_stock(item, qty)

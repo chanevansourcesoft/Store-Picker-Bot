@@ -17,5 +17,5 @@ jetson = ["pyyaml"]
 packages = ["store_agent", "robot_server"]
 
 [tool.setuptools.package-data]
-store_agent = ["inventory.json"]
+store_agent = ["catalog.json"]
 robot_server = ["stations.example.yaml"]

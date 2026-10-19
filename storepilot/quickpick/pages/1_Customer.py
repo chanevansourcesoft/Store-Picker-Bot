@@ -20,7 +20,7 @@ import streamlit as st
 
 from quickpick import store
 from store_agent import robot_client
-from store_agent.config import load_inventory
+from store_agent.inventory import load_inventory
 from store_agent.order_parser import parse_order
 from quickpick.worker import init_worker
 from quickpick.ui_style import (
@@ -189,7 +189,7 @@ def reset_for_new_order():
 # ============ Search ============
 
 def looks_like_order(text):
-    """A sentence ("2 soups and chips") goes to Nemotron. One or two words are a search."""
+    """A sentence ("2 chips and a frooti") goes to Nemotron. One or two words are a search."""
     words = text.lower().replace(",", " , ").split()
     has_number = any(ch.isdigit() for ch in text)
     return has_number or len(words) >= 3 or "and" in words or "," in words
@@ -325,7 +325,7 @@ def show_shop():
                 c1, c2 = st.columns([5, 1], vertical_alignment="bottom")
                 c1.text_input(
                     "Search",
-                    placeholder="🔍  Search or type your order, e.g. 2 soups and chips",
+                    placeholder="🔍  Search or type your order, e.g. 2 chips and a frooti",
                     label_visibility="collapsed",
                     key="search_text",
                 )

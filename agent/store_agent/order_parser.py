@@ -2,29 +2,31 @@
 Step 2.2: Turn a customer order (normal language) into a clean item list.
 
 Example:
-    "2 soup cans and one chips"  ->  {"items": [{"item": "soup_can", "qty": 2},
-                                                {"item": "chips_pack", "qty": 1}],
-                                      "unknown": []}
+    "2 chips and one hide and seek"  ->  {"items": [{"item": "chips_packet", "qty": 2},
+                                                    {"item": "hide_and_seek", "qty": 1}],
+                                          "unknown": []}
 
 Run a quick test:
-    python -m store_agent.order_parser "2 soup cans and one chips"
+    python -m store_agent.order_parser "2 chips and one hide and seek"
 """
 
 import json
 import re
 import sys
 
-from store_agent.config import MODEL_FAST, get_client, has_llm, load_inventory
+from store_agent.config import MODEL_FAST, get_client, has_llm
+from store_agent.inventory import load_inventory
 
 SYSTEM_PROMPT = """You read grocery orders for a small store.
-Products we sell (use these exact names): {products}
+Products we sell (use the exact name before the colon):
+{products}
 
 Turn the customer's order into JSON with this exact shape:
 {{"items": [{{"item": "<product name>", "qty": <number>}}], "unknown": ["<things we do not sell>"]}}
 
 Rules:
 - Only use product names from the list above.
-- Match loose words to the right product (for example "soup" -> "soup_can", "chips" -> "chips_pack").
+- Match loose words to the right product (for example "chips" -> "chips_packet", "biscuits" -> "hide_and_seek").
 - If the customer asks for something we do not sell, put their words in "unknown".
 - If no number is given, qty is 1.
 - Reply with JSON only. No other text."""
@@ -69,25 +71,41 @@ FILLER_WORDS = {"please", "i", "want", "need", "would", "like", "some", "get", "
                 "the", "and", "also", "plus", "with", "can", "could", "you", "x", "pcs", "pieces"}
 
 
+def product_words(inventory):
+    """{word or phrase: item} from the item id, its first word, the display name and the aliases."""
+    words = {}
+    for item, info in inventory.items():
+        for name in [item.replace("_", " "), item.split("_")[0], info.get("name", "")] + list(info.get("aliases", [])):
+            name = " ".join(name.lower().split())
+            if name:
+                words.setdefault(name, item)
+    return words
+
+
 def parse_order_offline(order_text, inventory):
     """Keyword parser for when Nemotron is not available (no API key).
 
-    "2 soups, a juice and pizza" -> soup_can x2, juice_box x1, unknown ["pizza"].
-    A product matches on the first word of its name ("soup" for soup_can), plural or not.
+    "2 chips, a frooti and pizza" -> chips_packet x2, frooti x1, unknown ["pizza"].
+    Names of more than one word ("hide and seek", "mango drink") are matched first,
+    so the "and" inside them does not split the order. Plurals match too ("biscuits").
     """
-    keywords = {name.split("_")[0]: name for name in inventory}
+    words = product_words(inventory)
+    text = order_text.lower()
+    for phrase in sorted((w for w in words if not w.isalpha()), key=len, reverse=True):
+        text = re.sub(r"(?<![a-z])" + re.escape(phrase) + r"s?(?![a-z])", f" {words[phrase]} ", text)
     data = {"items": [], "unknown": []}
-    for chunk in re.split(r",|;|\band\b|\bplus\b|&|\n", order_text.lower()):
-        words = re.findall(r"[a-z]+|\d+", chunk)
+    for chunk in re.split(r",|;|\band\b|\bplus\b|&|\n", text):
+        tokens = re.findall(r"[a-z_]+|\d+", chunk)
         qty, item, rest = 1, None, []
-        for word in words:
+        for word in tokens:
             if word.isdigit():
                 qty = int(word)
             elif word in NUMBER_WORDS:
                 qty = NUMBER_WORDS[word]
-            elif item is None and (word in keywords or word.rstrip("s") in keywords
-                                   or word.removesuffix("es") in keywords):
-                item = keywords.get(word) or keywords.get(word.rstrip("s")) or keywords.get(word.removesuffix("es"))
+            elif item is None and (word in inventory or word in words or word.rstrip("s") in words
+                                   or word.removesuffix("es") in words):
+                item = word if word in inventory else \
+                    words.get(word) or words.get(word.rstrip("s")) or words.get(word.removesuffix("es"))
             elif word not in FILLER_WORDS:
                 rest.append(word)
         if item:
@@ -106,7 +124,9 @@ def parse_order(order_text):
     response = client.chat.completions.create(
         model=MODEL_FAST,
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT.format(products=", ".join(inventory))},
+            {"role": "system", "content": SYSTEM_PROMPT.format(products="\n".join(
+                f"- {item}: {info.get('name', item)}" + (f" (also: {', '.join(info['aliases'])})" if info.get("aliases") else "")
+                for item, info in inventory.items()))},
             {"role": "user", "content": order_text},
         ],
         temperature=0,
@@ -117,6 +137,6 @@ def parse_order(order_text):
 
 
 if __name__ == "__main__":
-    text = " ".join(sys.argv[1:]) or "2 soup cans and one chips please"
+    text = " ".join(sys.argv[1:]) or "2 chips and one hide and seek please"
     print("Order :", text)
     print("Result:", json.dumps(parse_order(text), indent=2))

@@ -155,7 +155,7 @@ if __name__ == "__main__":
     print("/map:", get_map())
 
     print("\nNavigate to shelf_A:", navigate("shelf_A"))
-    print("Pick soup_can:", pick("soup_can", "shelf_A", "pick up the soup can"))
+    print("Pick chips_packet:", pick("chips_packet", "shelf_A", "pick up the chips packet"))
     print("Scan:", scan())
     print("Place in basket:", place("basket"))
 

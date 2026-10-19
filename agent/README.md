@@ -6,7 +6,8 @@ and the robot API server that runs on the Jetson.
 ```
 store_agent/    Nemotron agent served by Nebius Token Factory: order parsing, shelf route,
                 planner loop with tools, offline autopilot (no API key), OrderTracker guards,
-                robot client, inventory
+                robot client, catalog.json (products, in Git; same ids and shelves as
+                policy/instructions.json) and inventory.py (live stock in STOCK_FILE, not in Git)
 robot_server/   Robot API (Contract v2): jetson_server.py (Jetson, Nav2) and mock_robot.py
                 (same API, simulated). See robot_server/README.md
 ```
@@ -29,6 +30,7 @@ Tests (no robot, no API key):
 
 ```bash
 cd agent
+python -m store_agent.test_inventory
 python -m store_agent.test_agent
 python -m store_agent.test_order_tracker
 python -m store_agent.test_autopilot

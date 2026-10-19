@@ -3,7 +3,7 @@ Tests for quickpick/worker.py
 
 The agent is replaced with a fake one, so these tests need no Nemotron key
 and no robot. The fake agent sends the same steps and robot messages as the
-mock robot and the Jetson server ("placed soup_can in basket").
+mock robot and the Jetson server ("placed chips_packet in basket").
 
 Run:
     python -m quickpick.test_worker
@@ -12,21 +12,21 @@ Run:
 from unittest.mock import patch
 
 from quickpick import store, worker
-from store_agent.config import DEFAULT_INVENTORY
+from store_agent.inventory import DEFAULT_INVENTORY
 from quickpick.test_store import reset_inventory, setup_test_db, teardown_test_db
 from store_agent.testing_fakes import BASKET, RETURN, SCAN, FakeRobot, ScriptedModel, nav, pick
 
 # The exact tool calls the model made in demo order #3 (it lost count
-# after scan failures and packed 3 soups for an order of 2).
+# after scan failures and packed 3 chips packets for an order of 2).
 ORDER_3_SCRIPT = [
-    nav("shelf_A"), nav("shelf_A"), pick("soup_can"), SCAN, RETURN,
-    pick("soup_can"), SCAN, BASKET,
-    pick("soup_can"), SCAN, RETURN, pick("soup_can"), pick("soup_can"), SCAN,
-    nav("shelf_B"), pick("soup_can"), RETURN, RETURN, pick("soup_can"),
-    nav("shelf_A"), pick("soup_can"), SCAN, nav("shelf_A"), SCAN, BASKET,
-    pick("soup_can"), SCAN, BASKET,
-    nav("shelf_B"), pick("chips_pack"), SCAN, BASKET,
-    nav("shelf_C"), pick("juice_box"), SCAN, BASKET,
+    nav("shelf_A"), nav("shelf_A"), pick("chips_packet"), SCAN, RETURN,
+    pick("chips_packet"), SCAN, BASKET,
+    pick("chips_packet"), SCAN, RETURN, pick("chips_packet"), pick("chips_packet"), SCAN,
+    nav("shelf_B"), pick("chips_packet"), RETURN, RETURN, pick("chips_packet"),
+    nav("shelf_A"), pick("chips_packet"), SCAN, nav("shelf_A"), SCAN, BASKET,
+    pick("chips_packet"), SCAN, BASKET,
+    nav("shelf_B"), pick("hide_and_seek"), SCAN, BASKET,
+    nav("shelf_B"), pick("frooti"), SCAN, BASKET,
     nav("customer"), nav("home"),
 ]
 
@@ -59,23 +59,23 @@ def make_fake_agent(steps):
 
 
 def test_stock_goes_down_after_order():
-    """2 soups + 1 chips packed in the basket -> stock goes down by 2 and 1."""
+    """2 chips packets + 1 hide and seek packed in the basket -> stock goes down by 2 and 1."""
     db_path = setup_test_db()
     reset_inventory()
     try:
         before = store.get_stock()
-        items = [{"item": "soup_can", "qty": 2}, {"item": "chips_pack", "qty": 1}]
+        items = [{"item": "chips_packet", "qty": 2}, {"item": "hide_and_seek", "qty": 1}]
         order_id, problems = store.create_order(items)
         assert order_id, problems
 
-        steps = fake_steps("soup_can") + fake_steps("soup_can") + fake_steps("chips_pack")
+        steps = fake_steps("chips_packet") + fake_steps("chips_packet") + fake_steps("hide_and_seek")
         with patch("quickpick.worker.run_agent", make_fake_agent(steps)):
             worker.process_single_order(order_id)
 
         after = store.get_stock()
-        assert after["soup_can"] == before["soup_can"] - 2, after
-        assert after["chips_pack"] == before["chips_pack"] - 1, after
-        assert after["juice_box"] == before["juice_box"], after
+        assert after["chips_packet"] == before["chips_packet"] - 2, after
+        assert after["hide_and_seek"] == before["hide_and_seek"] - 1, after
+        assert after["frooti"] == before["frooti"], after
         assert store.get_order(order_id)["status"] == "done"
 
         print("PASS: test_stock_goes_down_after_order")
@@ -91,14 +91,14 @@ def test_returned_item_keeps_stock():
     reset_inventory()
     try:
         before = store.get_stock()
-        order_id, problems = store.create_order([{"item": "soup_can", "qty": 1}])
+        order_id, problems = store.create_order([{"item": "chips_packet", "qty": 1}])
         assert order_id, problems
 
-        steps = fake_steps("soup_can", target="return")
+        steps = fake_steps("chips_packet", target="return")
         with patch("quickpick.worker.run_agent", make_fake_agent(steps)):
             worker.process_single_order(order_id)
 
-        assert store.get_stock()["soup_can"] == before["soup_can"]
+        assert store.get_stock()["chips_packet"] == before["chips_packet"]
 
         print("PASS: test_returned_item_keeps_stock")
 
@@ -109,12 +109,12 @@ def test_returned_item_keeps_stock():
 
 def test_replay_order_3_is_not_overpacked():
     """Replay order #3 (several scan failures, model loses count). The code must stop
-    the mistakes: exactly 2 soups, bill Rs 175 or less, stock down by exactly 2."""
+    the mistakes: exactly 2 chips packets, bill Rs 85 or less, stock down by exactly 2."""
     db_path = setup_test_db()
     reset_inventory()
     try:
         before = store.get_stock()
-        items = [{"item": "soup_can", "qty": 2}, {"item": "chips_pack", "qty": 1}, {"item": "juice_box", "qty": 1}]
+        items = [{"item": "chips_packet", "qty": 2}, {"item": "hide_and_seek", "qty": 1}, {"item": "frooti", "qty": 1}]
         order_id, problems = store.create_order(items)
         assert order_id, problems
 
@@ -128,15 +128,15 @@ def test_replay_order_3_is_not_overpacked():
         order = store.get_order(order_id)
         bill = order["bill"]
         after = store.get_stock()
-        soups_in_basket = sum(1 for e in order["step_log"]
-                              if e["result"].get("message") == "placed soup_can in basket")
+        chips_in_basket = sum(1 for e in order["step_log"]
+                              if e["result"].get("message") == "placed chips_packet in basket")
 
-        assert soups_in_basket == 2, f"basket has {soups_in_basket} soups"
-        assert bill["total"] <= 175, bill
-        assert bill["total"] == bill["paid"] == 175, bill
-        assert before["soup_can"] - after["soup_can"] == 2, (before, after)
-        assert before["chips_pack"] - after["chips_pack"] == 1
-        assert before["juice_box"] - after["juice_box"] == 1
+        assert chips_in_basket == 2, f"basket has {chips_in_basket} chips packets"
+        assert bill["total"] <= 85, bill
+        assert bill["total"] == bill["paid"] == 85, bill
+        assert before["chips_packet"] - after["chips_packet"] == 2, (before, after)
+        assert before["hide_and_seek"] - after["hide_and_seek"] == 1
+        assert before["frooti"] - after["frooti"] == 1
         assert order["status"] == "done", (order["status"], order["problems"])
 
         # The mistakes were refused by the code and never reached the robot
@@ -154,19 +154,19 @@ def test_replay_order_3_is_not_overpacked():
 
 
 def test_extra_item_does_not_reduce_stock():
-    """If an extra soup still ends in the basket, stock goes down only by the ordered qty."""
+    """If an extra chips packet still ends in the basket, stock goes down only by the ordered qty."""
     db_path = setup_test_db()
     reset_inventory()
     try:
         before = store.get_stock()
-        order_id, problems = store.create_order([{"item": "soup_can", "qty": 2}])
+        order_id, problems = store.create_order([{"item": "chips_packet", "qty": 2}])
         assert order_id, problems
 
-        steps = fake_steps("soup_can") * 3  # 3 soups placed, 2 ordered
+        steps = fake_steps("chips_packet") * 3  # 3 chips packets placed, 2 ordered
         with patch("quickpick.worker.run_agent", make_fake_agent(steps)):
             worker.process_single_order(order_id)
 
-        assert before["soup_can"] - store.get_stock()["soup_can"] == 2
+        assert before["chips_packet"] - store.get_stock()["chips_packet"] == 2
         print("PASS: test_extra_item_does_not_reduce_stock")
 
     finally:

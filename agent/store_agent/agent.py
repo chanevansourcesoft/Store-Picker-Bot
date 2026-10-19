@@ -18,7 +18,7 @@ Final status: "done" (exactly as ordered), "done_with_problems" (some items pack
 but missing/extra items), or "failed" (nothing packed).
 
 Run:
-    python -m store_agent.agent "2 soup cans and one chips"
+    python -m store_agent.agent "2 chips and one hide and seek"
 """
 
 import json
@@ -29,7 +29,8 @@ from datetime import datetime
 
 from store_agent import robot_client
 from store_agent.autopilot import Autopilot
-from store_agent.config import MODEL_AGENT, get_client, load_inventory
+from store_agent.config import MODEL_AGENT, get_client
+from store_agent.inventory import load_inventory
 from store_agent.order_parser import parse_order
 from store_agent.order_tracker import OrderTracker
 from store_agent.tools import TOOLS, run_tool
@@ -171,7 +172,7 @@ RULES:
 
 
 def ordered_counts(order):
-    """{"soup_can": 2, ...} from the order items (duplicates added up)."""
+    """{"chips_packet": 2, ...} from the order items (duplicates added up)."""
     counts = {}
     for entry in order["items"]:
         counts[entry["item"]] = counts.get(entry["item"], 0) + entry["qty"]
@@ -182,7 +183,7 @@ def build_bill_from_log(log, order, inventory):
     """Build the bill from the step log. Only count successful place_item(basket) calls.
 
     Never charge more than the customer paid: each item is billed only up to the
-    ordered qty. Extra items are listed as problems ("1 extra soup_can, not charged").
+    ordered qty. Extra items are listed as problems ("1 extra chips_packet, not charged").
     """
     packed = {}  # item -> count
 
@@ -491,7 +492,7 @@ def process_order(order_text, on_step=None, on_parsed=None):
 
 
 def main():
-    order_text = " ".join(sys.argv[1:]) or "2 soup cans and one chips"
+    order_text = " ".join(sys.argv[1:]) or "2 chips and one hide and seek"
     print(f"Order: {order_text}\n")
 
     print("Parsing order...")

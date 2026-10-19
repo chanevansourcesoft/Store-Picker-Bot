@@ -1,0 +1,53 @@
+{
+  "_note": "What the store sells. Item ids and shelves must match policy/instructions.json (checked by test_inventory). Prices (INR), barcodes, sizes and initial_stock are PLACEHOLDERS until the real values are known. Live stock is not kept here: see STOCK_FILE in store_agent/inventory.py.",
+  "products": {
+    "chips_packet": {
+      "name": "Chips Packet",
+      "shelf": "shelf_A",
+      "bin": "A1",
+      "barcode": "0000000000011",
+      "price": 20,
+      "weight": "light",
+      "size": "50 g",
+      "category": "Snacks",
+      "aliases": ["chips", "chip", "crisps", "chips packet", "chips pack"],
+      "initial_stock": 10
+    },
+    "mentos": {
+      "name": "Mentos",
+      "shelf": "shelf_A",
+      "bin": "A2",
+      "barcode": "0000000000028",
+      "price": 10,
+      "weight": "light",
+      "size": "1 roll",
+      "category": "Sweets",
+      "aliases": ["mentos", "mint", "mints", "candy", "candy roll"],
+      "initial_stock": 15
+    },
+    "frooti": {
+      "name": "Frooti",
+      "shelf": "shelf_B",
+      "bin": "B1",
+      "barcode": "0000000000035",
+      "price": 15,
+      "weight": "medium",
+      "size": "125 ml",
+      "category": "Drinks",
+      "aliases": ["frooti", "mango drink", "mango juice", "juice", "drink"],
+      "initial_stock": 12
+    },
+    "hide_and_seek": {
+      "name": "Hide & Seek",
+      "shelf": "shelf_B",
+      "bin": "B2",
+      "barcode": "0000000000042",
+      "price": 30,
+      "weight": "medium",
+      "size": "100 g",
+      "category": "Biscuits",
+      "aliases": ["hide and seek", "hide & seek", "hide n seek", "biscuit", "biscuits", "cookies"],
+      "initial_stock": 10
+    }
+  }
+}

@@ -16,7 +16,8 @@ import streamlit as st
 
 from store_agent import robot_client
 from store_agent.agent import process_order
-from store_agent.config import MODEL_AGENT, MODEL_FAST, ROBOT_URL, load_inventory
+from store_agent.config import MODEL_AGENT, MODEL_FAST, ROBOT_URL
+from store_agent.inventory import load_inventory
 
 # Page config
 st.set_page_config(
@@ -180,7 +181,7 @@ with col1:
         "What would you like to order?",
         value=st.session_state.order_text,
         height=100,
-        placeholder="Example: 2 soup cans and one chips",
+        placeholder="Example: 2 chips and one hide and seek",
         key="order_input"
     )
 
@@ -189,15 +190,15 @@ with col1:
     example_cols = st.columns(3)
     with example_cols[0]:
         if st.button("🥫 Soup + Chips", use_container_width=True):
-            st.session_state.order_text = "2 soup cans and one chips"
+            st.session_state.order_text = "2 chips and one hide and seek"
             st.rerun()
     with example_cols[1]:
         if st.button("🧃 All Items", use_container_width=True):
-            st.session_state.order_text = "soup, juice and chips"
+            st.session_state.order_text = "chips, frooti and mentos"
             st.rerun()
     with example_cols[2]:
         if st.button("🍕 With Unknown", use_container_width=True):
-            st.session_state.order_text = "one soup and a pizza"
+            st.session_state.order_text = "one frooti and a pizza"
             st.rerun()
 
     # Place order button

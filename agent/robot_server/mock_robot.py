@@ -9,21 +9,16 @@ Run:
     # or: uvicorn robot_server.mock_robot:app --port 8000
 """
 
-import json
 import math
 import random
 import time
-from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-INVENTORY_FILE = Path(__file__).resolve().parent.parent / "store_agent" / "inventory.json"
-
-def load_inventory():
-    return json.loads(INVENTORY_FILE.read_text())
+from store_agent.inventory import load_catalog as load_inventory  # shelves and barcodes (no stock)
 
 # Chance that a step fails, so the agent can practice handling problems.
 PICK_FAIL_RATE = 0.10
@@ -99,7 +94,7 @@ def count_pick_try(item):
 
 
 def log_groot(req, attempt, result):
-    """One line per pick, e.g. [GR00T] pick up the soup can (try 2) -> picked"""
+    """One line per pick, e.g. [GR00T] pick up the chips packet (try 2) -> picked"""
     text = req.instruction or f"pick {req.item}"
     print(f"[GR00T] {text} (try {attempt}) -> {result['message']}", flush=True)
 

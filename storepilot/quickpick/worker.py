@@ -13,7 +13,7 @@ from typing import Callable, Optional
 from quickpick import store
 from store_agent import robot_client
 from store_agent.agent import run_agent
-from store_agent.config import load_inventory
+from store_agent.inventory import load_inventory
 
 # Worker state
 _worker_thread: Optional[threading.Thread] = None
@@ -207,7 +207,7 @@ if __name__ == "__main__":
     start_worker()
 
     # Create a test order
-    items = [{"item": "soup_can", "qty": 1}]
+    items = [{"item": "chips_packet", "qty": 1}]
     order_id, problems = store.create_order(items)
 
     if order_id:

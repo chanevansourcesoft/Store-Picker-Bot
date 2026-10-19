@@ -6,7 +6,7 @@ what to do and writes the bill. **NVIDIA GR00T** runs the pick skill on the robo
 
 Built for the Nebius x NVIDIA Global AI Hackathon 2026 (Physical AI track).
 
-- **Customer kiosk**: pick products or type an order ("2 soups and chips"), pay (fake), watch the robot pack it.
+- **Customer kiosk**: pick products or type an order ("2 chips and a frooti"), pay (fake), watch the robot pack it.
 - **Store control**: needs-attention alerts, KPIs (pack time, pick success), live robot map,
   step log for any order, orders per hour, orders (filter, cancel, CSV), stock, emergency STOP.
 
@@ -120,6 +120,7 @@ Put them in `.env`, in `.streamlit/secrets.toml`, or before the command.
 | `ROBOT_URL` | `http://localhost:8000` | Address of the robot server |
 | `ROSBRIDGE_URL` | `ws://192.168.149.1:9090` | rosbridge on the Jetson, for the live map |
 | `LASER_OFFSET` | `0,0,0` | Laser position from base_link: x,y,yaw (m, rad) |
+| `STOCK_FILE` | `<repo>/data/stock.json` | Live stock (runtime, not in Git). Products come from `agent/store_agent/catalog.json` |
 
 ## Run the tests
 
