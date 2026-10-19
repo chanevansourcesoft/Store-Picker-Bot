@@ -16,19 +16,19 @@ No robot? The app runs in **demo mode** with a simulated robot inside the app.
 
 ### Step 1: Install (only the first time)
 
-Needs Python 3.10 or newer. Run all commands from the project folder.
+Needs Python 3.10 or newer. Run all commands from this folder (`storepilot/quickpick`).
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt   # also installs the shared agent from ../../agent
 ```
 
 ### Step 2: Add your Nebius API key (only the first time)
 
 Nemotron runs on Nebius Token Factory, so the app needs a key. Choose ONE way:
 
-- **`.env` file** in the project folder:
+- **`.env` file** in this folder or in `storepilot/` (shared with the StorePilot dashboard):
   ```
   NEBIUS_API_KEY=your-key
   ```
@@ -57,24 +57,24 @@ Then pick ONE of these 3 ways:
 **A. Demo mode (no robot, easiest).** The simulated robot runs inside the app.
 
 ```bash
-DEMO_MODE=1 streamlit run app/Home.py
+DEMO_MODE=1 streamlit run Home.py
 ```
 
 **B. Mock robot server (no robot, same HTTP API as the real robot).** Use 2 terminals.
 
 ```bash
 # Terminal 1: the mock robot on http://localhost:8000
-python robot_server/mock_robot.py
+python -m robot_server.mock_robot
 
 # Terminal 2: the app
-streamlit run app/Home.py
+streamlit run Home.py
 ```
 
 **C. Real robot (Jetson).** Start the robot server on the Jetson first
-(see [robot_server/README.md](robot_server/README.md)), then:
+(see [agent/robot_server/README.md](../../agent/robot_server/README.md)), then:
 
 ```bash
-ROBOT_URL=http://<jetson-ip>:8000 streamlit run app/Home.py
+ROBOT_URL=http://<jetson-ip>:8000 streamlit run Home.py
 ```
 
 You can also put `ROBOT_URL=...` in `.env` instead of typing it each time.
@@ -96,17 +96,17 @@ On a second device (for example the Raspberry Pi kiosk), open
   answer, the app uses demo mode, and both pages show the
   "Demo mode: simulated robot" badge. Turn the robot on first, then restart the app.
 - To stop the app, press `Ctrl+C` in the terminal.
-- Orders are saved in `data/orders.db`. The app creates it by itself.
-  To start with no orders, stop the app and delete `data/orders.db`.
+- Orders are saved in `storepilot/data/orders.db`. The app creates it by itself.
+  To start with no orders, stop the app and delete that file.
 
 ### Optional: live map without the robot
 
 ```bash
 # Terminal 1: fake rosbridge on ws://localhost:9090
-python -m robot_server.fake_rosbridge
+python -m quickpick.fake_rosbridge   # run from storepilot/
 
 # Terminal 2: the app
-ROSBRIDGE_URL=ws://localhost:9090 DEMO_MODE=1 streamlit run app/Home.py
+ROSBRIDGE_URL=ws://localhost:9090 DEMO_MODE=1 streamlit run Home.py
 ```
 
 ### All settings
@@ -127,16 +127,18 @@ The tests need no robot and no API key.
 
 ```bash
 source venv/bin/activate
-python -m app.test_store
-python -m app.test_agent
-python -m app.test_worker
-python -m app.test_order_tracker
-python -m app.test_step_log
-python -m app.test_autopilot
-python -m app.test_metrics
+cd ..                                  # storepilot/
+python -m quickpick.test_store
+python -m quickpick.test_worker
+python -m quickpick.test_step_log
+python -m quickpick.test_metrics
+python -m quickpick.test_fake_rosbridge
+cd ../agent                            # shared agent and robot server
+python -m store_agent.test_agent
+python -m store_agent.test_order_tracker
+python -m store_agent.test_autopilot
 python -m robot_server.test_stations
 python -m robot_server.test_mock_robot
-python -m robot_server.test_fake_rosbridge
 ```
 
 ## Deploy (Streamlit Community Cloud)
@@ -144,17 +146,18 @@ python -m robot_server.test_fake_rosbridge
 1. Push this repo to GitHub. Do not commit `.env` or `.streamlit/secrets.toml`
    (they are in `.gitignore`).
 2. Go to https://share.streamlit.io, click **Create app**, and choose your repo and branch.
-3. Main file path: `app/Home.py`. In **Advanced settings**, choose Python 3.10 or newer.
+3. Main file path: `storepilot/quickpick/Home.py`. In **Advanced settings**, choose Python 3.10 or newer.
+   (Not tested since the move: `requirements.txt` installs the shared agent with `-e ../../agent`.)
 4. In **Secrets**, paste:
    ```toml
    NEBIUS_API_KEY = "your-key"
    DEMO_MODE = "1"
    ```
-5. Click **Deploy**. The app creates `data/orders.db` and the stock by itself on first start.
+5. Click **Deploy**. The app creates `storepilot/data/orders.db` and the stock by itself on first start.
 
 Note: on Community Cloud the disk is not permanent. Orders and stock go back to the
 starting values when the app restarts.
 
 ## License
 
-Apache 2.0. See [LICENSE](../LICENSE) in the repo root.
+Apache 2.0. See [LICENSE](../../LICENSE) in the repo root.

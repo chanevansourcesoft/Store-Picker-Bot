@@ -16,7 +16,7 @@ Both servers have **identical endpoints**, so the AI agent works with either.
 ### Mock Robot (for testing)
 
 ```bash
-cd robot_server
+cd agent/robot_server     # from the repo root
 pip install fastapi uvicorn pyyaml
 uvicorn mock_robot:app --host 0.0.0.0 --port 8000
 ```
@@ -48,7 +48,7 @@ curl http://localhost:8000/map
 
 4. **Run the server**:
    ```bash
-   cd robot_server
+   cd agent/robot_server     # from the repo root
    python jetson_server.py
    ```
 
@@ -164,7 +164,7 @@ home (0, 0) -----------------------+
 `jetson_server.py` reads `robot_server/stations.yaml` when it starts:
 
 ```bash
-cd robot_server
+cd agent/robot_server     # from the repo root
 cp stations.example.yaml stations.yaml
 # edit stations.yaml: x, y (meters, Nav2 "map" frame) and theta (radians) for each station
 pip install pyyaml        # usually already installed with ROS 2
@@ -185,7 +185,7 @@ stations:
 - If the file is missing, has a mistake, or PyYAML is not installed, the server prints a
   warning and uses `STATION_MAP` inside `jetson_server.py` (never a mix of both).
 - Restart the server after you change the file.
-- Test the file: `python -m robot_server.test_stations` (from the project root).
+- Test the file: `python -m robot_server.test_stations` (from `agent/`).
 
 ## Implementing the Stubs
 
@@ -269,14 +269,14 @@ netstat -tlnp | grep 8000
 
 1. Start the mock robot on your laptop:
    ```bash
-   cd robot_server
-   uvicorn mock_robot:app --port 8000
+   cd agent
+   uvicorn robot_server.mock_robot:app --port 8000
    ```
 
 2. In another terminal, run the Streamlit app:
    ```bash
-   cd ..
-   streamlit run app/Home.py
+   cd ../storepilot/quickpick
+   streamlit run Home.py
    ```
 
 3. Place an order from the Customer page and watch the Owner dashboard.

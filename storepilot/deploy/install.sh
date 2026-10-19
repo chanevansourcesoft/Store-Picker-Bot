@@ -20,6 +20,7 @@ fi
 echo "==> Backend venv"
 [ -d "$ROOT/backend/.venv" ] || python3 -m venv "$ROOT/backend/.venv"
 "$ROOT/backend/.venv/bin/pip" install -q -r "$ROOT/backend/requirements.txt"
+"$ROOT/backend/.venv/bin/pip" install -q -e "$ROOT/../agent"   # shared agent (planner, parser, guards)
 [ -f "$ROOT/.env" ] || { cp "$ROOT/.env.example" "$ROOT/.env"; chmod 600 "$ROOT/.env"; echo "   created .env (mock mode)"; }
 
 echo "==> Frontend build"

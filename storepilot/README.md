@@ -9,11 +9,19 @@ explicit HTTP interface. The Jetson stays the source of truth and runs all robot
  └─ Chromium kiosk ──HTTP/WebSocket──► StorePilot backend (FastAPI, :8080, on the Pi)
                                          ├─ SQLite: mission history + events (survives disconnects)
                                          ├─ Nemotron via Nebius Token Factory (key stays on the Pi)
-                                         │    order parsing + step planning (shared code in ../webapp/app)
+                                         │    order parsing + step planning (shared code in ../agent)
                                          └─ Robot adapter
                                               ├─ mock: built-in simulator (labelled SIMULATED)
                                               └─ live: Jetson robot server, Contract v2 (HTTP)
 ```
+
+This folder holds both store apps. They share the agent in `../agent` (Nemotron planner,
+order parser, OrderTracker guards, robot client) and one `.env`:
+
+| Folder | App | Start (mock, no robot, no key) |
+|---|---|---|
+| `backend/` + `frontend/` | StorePilot AI dashboard (this README) | `./dev.sh`, or the installed service on :8080 |
+| `quickpick/` | QuickPick customer kiosk + owner dashboard (Streamlit) | `cd quickpick && DEMO_MODE=1 streamlit run Home.py` ([README](quickpick/README.md)) |
 
 ## What it shows
 
@@ -54,7 +62,7 @@ cd ~/Documents/"Dark Store Robot"/Store-Picker-Bot/storepilot
 
 The installer is safe to run again. It:
 1. installs Node.js 22 LTS in `~/.local/opt/node` if missing (checksum verified),
-2. creates `backend/.venv` and installs `backend/requirements.txt`,
+2. creates `backend/.venv` and installs `backend/requirements.txt` and the shared agent (`pip install -e ../agent`),
 3. creates `.env` from `.env.example` if missing,
 4. builds the frontend (`frontend/dist`, served by the backend),
 5. installs and starts the systemd **user** service `storepilot-backend` (starts at boot; this Pi
@@ -266,7 +274,7 @@ appears afterwards, a new `/navigate` is refused until `/resume`, **and** an arm
 ## Jetson integration: what is assumed, what is still needed
 
 The live adapter (`backend/storepilot/adapters/jetson.py`) speaks the contract of
-`webapp/robot_server/jetson_server.py` (Contract v2): `GET /health /status /map`,
+`agent/robot_server/jetson_server.py` (Contract v2): `GET /health /status /map`,
 `POST /navigate /pick /scan /place /stop /resume`. Before switching to live mode, please confirm:
 
 1. **Address:** the Jetson's IP on the robot network and that `jetson_server.py` runs on port 8000
@@ -281,10 +289,10 @@ The live adapter (`backend/storepilot/adapters/jetson.py`) speaks the contract o
    published, and `speed` is a constant 0.3 while navigating. Which topics give real values?
 6. **Pick / scan / place:** these are still timed stubs on the Jetson. Which service will run the
    GR00T pick and barcode / load-cell verification, and will it report failures in the same JSON?
-7. **Stations:** is `robot_server/stations.yaml` filled with the real store positions? The map
+7. **Stations:** is `agent/robot_server/stations.yaml` filled with the real store positions? The map
    draws exactly what `/map` returns.
 8. **Map image (optional):** to draw the real occupancy grid, the Jetson would need to serve it
    (for example `GET /map/image` + resolution / origin), or allow rosbridge from the Pi.
 
-Note: the older Streamlit webapp (`../webapp`) checks `/health` for `"ok"` only, so against the real
+Note: the QuickPick Streamlit app (`quickpick/`) checks `/health` for `"ok"` only, so against the real
 Jetson (`"healthy"`) it would fall back to its simulator. StorePilot does not have this problem.

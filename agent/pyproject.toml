@@ -7,7 +7,7 @@ name = "store-agent"
 version = "0.1.0"
 description = "Shared store agent (Nemotron planner, order parser, OrderTracker guards, robot client) and the robot API servers"
 requires-python = ">=3.10"
-# Versions are pinned by the apps (storepilot/backend/requirements.txt, webapp/requirements.txt)
+# Versions are pinned by the apps (storepilot/backend/requirements.txt, storepilot/quickpick/requirements.txt)
 dependencies = ["openai", "python-dotenv", "requests", "fastapi", "uvicorn", "pydantic"]
 
 [project.optional-dependencies]

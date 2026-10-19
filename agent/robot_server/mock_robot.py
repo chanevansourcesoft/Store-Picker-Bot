@@ -5,7 +5,7 @@ It follows the same API contract as the real robot server (see robot_server/READ
 The app team uses this until the real mobile robot is ready.
 
 Run:
-    python robot_server/mock_robot.py
+    python -m robot_server.mock_robot      (from agent/)
     # or: uvicorn robot_server.mock_robot:app --port 8000
 """
 

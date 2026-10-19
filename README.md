@@ -48,9 +48,9 @@ No simulation is used; all data comes from the real robot.
 ```
 policy/      LeRobot project: GR00T data collection and pick service (owns arm and cameras)
 ros2_ws/     ROS 2 workspace: bringup, base driver, docking, tray scale, task executor
-agent/       Nemotron agent
-webapp/      Customer page and operations dashboard
-storepilot/  StorePilot AI: touchscreen robot dashboard for the Raspberry Pi LCD
+agent/       Shared Nemotron agent (store_agent) and the robot API server (robot_server, runs on the Jetson)
+storepilot/  The apps: StorePilot AI touchscreen dashboard (backend/, frontend/) and the
+             QuickPick customer kiosk + owner dashboard (quickpick/, Streamlit)
 docs/        Architecture notes and tool feedback
 ```
 
