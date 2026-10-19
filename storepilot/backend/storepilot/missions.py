@@ -1,7 +1,7 @@
 """
 Missions: order text -> parsed items -> validated plan -> operator confirmation -> run.
 
-Planning reuses the shared agent in webapp/app (NVIDIA Nemotron on Nebius Token
+Planning reuses the shared agent in agent/store_agent (NVIDIA Nemotron on Nebius Token
 Factory, or the offline autopilot without a key). Its OrderTracker guards refuse
 wrong commands before they reach the robot.
 
@@ -21,12 +21,12 @@ from datetime import datetime
 from . import config
 from .db import now_iso
 
-# Shared code from webapp/app (config.py put webapp/ on sys.path)
-import app.agent as shared_agent            # noqa: E402
-import app.tools as shared_tools            # noqa: E402
-from app.agent import group_items_by_shelf, plan_shelf_route, run_agent   # noqa: E402
-from app.config import MODEL_AGENT, MODEL_FAST, has_llm, load_inventory   # noqa: E402
-from app.order_parser import parse_order, parse_order_offline             # noqa: E402
+# Shared agent code (agent/store_agent, installed with pip install -e ../../agent)
+import store_agent.agent as shared_agent
+import store_agent.tools as shared_tools
+from store_agent.agent import group_items_by_shelf, plan_shelf_route, run_agent
+from store_agent.config import MODEL_AGENT, MODEL_FAST, has_llm, load_inventory
+from store_agent.order_parser import parse_order, parse_order_offline
 
 RESULT_STATUS = {"done": "completed", "done_with_problems": "completed_with_issues", "failed": "failed"}
 FINISHED = ("completed", "completed_with_issues", "failed", "aborted", "interrupted", "rejected",

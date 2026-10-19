@@ -1,12 +1,12 @@
 """
-Tests for app/order_tracker.py
+Tests for store_agent/order_tracker.py
 
 Run:
-    python -m app.test_order_tracker
+    python -m store_agent.test_order_tracker
 """
 
-from app.config import DEFAULT_INVENTORY
-from app.order_tracker import OrderTracker
+from store_agent.config import DEFAULT_INVENTORY
+from store_agent.order_tracker import OrderTracker
 
 OK = {"success": True}
 

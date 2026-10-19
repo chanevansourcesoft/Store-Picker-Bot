@@ -14,9 +14,9 @@ import time
 
 import streamlit as st
 
-from app import robot_client
-from app.agent import process_order
-from app.config import MODEL_AGENT, MODEL_FAST, ROBOT_URL, load_inventory
+from store_agent import robot_client
+from store_agent.agent import process_order
+from store_agent.config import MODEL_AGENT, MODEL_FAST, ROBOT_URL, load_inventory
 
 # Page config
 st.set_page_config(

@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 from app import store
+from store_agent.config import INVENTORY_FILE
 
 
 def setup_test_db():
@@ -34,7 +35,7 @@ def teardown_test_db(path):
 
 def reset_inventory():
     """Reset inventory to default stock levels."""
-    inventory_path = Path(__file__).resolve().parent / "inventory.json"
+    inventory_path = INVENTORY_FILE
     inventory = {
         "soup_can": {"shelf": "shelf_A", "bin": "A1", "barcode": "8901000000011", "price": 60, "weight": "heavy", "stock": 10},
         "chips_pack": {"shelf": "shelf_B", "bin": "B1", "barcode": "8901000000028", "price": 20, "weight": "light", "stock": 15},

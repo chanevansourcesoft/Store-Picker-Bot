@@ -1,5 +1,5 @@
 """
-Adapter for the Jetson robot server (webapp/robot_server/jetson_server.py, Contract v2).
+Adapter for the Jetson robot server (agent/robot_server/jetson_server.py, Contract v2).
 
     GET  /health  -> {"status": "healthy" | "ok", "ros_available": bool, "ros_connected": bool}
     GET  /status  -> busy, holding, station, pose, battery, speed, nav_state, obstacle, last_error, stopped

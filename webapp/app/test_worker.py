@@ -12,9 +12,9 @@ Run:
 from unittest.mock import patch
 
 from app import store, worker
-from app.config import DEFAULT_INVENTORY
+from store_agent.config import DEFAULT_INVENTORY
 from app.test_store import reset_inventory, setup_test_db, teardown_test_db
-from app.testing_fakes import BASKET, RETURN, SCAN, FakeRobot, ScriptedModel, nav, pick
+from store_agent.testing_fakes import BASKET, RETURN, SCAN, FakeRobot, ScriptedModel, nav, pick
 
 # The exact tool calls the model made in demo order #3 (it lost count
 # after scan failures and packed 3 soups for an order of 2).
@@ -121,8 +121,8 @@ def test_replay_order_3_is_not_overpacked():
         # Same failures as order #3: 1st navigation, 4th grasp, scans 1, 3 and 4
         robot = FakeRobot(DEFAULT_INVENTORY, nav_fail=[1], pick_fail=[4], scan_fail=[1, 3, 4])
         model = ScriptedModel(ORDER_3_SCRIPT)
-        with patch("app.tools.robot_client", robot), patch("app.agent.robot_client", robot), \
-                patch("app.agent.get_client", return_value=model):
+        with patch("store_agent.tools.robot_client", robot), patch("store_agent.agent.robot_client", robot), \
+                patch("store_agent.agent.get_client", return_value=model):
             worker.process_single_order(order_id)
 
         order = store.get_order(order_id)

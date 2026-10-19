@@ -27,7 +27,7 @@ from storepilot.health import AIStatus
 from storepilot.missions import MissionError, MissionManager, mentioned
 from storepilot.telemetry import Telemetry
 
-from app.config import DEFAULT_INVENTORY
+from store_agent.config import DEFAULT_INVENTORY
 
 INVENTORY = lambda: DEFAULT_INVENTORY  # noqa: E731
 
@@ -59,8 +59,8 @@ def services(adapter=None, db=None):
 def offline():
     """No Nemotron: keyword parser + offline autopilot."""
     return [patch("storepilot.missions.has_llm", return_value=False),
-            patch("app.agent.get_client", side_effect=RuntimeError("no key")),
-            patch("app.tools.load_inventory", INVENTORY), patch("app.agent.load_inventory", INVENTORY),
+            patch("store_agent.agent.get_client", side_effect=RuntimeError("no key")),
+            patch("store_agent.tools.load_inventory", INVENTORY), patch("store_agent.agent.load_inventory", INVENTORY),
             patch("storepilot.missions.load_inventory", INVENTORY)]
 
 

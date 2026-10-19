@@ -9,7 +9,7 @@ import shutil
 import threading
 import time
 
-from app.config import MODEL_AGENT, MODEL_FAST, get_client, has_llm
+from store_agent.config import MODEL_AGENT, MODEL_FAST, get_client, has_llm
 
 STARTED = time.monotonic()
 

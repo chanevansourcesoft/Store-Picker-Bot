@@ -20,7 +20,7 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-INVENTORY_FILE = Path(__file__).resolve().parent.parent / "app" / "inventory.json"
+INVENTORY_FILE = Path(__file__).resolve().parent.parent / "store_agent" / "inventory.json"
 
 def load_inventory():
     return json.loads(INVENTORY_FILE.read_text())

@@ -10,9 +10,10 @@ import time
 import traceback
 from typing import Callable, Optional
 
-from app import robot_client, store
-from app.agent import run_agent
-from app.config import load_inventory
+from app import store
+from store_agent import robot_client
+from store_agent.agent import run_agent
+from store_agent.config import load_inventory
 
 # Worker state
 _worker_thread: Optional[threading.Thread] = None

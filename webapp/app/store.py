@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from app.config import ensure_inventory, load_inventory
+from store_agent.config import INVENTORY_FILE, ensure_inventory, load_inventory
 
 # Order statuses: queued -> packing -> one of FINISHED_STATUSES (or queued -> cancelled)
 FINISHED_STATUSES = ("done", "done_with_problems", "failed", "cancelled")
@@ -132,7 +132,7 @@ def reduce_stock(item, qty=1):
     Updates inventory.json file.
     Returns True if successful, False if not enough stock.
     """
-    inventory_path = Path(__file__).resolve().parent / "inventory.json"
+    inventory_path = INVENTORY_FILE
 
     with _write_lock:
         # Read current inventory
@@ -156,7 +156,7 @@ def reduce_stock(item, qty=1):
 
 def restore_stock(item, qty=1):
     """Restore stock for an item (e.g., when order is cancelled)."""
-    inventory_path = Path(__file__).resolve().parent / "inventory.json"
+    inventory_path = INVENTORY_FILE
 
     with _write_lock:
         inventory = json.loads(inventory_path.read_text())
@@ -402,7 +402,7 @@ def get_current_packing_order():
 
 def add_stock(item, qty=10):
     """Add stock to an item (for restocking)."""
-    inventory_path = Path(__file__).resolve().parent / "inventory.json"
+    inventory_path = INVENTORY_FILE
 
     with _write_lock:
         inventory = json.loads(inventory_path.read_text())

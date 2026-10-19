@@ -1,21 +1,21 @@
 """
-Tests for app/agent.py
+Tests for store_agent/agent.py
 
 Run:
-    python -m app.test_agent
+    python -m store_agent.test_agent
 """
 
 from unittest.mock import patch
 
-from app.agent import (
+from store_agent.agent import (
     build_bill_from_log,
     check_order_complete,
     run_agent,
     sort_items_by_weight,
     suggest_similar,
 )
-from app.config import DEFAULT_INVENTORY
-from app.testing_fakes import BASKET, SCAN, FakeRobot, ScriptedModel, nav, pick
+from store_agent.config import DEFAULT_INVENTORY
+from store_agent.testing_fakes import BASKET, SCAN, FakeRobot, ScriptedModel, nav, pick
 
 
 def run_with_fakes(order_items, script, **robot_failures):
@@ -23,9 +23,9 @@ def run_with_fakes(order_items, script, **robot_failures):
     robot = FakeRobot(DEFAULT_INVENTORY, **robot_failures)
     model = ScriptedModel(script)
     order = {"items": order_items, "unknown": []}
-    with patch("app.tools.robot_client", robot), patch("app.agent.robot_client", robot), \
-            patch("app.tools.load_inventory", return_value=DEFAULT_INVENTORY), \
-            patch("app.agent.load_inventory", return_value=DEFAULT_INVENTORY):
+    with patch("store_agent.tools.robot_client", robot), patch("store_agent.agent.robot_client", robot), \
+            patch("store_agent.tools.load_inventory", return_value=DEFAULT_INVENTORY), \
+            patch("store_agent.agent.load_inventory", return_value=DEFAULT_INVENTORY):
         bill, log = run_agent(order, client=model)
     return bill, log, robot, model
 

@@ -1,27 +1,27 @@
 """
-Tests for app/autopilot.py (the offline planner used without NEBIUS_API_KEY)
+Tests for store_agent/autopilot.py (the offline planner used without NEBIUS_API_KEY)
 and the offline order parser.
 
 Run:
-    python -m app.test_autopilot
+    python -m store_agent.test_autopilot
 """
 
 from unittest.mock import patch
 
-from app.agent import run_agent
-from app.autopilot import Autopilot
-from app.config import DEFAULT_INVENTORY
-from app.order_parser import parse_order_offline
-from app.testing_fakes import FakeRobot
+from store_agent.agent import run_agent
+from store_agent.autopilot import Autopilot
+from store_agent.config import DEFAULT_INVENTORY
+from store_agent.order_parser import parse_order_offline
+from store_agent.testing_fakes import FakeRobot
 
 
 def run_autopilot(order_items, **robot_failures):
     """Run the real agent loop with the autopilot and a fake robot."""
     robot = FakeRobot(DEFAULT_INVENTORY, **robot_failures)
     order = {"items": order_items, "unknown": []}
-    with patch("app.tools.robot_client", robot), patch("app.agent.robot_client", robot), \
-            patch("app.tools.load_inventory", return_value=DEFAULT_INVENTORY), \
-            patch("app.agent.load_inventory", return_value=DEFAULT_INVENTORY):
+    with patch("store_agent.tools.robot_client", robot), patch("store_agent.agent.robot_client", robot), \
+            patch("store_agent.tools.load_inventory", return_value=DEFAULT_INVENTORY), \
+            patch("store_agent.agent.load_inventory", return_value=DEFAULT_INVENTORY):
         bill, log = run_agent(order, client=Autopilot())
     return bill, log, robot
 

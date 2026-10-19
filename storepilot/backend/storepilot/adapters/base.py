@@ -11,7 +11,7 @@ failure is visible as "disconnected" instead of being hidden:
     fetch_status() -> dict
     fetch_map()    -> {"stations": {...}}
 
-The command methods follow the robot contract (webapp/robot_server README):
+The command methods follow the robot contract (agent/robot_server/README.md):
 they return {"success": bool, "message": str, ...} and never raise.
 """
 

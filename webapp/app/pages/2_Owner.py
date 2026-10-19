@@ -23,9 +23,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 import streamlit as st
 
-from app import live_map, metrics, robot_client, store
-from app.agent import group_items_by_shelf, plan_shelf_route, strip_think
-from app.config import LASER_OFFSET, MODEL_ULTRA, ROBOT_URL, ROSBRIDGE_URL, get_client, has_llm, load_inventory
+from app import live_map, metrics, store
+from app.settings import LASER_OFFSET, ROSBRIDGE_URL
+from store_agent import robot_client
+from store_agent.agent import group_items_by_shelf, plan_shelf_route, strip_think
+from store_agent.config import MODEL_ULTRA, ROBOT_URL, get_client, has_llm, load_inventory
 from app.step_log import is_recovered, step_target
 from app.worker import init_worker
 from app.ui_style import (

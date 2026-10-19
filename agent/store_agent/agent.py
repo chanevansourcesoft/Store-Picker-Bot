@@ -18,7 +18,7 @@ Final status: "done" (exactly as ordered), "done_with_problems" (some items pack
 but missing/extra items), or "failed" (nothing packed).
 
 Run:
-    python -m app.agent "2 soup cans and one chips"
+    python -m store_agent.agent "2 soup cans and one chips"
 """
 
 import json
@@ -27,12 +27,12 @@ import sys
 from collections import defaultdict
 from datetime import datetime
 
-from app import robot_client
-from app.autopilot import Autopilot
-from app.config import MODEL_AGENT, get_client, load_inventory
-from app.order_parser import parse_order
-from app.order_tracker import OrderTracker
-from app.tools import TOOLS, run_tool
+from store_agent import robot_client
+from store_agent.autopilot import Autopilot
+from store_agent.config import MODEL_AGENT, get_client, load_inventory
+from store_agent.order_parser import parse_order
+from store_agent.order_tracker import OrderTracker
+from store_agent.tools import TOOLS, run_tool
 
 MAX_STEPS = 60  # Stop the loop after this many tool calls.
 MAX_RETRIES = 2  # Retry pick/scan this many times per item.

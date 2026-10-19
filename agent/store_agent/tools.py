@@ -13,8 +13,8 @@ A refused command is NOT sent to the robot: Nemotron gets "REFUSED: ..." back.
 
 import json
 
-from app import robot_client
-from app.config import load_inventory
+from store_agent import robot_client
+from store_agent.config import load_inventory
 
 TOOLS = [
     {

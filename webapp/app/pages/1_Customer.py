@@ -18,9 +18,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 import streamlit as st
 
-from app import robot_client, store
-from app.config import load_inventory
-from app.order_parser import parse_order
+from app import store
+from store_agent import robot_client
+from store_agent.config import load_inventory
+from store_agent.order_parser import parse_order
 from app.worker import init_worker
 from app.ui_style import (
     BASE_CSS,

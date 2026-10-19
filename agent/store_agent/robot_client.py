@@ -13,7 +13,7 @@ import threading
 
 import requests
 
-from app.config import DEMO_MODE, ROBOT_URL
+from store_agent.config import DEMO_MODE, ROBOT_URL
 
 TIMEOUT_SEC = 120  # a real pick or navigation can take time
 STARTUP_CHECK_SEC = 3  # how long we wait for the real robot at startup

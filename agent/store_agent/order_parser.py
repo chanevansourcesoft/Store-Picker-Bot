@@ -7,14 +7,14 @@ Example:
                                       "unknown": []}
 
 Run a quick test:
-    python -m app.order_parser "2 soup cans and one chips"
+    python -m store_agent.order_parser "2 soup cans and one chips"
 """
 
 import json
 import re
 import sys
 
-from app.config import MODEL_FAST, get_client, has_llm, load_inventory
+from store_agent.config import MODEL_FAST, get_client, has_llm, load_inventory
 
 SYSTEM_PROMPT = """You read grocery orders for a small store.
 Products we sell (use these exact names): {products}
