@@ -106,13 +106,16 @@ instead: see [TRAINING.md](docs/TRAINING.md).
      conda activate lerobot_env
      pip install feetech-servo-sdk
      ```
-4. Fill in the repo root `.env` as described in "Hugging Face access" above, plus the arm ports and
-   cameras once you know them ([DATA_COLLECTION.md](docs/DATA_COLLECTION.md), step 2).
+4. Create the repo root `.env` (`cp .env.example .env`) and fill it in as described in "Hugging Face
+   access" above. The arm ports and cameras are added later ([ARM_SETUP.md](docs/ARM_SETUP.md), step 1, and
+   [CAMERA_SETUP.md](docs/CAMERA_SETUP.md), step 2).
 5. In every new terminal, load the environment (with conda, run `conda activate lerobot_env` first):
    ```bash
    source policy/env.sh
    ```
    It prints the environment it uses and `LeRobot 0.6.1`. A GPU is not needed for the arms or recording.
+   After every change to `.env`, run `source policy/env.sh` again: a terminal only sees `.env` as it was
+   when `env.sh` was last loaded.
 
 `env.sh` does what the container does on the Jetson: it uses the active conda env if it has LeRobot,
 otherwise `policy/.venv`, loads `.env` (so

@@ -42,7 +42,25 @@ Prefer the stable names, which do not change when cables are re-plugged:
 ls -l /dev/serial/by-id/
 ```
 
-Use those paths (e.g. `/dev/serial/by-id/usb-1a86_USB_Single_Serial_<serial>-if00`) wherever `FOLLOWER_PORT` and `LEADER_PORT` appear below.
+Each line ends with an arrow to the port it points to, e.g.
+`usb-1a86_USB_Single_Serial_5A68012416-if00 -> ../../ttyACM0`: the one pointing to the port that
+`lerobot-find-port` printed for an arm belongs to that arm.
+
+Put both paths in the repo root `.env` (copy `.env.example` to `.env` first if it does not exist yet).
+`record.py` reads them from there on both setups:
+
+```
+FOLLOWER_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_<follower serial>-if00
+LEADER_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_<leader serial>-if00
+```
+
+- **With Docker:** replace `FOLLOWER_PORT` and `LEADER_PORT` in the commands below with these paths.
+- **Without Docker:** load `.env` again, then the commands below work as they are:
+  ```bash
+  source env.sh
+  echo "$FOLLOWER_PORT" "$LEADER_PORT"     # must print both paths
+  ```
+  Do this every time you change `.env`: a terminal only sees `.env` as it was when `env.sh` was last loaded.
 
 ## 2. Assign servo IDs (new arms only)
 
@@ -58,10 +76,10 @@ docker compose run --rm policy lerobot-setup-motors \
 
 # Without Docker (PC)
 lerobot-setup-motors \
-  --robot.type=so100_follower --robot.port=FOLLOWER_PORT
+  --robot.type=so100_follower --robot.port="$FOLLOWER_PORT"
 
 lerobot-setup-motors \
-  --teleop.type=so100_leader --teleop.port=LEADER_PORT
+  --teleop.type=so100_leader --teleop.port="$LEADER_PORT"
 ```
 
 Connect one servo at a time when prompted (gripper first, down to the shoulder pan).
@@ -80,7 +98,7 @@ docker compose run --rm policy lerobot-calibrate \
 # Without Docker (PC)
 lerobot-calibrate \
   --robot.type=so100_follower \
-  --robot.port=FOLLOWER_PORT \
+  --robot.port="$FOLLOWER_PORT" \
   --robot.id=picker_follower
 ```
 
@@ -96,11 +114,12 @@ docker compose run --rm policy lerobot-calibrate \
 # Without Docker (PC)
 lerobot-calibrate \
   --teleop.type=so100_leader \
-  --teleop.port=LEADER_PORT \
+  --teleop.port="$LEADER_PORT" \
   --teleop.id=picker_leader
 ```
 
-For each arm:
+If the arm already has a calibration file, it first asks whether to use it: type `c` and press Enter to
+calibrate again (Enter alone keeps the old one). Then, for each arm:
 
 1. Move the arm to the middle of its range (joints roughly centred, gripper half open) and press Enter.
 2. Move every joint slowly through its full range, then press Enter. The wrist roll is not needed here:

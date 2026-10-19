@@ -64,6 +64,15 @@ GRIPPER_CAM=/dev/v4l/by-id/<gripper camera>-video-index0
 SCENE_CAM=/dev/v4l/by-id/<scene camera>-video-index0
 ```
 
+After every change to `.env`:
+
+- **With Docker:** nothing to do; each `docker compose run` reads `.env` again.
+- **Without Docker:** load it again in every open terminal, and check:
+  ```bash
+  source env.sh
+  echo "$FOLLOWER_PORT" "$LEADER_PORT" "$GRIPPER_CAM" "$SCENE_CAM"
+  ```
+
 **Camera settings.** Create `data_collection/camera_settings.json` ([CAMERA_SETUP.md](CAMERA_SETUP.md), step 4).
 `record.py` applies it at every start, so exposure, white balance and focus are the same in every session.
 Without it, the script warns and the cameras stay automatic.
@@ -230,7 +239,7 @@ docker compose run --rm policy lerobot-replay \
 
 # Without Docker (PC)
 lerobot-replay \
-  --robot.type=so100_follower --robot.port=FOLLOWER_PORT --robot.id=picker_follower \
+  --robot.type=so100_follower --robot.port="$FOLLOWER_PORT" --robot.id=picker_follower \
   --dataset.repo_id=local/dataset_v1_12102026_153045 \
   --dataset.root=data_collection/dataset/dataset_v1_12102026_153045 \
   --dataset.episode=0

@@ -1,0 +1,22 @@
+{
+  "gripper_cam": {
+    "power_line_frequency": 1,
+    "exposure_dynamic_framerate": 0,
+    "auto_exposure": 1,
+    "exposure_time_absolute": 250,
+    "gain": 50,
+    "white_balance_automatic": 0,
+    "white_balance_temperature": 4600,
+    "backlight_compensation": 0
+  },
+  "scene_cam": {
+    "power_line_frequency": 1,
+    "exposure_dynamic_framerate": 0,
+    "auto_exposure": 1,
+    "exposure_time_absolute": 250,
+    "gain": 80,
+    "white_balance_automatic": 0,
+    "white_balance_temperature": 4600,
+    "backlight_compensation": 0
+  }
+}

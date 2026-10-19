@@ -58,7 +58,7 @@ os.environ.setdefault("HF_DATASETS_DISABLE_PROGRESS_BARS", "1")
 # Arm calibration from policy/calibration/ (also set by compose.yaml and env.sh).
 os.environ.setdefault("HF_LEROBOT_CALIBRATION", str(Path(__file__).resolve().parent.parent / "calibration"))
 
-from lerobot.cameras.opencv import OpenCVCameraConfig
+from lerobot.cameras.opencv import OpenCVCamera, OpenCVCameraConfig
 from lerobot.common.control_utils import sanity_check_dataset_robot_compatibility
 from lerobot.datasets import (
     LeRobotDataset,
@@ -303,11 +303,62 @@ def plan_progress(plan, log):
 # Hardware
 
 
-def camera_config(device, args):
+def camera_config(name, device, args):
+    """Camera config at exactly --fps if the camera offers it, otherwise at the camera's own, slightly
+    higher rate (e.g. 30.5 fps). LeRobot only accepts an exact fps match, but the recording loop takes
+    the newest frame --fps times per second either way, so the dataset is the same."""
     index_or_path = int(device) if device.isdigit() else Path(device)
-    return OpenCVCameraConfig(
+    config = OpenCVCameraConfig(
         index_or_path=index_or_path, fps=args.fps, width=args.width, height=args.height, fourcc=args.fourcc
     )
+    probe = OpenCVCamera(config)
+    try:
+        probe.connect(warmup=False)
+        return config
+    except RuntimeError as e:
+        if "failed to set fps" not in str(e):
+            raise
+    finally:
+        if probe.is_connected:
+            probe.disconnect()
+    config.fps = None  # ask the camera for its own rate at this size and format
+    probe = OpenCVCamera(config)
+    probe.connect(warmup=False)
+    own_fps = probe.fps
+    probe.disconnect()
+    config.fps = own_fps  # a robot needs a set fps; this one the camera accepts exactly
+    if own_fps < args.fps:
+        sys.exit(f"{name} ({device}) runs at {own_fps:g} fps at {args.width}x{args.height}, slower than "
+                 f"--fps {args.fps}: frames would repeat. Choose another --fourcc or camera (see CAMERA_SETUP.md).")
+    print(f"{name} has no exact {args.fps} fps mode: it runs at {own_fps:g} fps, and {args.fps} frames per second "
+          "are saved from it.")
+    return config
+
+
+def check_camera_rates(robot, fps, seconds=1.5):
+    """Count the new frames each camera delivers. A camera that is slower than --fps (for example
+    because its exposure time is too long) makes LeRobot save the same frame several times, silently."""
+    import numpy as np
+
+    slow = []
+    for name, cam in robot.cameras.items():
+        previous, new, start = None, 0, time.monotonic()
+        while time.monotonic() - start < seconds:
+            frame = cam.read_latest()
+            if previous is None or not np.array_equal(frame, previous):
+                new += 1
+            previous = frame
+            time.sleep(1 / (2 * fps))
+        rate = new / seconds
+        print(f"{name}: {rate:.0f} new frames per second")
+        if rate < 0.93 * fps:
+            slow.append(f"{name} ({rate:.0f} fps)")
+    if slow:
+        print(f"WARNING: slower than {fps} fps: {', '.join(slow)}. Its frames would be saved twice. Usually the "
+              "exposure time is too long: lower exposure_time_absolute in camera_settings.json and raise gain "
+              "instead (CAMERA_SETUP.md, step 4).")
+        if input("Record anyway? [y/N] ").strip().lower() not in ("y", "yes"):
+            sys.exit("Nothing recorded.")
 
 
 def apply_camera_settings(devices):
@@ -478,8 +529,8 @@ def main():
     robot = make_robot_from_config(SO100FollowerConfig(
         port=args.follower_port,
         id=FOLLOWER_ID,
-        cameras={GRIPPER_CAM: camera_config(args.gripper_cam, args),
-                 SCENE_CAM: camera_config(args.scene_cam, args)},
+        cameras={GRIPPER_CAM: camera_config(GRIPPER_CAM, args.gripper_cam, args),
+                 SCENE_CAM: camera_config(SCENE_CAM, args.scene_cam, args)},
     ))
     teleop = make_teleoperator_from_config(SO100LeaderConfig(port=args.leader_port, id=LEADER_ID))
 
@@ -524,6 +575,7 @@ def main():
         # The follower moves straight to the leader's pose: start with both arms alike.
         teleop.connect()
         robot.connect()
+        check_camera_rates(robot, args.fps)
 
         # Open the dataset only once the hardware works, so a wrong port leaves no empty dataset behind.
         if args.resume:
