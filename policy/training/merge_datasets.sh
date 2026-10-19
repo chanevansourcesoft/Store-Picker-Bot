@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Merge several recorded datasets into one, so GR00T trains on all of them.
 # All inputs must have the same cameras, FPS and robot (record.py makes sure of that).
-# The inputs are left unchanged; the result is a new <DDMMYYYY_HHMMSS>_<name> folder.
+# The inputs are left unchanged; the result is a new <name>_<DDMMYYYY_HHMMSS> folder.
 #
 # Usage:
 #   ./merge_datasets.sh <name> <dataset folder> <dataset folder> [...]
-#   ./merge_datasets.sh all_products 12102026_153045_store_v1 14102026_100000_store_v2
+#   ./merge_datasets.sh all_products dataset_v1_12102026_153045 dataset_v2_14102026_100000
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,7 +45,7 @@ for dataset in "$@"; do
   PATHS+=("$DATASET_DIR/$dataset")
 done
 
-OUT_NAME="$(date +%d%m%Y_%H%M%S)_${NAME}"
+OUT_NAME="${NAME}_$(date +%d%m%Y_%H%M%S)"
 join() { local IFS=,; echo "$*"; }
 
 lerobot-edit-dataset \

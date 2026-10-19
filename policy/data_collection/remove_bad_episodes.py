@@ -6,8 +6,8 @@ renumbered. The original folder is kept next to it as <folder>_old until you del
 plan and episode log are carried over with the new numbers.
 
 Usage (from policy/):
-    docker compose run --rm policy python3 data_collection/remove_bad_episodes.py 12102026_153045_store_v1  # Jetson
-    python data_collection/remove_bad_episodes.py 12102026_153045_store_v1     # PC, after `source env.sh`
+    docker compose run --rm policy python3 data_collection/remove_bad_episodes.py dataset_v1_12102026_153045  # Jetson
+    python data_collection/remove_bad_episodes.py dataset_v1_12102026_153045     # PC, after `source env.sh`
     python data_collection/remove_bad_episodes.py <folder> --yes                # no question
 """
 

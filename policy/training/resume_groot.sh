@@ -4,7 +4,7 @@
 #
 # Usage:
 #   ./resume_groot.sh <run folder>            # a folder in policy/training/outputs/
-#   NUM_GPUS=1 ./resume_groot.sh 13102026_090000_12102026_153045_store_v1
+#   NUM_GPUS=1 ./resume_groot.sh 13102026_090000_dataset_v1_12102026_153045
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -64,10 +64,10 @@ Without it, the script warns and the cameras stay automatic.
 
 ```bash
 # With Docker (Jetson)
-docker compose run --rm policy python3 data_collection/record.py --name store_v1
+docker compose run --rm policy python3 data_collection/record.py
 
 # Without Docker (after `source env.sh`, see README.md)
-python data_collection/record.py --name store_v1
+python data_collection/record.py
 ```
 
 It asks for the plan. Press Enter to accept a default in brackets:
@@ -88,8 +88,10 @@ Start? [Y]:
 The same choices can be given as options, without questions:
 `--products soup_can,chips_pack --rounds 5 --per_round 10`.
 
-The dataset is saved in `data_collection/dataset/<DDMMYYYY_HHMMSS>_<name>/`, for example
-`data_collection/dataset/12102026_153045_store_v1/`. The name may contain letters, digits, `-` and `_`.
+The dataset is saved in `data_collection/dataset/dataset_v<N>_<DDMMYYYY_HHMMSS>/`, for example
+`data_collection/dataset/dataset_v1_12102026_153045/`. The version N counts up by itself: the next new
+dataset is `dataset_v2_...`. To choose another name, add `--name <name>` (letters, digits, `-` and `_`):
+the folder is then `<name>_<DDMMYYYY_HHMMSS>/`.
 
 ### Rounds
 
@@ -154,10 +156,10 @@ Quit at any time, and continue on another day with the dataset's folder name:
 
 ```bash
 # With Docker (Jetson)
-docker compose run --rm policy python3 data_collection/record.py --resume 12102026_153045_store_v1
+docker compose run --rm policy python3 data_collection/record.py --resume dataset_v1_12102026_153045
 
 # Without Docker (after `source env.sh`, see README.md)
-python data_collection/record.py --resume 12102026_153045_store_v1
+python data_collection/record.py --resume dataset_v1_12102026_153045
 ```
 
 It continues the plan exactly where it stopped. The script refuses to resume if the cameras, FPS or arm
@@ -204,15 +206,15 @@ Replay an episode on the follower arm (here episode 0 of one dataset):
 # With Docker (Jetson)
 docker compose run --rm policy lerobot-replay \
   --robot.type=so100_follower --robot.port=FOLLOWER_PORT --robot.id=picker_follower \
-  --dataset.repo_id=local/12102026_153045_store_v1 \
-  --dataset.root=data_collection/dataset/12102026_153045_store_v1 \
+  --dataset.repo_id=local/dataset_v1_12102026_153045 \
+  --dataset.root=data_collection/dataset/dataset_v1_12102026_153045 \
   --dataset.episode=0
 
 # Without Docker (after `source env.sh`, see README.md)
 lerobot-replay \
   --robot.type=so100_follower --robot.port=FOLLOWER_PORT --robot.id=picker_follower \
-  --dataset.repo_id=local/12102026_153045_store_v1 \
-  --dataset.root=data_collection/dataset/12102026_153045_store_v1 \
+  --dataset.repo_id=local/dataset_v1_12102026_153045 \
+  --dataset.root=data_collection/dataset/dataset_v1_12102026_153045 \
   --dataset.episode=0
 ```
 
@@ -221,14 +223,14 @@ Print the dataset summary (episodes, frames, tasks):
 ```bash
 # With Docker (Jetson)
 docker compose run --rm policy lerobot-edit-dataset \
-  --repo_id=local/12102026_153045_store_v1 \
-  --root=data_collection/dataset/12102026_153045_store_v1 \
+  --repo_id=local/dataset_v1_12102026_153045 \
+  --root=data_collection/dataset/dataset_v1_12102026_153045 \
   --operation.type=info
 
 # Without Docker (after `source env.sh`, see README.md)
 lerobot-edit-dataset \
-  --repo_id=local/12102026_153045_store_v1 \
-  --root=data_collection/dataset/12102026_153045_store_v1 \
+  --repo_id=local/dataset_v1_12102026_153045 \
+  --root=data_collection/dataset/dataset_v1_12102026_153045 \
   --operation.type=info
 ```
 
@@ -240,14 +242,14 @@ Episodes marked with B stay in the dataset until you remove them, best once a re
 
 ```bash
 # With Docker (Jetson)
-docker compose run --rm policy python3 data_collection/remove_bad_episodes.py 12102026_153045_store_v1
+docker compose run --rm policy python3 data_collection/remove_bad_episodes.py dataset_v1_12102026_153045
 
 # Without Docker (after `source env.sh`, see README.md)
-python data_collection/remove_bad_episodes.py 12102026_153045_store_v1
+python data_collection/remove_bad_episodes.py dataset_v1_12102026_153045
 ```
 
 It lists the marked episodes and asks before removing them. The remaining episodes are renumbered from 0,
-and the episode log is updated to match. The original is kept as `12102026_153045_store_v1_old/` next
+and the episode log is updated to match. The original is kept as `dataset_v1_12102026_153045_old/` next
 to it: check the new dataset, then delete the `_old` folder.
 
 ## 8. Move the dataset to the training machine
@@ -255,7 +257,7 @@ to it: check the new dataset, then delete the `_old` folder.
 Datasets are not stored in Git. Copy the folder to the same place on the training machine:
 
 ```bash
-rsync -a --progress data_collection/dataset/12102026_153045_store_v1 \
+rsync -a --progress data_collection/dataset/dataset_v1_12102026_153045 \
   <user>@<training-pc>:<repo>/policy/data_collection/dataset/
 ```
 
@@ -263,12 +265,12 @@ Or upload it to the Hugging Face Hub (needs `HF_TOKEN` in the repo root `.env`, 
 
 ```bash
 # With Docker (Jetson)
-docker compose run --rm policy hf upload <hf-user>/12102026_153045_store_v1 \
-  /workspace/policy/data_collection/dataset/12102026_153045_store_v1 --repo-type=dataset
+docker compose run --rm policy hf upload <hf-user>/dataset_v1_12102026_153045 \
+  /workspace/policy/data_collection/dataset/dataset_v1_12102026_153045 --repo-type=dataset
 
 # Without Docker (after `source env.sh`, see README.md)
-hf upload <hf-user>/12102026_153045_store_v1 \
-  /workspace/policy/data_collection/dataset/12102026_153045_store_v1 --repo-type=dataset
+hf upload <hf-user>/dataset_v1_12102026_153045 \
+  data_collection/dataset/dataset_v1_12102026_153045 --repo-type=dataset
 ```
 
 Next: [TRAINING.md](TRAINING.md).

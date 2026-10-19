@@ -6,7 +6,7 @@
 #
 # Usage:
 #   ./train_groot.sh <dataset folder>             # a folder in policy/data_collection/dataset/
-#   NUM_GPUS=1 STEPS=10000 ./train_groot.sh 12102026_153045_store_v1
+#   NUM_GPUS=1 STEPS=10000 ./train_groot.sh dataset_v1_12102026_153045
 # Settings come from env vars; extra args are passed to lerobot-train.
 set -euo pipefail
 

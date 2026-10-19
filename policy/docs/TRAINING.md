@@ -47,10 +47,10 @@ GR00T trains on one dataset. To train on several (for example several recording 
 
 ```bash
 cd training
-./merge_datasets.sh all_products 12102026_153045_store_v1 14102026_100000_store_v2
+./merge_datasets.sh all_products dataset_v1_12102026_153045 dataset_v2_14102026_100000
 ```
 
-This creates a new folder such as `data_collection/dataset/13102026_090000_all_products/`. The inputs are not changed.
+This creates a new folder such as `data_collection/dataset/all_products_13102026_090000/`. The inputs are not changed.
 The script then runs `set_episode_file_indices.py`, which sets the file numbers in the merged episode metadata.
 LeRobot 0.6.1 copies them from the inputs, and they do not match for datasets recorded in several sessions (`--resume`).
 Dataset edits such as deleting episodes need them to match.
@@ -61,7 +61,7 @@ All inputs must have the same cameras and FPS, which is always true for datasets
 
 ```bash
 cd training
-./train_groot.sh 13102026_090000_all_products
+./train_groot.sh all_products_13102026_090000
 ```
 
 The run is saved in `training/outputs/<DDMMYYYY_HHMMSS>_<dataset>/`. A checkpoint is written every
@@ -79,7 +79,7 @@ Settings are changed with environment variables in front of the command:
 | `SAVE_FREQ` | `5000` | Steps between checkpoints |
 | `MEMORY_MODE` | `bf16` | See step 5 |
 
-Example: `NUM_GPUS=1 GPU=1 STEPS=10000 ./train_groot.sh 13102026_090000_all_products`.
+Example: `NUM_GPUS=1 GPU=1 STEPS=10000 ./train_groot.sh all_products_13102026_090000`.
 Extra arguments are passed to `lerobot-train`.
 
 ## 5. Memory modes
@@ -99,7 +99,7 @@ If `bf16` stops with `CUDA out of memory`, first try `BATCH_SIZE=4`, then `MEMOR
 ## 6. Resume an interrupted run
 
 ```bash
-./resume_groot.sh 13102026_100000_13102026_090000_all_products
+./resume_groot.sh 13102026_100000_all_products_13102026_090000
 ```
 
 It continues from `checkpoints/last` with the same step, optimizer and learning-rate schedule.

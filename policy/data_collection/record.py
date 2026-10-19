@@ -24,10 +24,13 @@ The GR00T instruction of each product comes from policy/instructions.json. The p
 episode is listed in meta/episode_log.json with its round and product. --resume continues
 the plan where it stopped. Episodes marked bad are removed later with remove_bad_episodes.py.
 
+A new dataset is called dataset_v<N>_<DDMMYYYY_HHMMSS> (N = next free version), or
+<name>_<DDMMYYYY_HHMMSS> with --name.
+
 Usage (from policy/):
-    docker compose run --rm policy python3 data_collection/record.py --name store_v1    # Jetson (Docker)
-    python data_collection/record.py --name store_v1                                    # PC, after `source env.sh`
-    python data_collection/record.py --resume 12102026_153045_store_v1
+    docker compose run --rm policy python3 data_collection/record.py     # Jetson (Docker)
+    python data_collection/record.py                                     # PC, after `source env.sh`
+    python data_collection/record.py --resume dataset_v1_12102026_153045
 
 Guide: policy/docs/DATA_COLLECTION.md
 """
@@ -113,8 +116,9 @@ def parse_args():
         description="Record SO-100 demonstrations with LeRobot, following a plan of products and rounds.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    target = parser.add_mutually_exclusive_group(required=True)
-    target.add_argument("--name", help="Name for a new dataset (letters, digits, - and _)")
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument("--name", help="Name for a new dataset (letters, digits, - and _); "
+                                       "default: dataset_v<next version>")
     target.add_argument("--resume", help="Existing dataset folder in dataset/ to continue")
     plan = parser.add_argument_group("plan of a new dataset (asked in the terminal when not given)")
     plan.add_argument("--products", help="Comma-separated item ids from instructions.json, or 'all'")
@@ -155,6 +159,13 @@ def parse_args():
 
 # ---------------------------------------------------------------------------------------------
 # Plan and episode log
+
+
+def next_version_name():
+    """dataset_v<N> with N one higher than the highest dataset_v<N>_... folder in dataset/."""
+    versions = [int(m.group(1)) for p in DATASET_DIR.glob("dataset_v*")
+                if (m := re.match(r"dataset_v(\d+)_", p.name))]
+    return f"dataset_v{max(versions, default=0) + 1}"
 
 
 def ask(question, default):
@@ -459,7 +470,7 @@ def main():
         plan = json.loads((root / "meta" / PLAN_FILE).read_text())
         check_plan_instructions(plan)
     else:
-        root = DATASET_DIR / f"{datetime.now().strftime('%d%m%Y_%H%M%S')}_{args.name}"
+        root = DATASET_DIR / f"{args.name or next_version_name()}_{datetime.now().strftime('%d%m%Y_%H%M%S')}"
         plan = make_plan(args)
     repo_id = f"{os.environ.get('HF_USER') or 'local'}/{root.name}"
 
