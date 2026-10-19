@@ -135,11 +135,15 @@ python -m quickpick.test_step_log
 python -m quickpick.test_metrics
 python -m quickpick.test_fake_rosbridge
 cd ../agent                            # shared agent and robot server
+python -m store_agent.test_inventory
+python -m store_agent.test_robot_client
 python -m store_agent.test_agent
 python -m store_agent.test_order_tracker
 python -m store_agent.test_autopilot
 python -m robot_server.test_stations
 python -m robot_server.test_mock_robot
+python -m robot_server.test_nav2_client
+python -m robot_server.test_jetson_pick
 ```
 
 ## Deploy (Streamlit Community Cloud)
