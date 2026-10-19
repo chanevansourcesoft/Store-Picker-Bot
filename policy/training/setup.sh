@@ -15,7 +15,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-POLICY_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+POLICY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$POLICY_DIR/.." && pwd)"
 UV_VERSION="0.12.23"   # same as the Jetson Dockerfile
 MIN_DRIVER=570

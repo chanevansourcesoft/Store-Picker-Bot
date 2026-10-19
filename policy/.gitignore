@@ -2,4 +2,4 @@
 data_collection/dataset/
 
 # Training runs
-training/local/outputs/
+training/outputs/

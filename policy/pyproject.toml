@@ -14,7 +14,7 @@ dependencies = [
 package = false
 required-version = ">=0.12"
 
-# x86_64 Linux (Nebius, dev PCs): CUDA 12.8 builds, same as upstream LeRobot.
+# x86_64 Linux (training PC, dev PCs): CUDA 12.8 builds, same as upstream LeRobot.
 # The Jetson uses torch from its container image instead (see Dockerfile).
 [[tool.uv.index]]
 name = "pytorch-cu128"

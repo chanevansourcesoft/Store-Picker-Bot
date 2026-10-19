@@ -1,7 +1,7 @@
-# Training on the local PC
+# Training GR00T
 
 How to fine-tune GR00T N1.7 on the recorded datasets, on the local training PC (2× RTX 5090, 32 GB each).
-The scripts are in `training/local/`. They use the same GR00T settings as the SO-101 sim project.
+The scripts are in `training/`. They use the same GR00T settings as the SO-101 sim project.
 
 > Not tested yet on this PC. The memory settings for 32 GB GPUs (step 5) are a best guess.
 
@@ -19,7 +19,7 @@ Then run one script:
 
 ```bash
 git clone <repo url> store-picker-bot
-cd store-picker-bot/policy/training/local
+cd store-picker-bot/policy/training
 ./setup.sh
 ```
 
@@ -46,8 +46,8 @@ folder names ([DATA_COLLECTION.md](DATA_COLLECTION.md), step 8).
 GR00T trains on one dataset. To train on several (for example one per product), merge them first:
 
 ```bash
-cd training/local
-./merge_datasets.sh all_products 12102026_153045_tea_packet 12102026_161200_soup_can
+cd training
+./merge_datasets.sh all_products 12102026_153045_soup_can 12102026_161200_chips_pack
 ```
 
 This creates a new folder such as `data_collection/dataset/13102026_090000_all_products/`. The inputs are not changed.
@@ -59,11 +59,11 @@ All inputs must have the same cameras and FPS, which is always true for datasets
 ## 4. Train
 
 ```bash
-cd training/local
+cd training
 ./train_groot.sh 13102026_090000_all_products
 ```
 
-The run is saved in `training/local/outputs/<DDMMYYYY_HHMMSS>_<dataset>/`. A checkpoint is written every
+The run is saved in `training/outputs/<DDMMYYYY_HHMMSS>_<dataset>/`. A checkpoint is written every
 5,000 steps to `checkpoints/<step>/pretrained_model/` (about 11 GB each), and `checkpoints/last` points to the newest.
 Training prints the loss every 10 steps.
 
@@ -88,7 +88,7 @@ the whole model, so the memory per GPU is what matters.
 
 | `MEMORY_MODE` | What it does | GPU memory |
 |---|---|---|
-| `full` | NVIDIA's recipe: fp32 weights, everything trainable is trained | about 40 GB or more: cloud GPUs only |
+| `full` | NVIDIA's recipe: fp32 weights, everything trainable is trained | about 40 GB or more: needs larger GPUs than the training PC |
 | `bf16` (default) | bf16 weights, diffusion model trained | aimed at 32 GB, not tested yet |
 | `low` | bf16 weights, diffusion model frozen | about 14 GB at batch 8 (tested in the sim project) |
 
@@ -108,4 +108,3 @@ Use the same `NUM_GPUS` as the original run.
 
 - Do not use the `lora_*` options of the GR00T policy: LeRobot's GR00T code does not use them.
 - Running the trained model on the Jetson is not set up yet.
-- For bigger GPUs in the cloud, see [training/nebius_cloud_ai/README.md](../training/nebius_cloud_ai/README.md).

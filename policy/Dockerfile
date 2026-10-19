@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Policy environment for the Jetson AGX Orin (JetPack 6.2 / L4T r36.4).
 # The base image provides Python 3.12 and a CUDA build of torch/torchvision for the Orin GPU;
-# every other package comes from uv.lock so versions match dev machines and Nebius.
+# every other package comes from uv.lock so versions match the training PC and dev machines.
 FROM dustynv/pytorch:2.7-r36.4.0-cu128-24.04@sha256:4bb7f0a3852f86629ed271aaf6c4aa000305cc4e4673b8e9f334668ee1b22bc8
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.23 /uv /usr/local/bin/uv

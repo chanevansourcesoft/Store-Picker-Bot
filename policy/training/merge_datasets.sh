@@ -5,11 +5,11 @@
 #
 # Usage:
 #   ./merge_datasets.sh <name> <dataset folder> <dataset folder> [...]
-#   ./merge_datasets.sh all_products 12102026_153045_tea_packet 12102026_161200_soup_can
+#   ./merge_datasets.sh all_products 12102026_153045_soup_can 12102026_161200_chips_pack
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DATASET_DIR="${DATASET_DIR:-$SCRIPT_DIR/../../data_collection/dataset}"
+DATASET_DIR="${DATASET_DIR:-$SCRIPT_DIR/../data_collection/dataset}"
 
 if [[ $# -lt 3 ]]; then
   echo "Usage: $0 <name> <dataset folder> <dataset folder> [...]" >&2
@@ -24,7 +24,7 @@ if [[ ! "$NAME" =~ ^[A-Za-z0-9_-]+$ ]]; then
   exit 1
 fi
 # Use the environment made by setup.sh (policy/.venv), no activation needed.
-VENV_BIN="$SCRIPT_DIR/../../.venv/bin"
+VENV_BIN="$SCRIPT_DIR/../.venv/bin"
 [[ -x "$VENV_BIN/lerobot-edit-dataset" ]] && export PATH="$VENV_BIN:$PATH"
 if ! command -v lerobot-edit-dataset >/dev/null; then
   echo "lerobot-edit-dataset not found. Run ./setup.sh first." >&2

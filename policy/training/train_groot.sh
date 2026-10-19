@@ -2,16 +2,16 @@
 # Fine-tune GR00T N1.7 with LeRobot on the local training PC (2x RTX 5090, 32 GB each).
 #
 # Based on train_groot.sh from the SO-101 sim project. Run from anywhere, with the
-# environment from setup.sh (see policy/docs/TRAINING_LOCAL.md).
+# environment from setup.sh (see policy/docs/TRAINING.md).
 #
 # Usage:
 #   ./train_groot.sh <dataset folder>             # a folder in policy/data_collection/dataset/
-#   NUM_GPUS=1 STEPS=10000 ./train_groot.sh 12102026_153045_tea_packet
+#   NUM_GPUS=1 STEPS=10000 ./train_groot.sh 12102026_153045_soup_can
 # Settings come from env vars; extra args are passed to lerobot-train.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DATASET_DIR="${DATASET_DIR:-$SCRIPT_DIR/../../data_collection/dataset}"
+DATASET_DIR="${DATASET_DIR:-$SCRIPT_DIR/../data_collection/dataset}"
 
 if [[ $# -lt 1 ]]; then
   echo "Usage: $0 <dataset folder> [extra lerobot-train args]" >&2
@@ -27,7 +27,7 @@ if [[ ! -f "$DATASET_ROOT/meta/info.json" ]]; then
   exit 1
 fi
 # Use the environment made by setup.sh (policy/.venv), no activation needed.
-VENV_BIN="$SCRIPT_DIR/../../.venv/bin"
+VENV_BIN="$SCRIPT_DIR/../.venv/bin"
 [[ -x "$VENV_BIN/lerobot-train" ]] && export PATH="$VENV_BIN:$PATH"
 if ! command -v lerobot-train >/dev/null; then
   echo "lerobot-train not found. Run ./setup.sh first." >&2
@@ -42,7 +42,7 @@ BATCH_SIZE="${BATCH_SIZE:-8}"
 STEPS="${STEPS:-30000}"
 SAVE_FREQ="${SAVE_FREQ:-5000}"
 # How much of the model fits in GPU memory:
-#   full : NVIDIA's recipe, fp32 weights, diffusion model trained. Needs ~40 GB or more (cloud GPUs).
+#   full : NVIDIA's recipe, fp32 weights, diffusion model trained. Needs ~40 GB or more per GPU.
 #   bf16 : bf16 weights, diffusion model trained. Meant for 32 GB GPUs. Not tested yet.
 #   low  : bf16 weights, diffusion model frozen. Fits 16 GB (tested in the sim project),
 #          but the model learns less. Use it if bf16 runs out of memory.

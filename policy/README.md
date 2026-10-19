@@ -10,9 +10,10 @@ Kept out of the ROS 2 build by `COLCON_IGNORE`.
 
 | Folder | What is inside |
 |---|---|
+| `calibration/` | Arm calibration files (made by `lerobot-calibrate`, kept in Git) and `calibrate_wrist_roll.py` |
 | `data_collection/` | `record.py` for recording demonstrations; recorded datasets in `data_collection/dataset/` |
-| `training/local/` | GR00T training scripts for the local PC (2× RTX 5090) |
-| `training/nebius_cloud_ai/` | Plan for training on Nebius AI Cloud |
+| `training/` | GR00T training scripts for the training PC (2× RTX 5090) |
+| `instructions.json` | GR00T instruction per item id, used when recording and when picking |
 | `docs/` | Step-by-step guides |
 
 ## Versions
@@ -22,7 +23,7 @@ Kept out of the ROS 2 build by `COLCON_IGNORE`.
 | Machine | torch |
 |---|---|
 | Jetson AGX Orin (container) | 2.7.0 from the `dustynv/pytorch` base image, built for the Orin GPU |
-| x86_64 Linux (training PC, Nebius, dev PCs) | 2.11.0+cu128 |
+| x86_64 Linux (training PC, dev PCs) | 2.11.0+cu128 |
 | Others | 2.11.0 from PyPI |
 
 ## Guides
@@ -32,7 +33,7 @@ Kept out of the ROS 2 build by `COLCON_IGNORE`.
 3. [TELEOP_TEST.md](docs/TELEOP_TEST.md): checking that the follower mirrors the leader
 4. [CAMERA_SETUP.md](docs/CAMERA_SETUP.md): mounting, device paths, formats, exposure
 5. [DATA_COLLECTION.md](docs/DATA_COLLECTION.md): recording demonstrations and moving them to the training machine
-6. [TRAINING_LOCAL.md](docs/TRAINING_LOCAL.md): training GR00T on the local PC
+6. [TRAINING.md](docs/TRAINING.md): training GR00T on the training PC
 
 ## Getting started (Jetson)
 
@@ -41,7 +42,7 @@ The Jetson runs the policy in Docker so it never touches the host Python or othe
 ### Prerequisites
 
 - Jetson AGX Orin with JetPack 6.2, Docker, and the NVIDIA container runtime.
-- Data folder on the NVMe (holds the Hugging Face cache and the arm calibration files):
+- Data folder on the NVMe (holds the Hugging Face cache; the arm calibration is in `calibration/` in the repo):
   ```bash
   mkdir -p /mnt/nvme/store-picker-bot-data/{hf,lerobot,home}
   ```
@@ -78,7 +79,7 @@ Arm serial ports and cameras are available inside the container, including after
 
 ## Other machines: uv
 
-The training PC is set up with one script: see [TRAINING_LOCAL.md](docs/TRAINING_LOCAL.md).
+The training PC is set up with one script: see [TRAINING.md](docs/TRAINING.md).
 On other Linux machines, install the same environment with uv (needs a C compiler, e.g. `build-essential`):
 
 ```bash

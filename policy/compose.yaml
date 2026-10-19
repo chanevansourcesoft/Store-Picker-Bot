@@ -19,6 +19,8 @@ services:
       HOME: /data/home
       HF_HOME: /data/hf
       HF_LEROBOT_HOME: /data/lerobot
+      # Arm calibration lives in the repo (policy/calibration/), so it is the same on every machine.
+      HF_LEROBOT_CALIBRATION: /workspace/policy/calibration
       DISPLAY: ${DISPLAY:-}
     volumes:
       - .:/workspace/policy

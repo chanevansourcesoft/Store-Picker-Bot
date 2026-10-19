@@ -16,16 +16,19 @@ can put the item back and move the arm to its rest pose. Keys are read from the 
 Each new dataset goes to dataset/<DDMMYYYY_HHMMSS>_<name>/ next to this script.
 --resume <folder> adds episodes to an existing one.
 
+The GR00T instruction comes from policy/instructions.json (--item <id>), so recording and
+the robot at run time use exactly the same text. --task sets a custom text instead.
+
 Usage (from policy/, on the Jetson):
+    docker compose run --rm policy python3 data_collection/record.py --name soup_can --item soup_can
     docker compose run --rm policy python3 data_collection/record.py \
-        --name tea_packet --task "Pick the tea packet from bin 1 and place it on the tray."
-    docker compose run --rm policy python3 data_collection/record.py \
-        --resume 12102026_153045_tea_packet --task "Pick the tea packet from bin 1 and place it on the tray."
+        --resume 12102026_153045_soup_can --item soup_can
 
 Guide: policy/docs/DATA_COLLECTION.md
 """
 
 import argparse
+import json
 import math
 import os
 import re
@@ -56,6 +59,8 @@ from lerobot.utils.feature_utils import combine_feature_dicts
 from lerobot.utils.utils import init_logging
 
 DATASET_DIR = Path(__file__).resolve().parent / "dataset"
+# Item id (as in webapp/app/inventory.json) -> GR00T instruction. Shared with the robot at run time.
+INSTRUCTIONS_FILE = Path(__file__).resolve().parent.parent / "instructions.json"
 
 # Fixed for the whole project: training and the pick service rely on these names.
 FOLLOWER_ID = "picker_follower"
@@ -72,8 +77,11 @@ def parse_args():
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--name", help="Name for a new dataset (letters, digits, - and _)")
     target.add_argument("--resume", help="Existing dataset folder in dataset/ to add episodes to")
-    parser.add_argument("--task", required=True,
-                        help="Language instruction for every episode of this run (one sentence per product)")
+    instruction = parser.add_mutually_exclusive_group(required=True)
+    instruction.add_argument("--item",
+                             help=f"Item id; its instruction is read from {INSTRUCTIONS_FILE.name}")
+    instruction.add_argument("--task",
+                             help="Custom instruction for every episode of this run (instead of --item)")
     parser.add_argument("--follower_port", default=os.environ.get("FOLLOWER_PORT"),
                         help="Follower serial port (default: FOLLOWER_PORT from .env)")
     parser.add_argument("--leader_port", default=os.environ.get("LEADER_PORT"),
@@ -99,6 +107,12 @@ def parse_args():
                      + " (pass them or set them in the repo root .env)")
     if args.name is not None and not re.fullmatch(r"[A-Za-z0-9_-]+", args.name):
         parser.error("--name may only contain letters, digits, '-' and '_'")
+    if args.item is not None:
+        instructions = json.loads(INSTRUCTIONS_FILE.read_text())
+        if args.item not in instructions:
+            parser.error(f"unknown --item '{args.item}'. Items in {INSTRUCTIONS_FILE}: "
+                         + ", ".join(instructions))
+        args.task = instructions[args.item]
     return args
 
 

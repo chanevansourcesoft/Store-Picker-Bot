@@ -8,8 +8,8 @@ Complete [ARM_SETUP.md](ARM_SETUP.md) first (both arms calibrated). All commands
 - Both controller boards are connected to the Jetson, and both arms are powered.
 - Both calibration files exist:
   ```bash
-  ls /mnt/nvme/store-picker-bot-data/lerobot/calibration/robots/so_follower/picker_follower.json \
-     /mnt/nvme/store-picker-bot-data/lerobot/calibration/teleoperators/so_leader/picker_leader.json
+  ls calibration/robots/so_follower/picker_follower.json \
+     calibration/teleoperators/so_leader/picker_leader.json
   ```
 - Look up which board is on which arm:
   ```bash
@@ -48,7 +48,8 @@ Move one joint at a time on the leader, then all together:
 | Problem | Likely cause | Fix |
 |---|---|---|
 | Error that a motor is missing or not responding | Servo unpowered, loose cable, or wrong ID | Check the arm's power supply and servo cables; run `lerobot-setup-motors` for that arm ([ARM_SETUP.md](ARM_SETUP.md), step 2) |
-| A joint moves the wrong way or is offset | Calibration is wrong | Recalibrate that arm ([ARM_SETUP.md](ARM_SETUP.md), step 3) |
+| A joint moves the wrong way or is offset | Calibration is wrong | Recalibrate that arm ([ARM_SETUP.md](ARM_SETUP.md), steps 3 and 4) |
+| The follower's wrist spins away fast at one wrist angle | Wrist roll not centred between its stops | Run the wrist roll calibration on both arms ([ARM_SETUP.md](ARM_SETUP.md), step 4) |
 | A joint moves freely or does not follow | Loose horn screw, or a stripped gear in the servo | Tighten the horn screw; replace the servo if the gears slip |
 | Follower sags or stalls when lifting | Supply voltage too low for the servos | Use the supply rated on the follower's servos |
 | Port not found | Board unplugged, or the path changed | Check `ls -l /dev/serial/by-id/` |
