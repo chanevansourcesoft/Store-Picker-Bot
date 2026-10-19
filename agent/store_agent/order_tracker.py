@@ -33,6 +33,21 @@ def basket_item(entry):
     return None
 
 
+def unpacked_units(items, log):
+    """{item: qty} ordered but not in the basket, from the order items and its step log.
+    Extra units (more than ordered) do not count against other items."""
+    ordered = {}
+    for entry in items:
+        ordered[entry["item"]] = ordered.get(entry["item"], 0) + entry["qty"]
+    packed = {}
+    for entry in log or []:
+        item = basket_item(entry)
+        if item:
+            packed[item] = packed.get(item, 0) + 1
+    return {item: qty - min(packed.get(item, 0), qty) for item, qty in ordered.items()
+            if qty - min(packed.get(item, 0), qty) > 0}
+
+
 class OrderTracker:
     def __init__(self, items, inventory):
         self.inventory = inventory

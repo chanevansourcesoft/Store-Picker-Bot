@@ -14,6 +14,8 @@ holds a file lock.
     get_stock()         -> {item: n}
     take_stock(item, n) -> True, or False if not enough
     add_stock(item, n)  -> True, or False if unknown item
+    reserve(items)      -> (ok, problems): take a whole order's stock at once, or nothing
+    release(counts)     -> give back {item: n} (units an order did not pack)
     check_catalog()     -> problems compared with policy/instructions.json ([] = OK)
 """
 
@@ -115,6 +117,42 @@ def add_stock(item, qty=1):
             return False
         stock[item] += qty
         return True
+
+
+def _counts(items):
+    """[{"item", "qty"}] or {item: qty} -> {item: qty}."""
+    if isinstance(items, dict):
+        return {item: int(qty) for item, qty in items.items()}
+    counts = {}
+    for entry in items:
+        counts[entry["item"]] = counts.get(entry["item"], 0) + int(entry["qty"])
+    return counts
+
+
+def reserve(items):
+    """Take the stock for a whole order when it is accepted, all or nothing, in one lock,
+    so two orders can never both get the last unit. Returns (ok, problems)."""
+    need = _counts(items)
+    with _stock() as stock:
+        problems = []
+        for item, qty in need.items():
+            if item not in stock:
+                problems.append(f"'{item}' is not in inventory.")
+            elif stock[item] < qty:
+                problems.append(f"Not enough '{item}': need {qty}, have {stock[item]}.")
+        if problems:
+            return False, problems
+        for item, qty in need.items():
+            stock[item] -= qty
+        return True, []
+
+
+def release(items):
+    """Give back reserved units that were not packed (failed pick, stop, cancel, restart)."""
+    with _stock() as stock:
+        for item, qty in _counts(items).items():
+            if item in stock and qty > 0:
+                stock[item] += qty
 
 
 def load_inventory():

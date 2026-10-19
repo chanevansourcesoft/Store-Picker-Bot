@@ -6,7 +6,7 @@ Run:
 """
 
 from store_agent.inventory import DEFAULT_INVENTORY
-from store_agent.order_tracker import OrderTracker
+from store_agent.order_tracker import OrderTracker, unpacked_units
 
 OK = {"success": True}
 
@@ -86,6 +86,17 @@ def test_progress_line():
     print("PASS: test_progress_line")
 
 
+def test_unpacked_units():
+    items = [{"item": "chips_packet", "qty": 2}, {"item": "frooti", "qty": 1}]
+    in_basket = {"tool": "pick_item", "input": {"item": "chips_packet"},
+                 "result": {"success": True, "item": "chips_packet", "target": "basket"}}
+    failed = {"tool": "pick_item", "input": {"item": "frooti"}, "result": {"success": False}}
+    assert unpacked_units(items, []) == {"chips_packet": 2, "frooti": 1}
+    assert unpacked_units(items, [in_basket, failed]) == {"chips_packet": 1, "frooti": 1}
+    assert unpacked_units(items, [in_basket] * 3) == {"frooti": 1}, "an extra unit does not count for others"
+    print("PASS: test_unpacked_units")
+
+
 def run_all_tests():
     print("Running order tracker tests...\n")
     test_pick_guards()
@@ -93,6 +104,7 @@ def run_all_tests():
     test_pick_not_in_basket_is_held()
     test_extra_and_complete()
     test_progress_line()
+    test_unpacked_units()
     print("\nAll order tracker tests passed!")
 
 

@@ -26,9 +26,9 @@ import store_agent.agent as shared_agent
 import store_agent.tools as shared_tools
 from store_agent.agent import group_items_by_shelf, plan_shelf_route, run_agent
 from store_agent.config import MODEL_AGENT, MODEL_FAST, has_llm
-from store_agent.inventory import load_inventory
+from store_agent.inventory import load_inventory, release, reserve
 from store_agent.order_parser import parse_order, parse_order_offline
-from store_agent.order_tracker import basket_item
+from store_agent.order_tracker import basket_item, unpacked_units
 
 RESULT_STATUS = {"done": "completed", "done_with_problems": "completed_with_issues", "failed": "failed"}
 FINISHED = ("completed", "completed_with_issues", "failed", "aborted", "interrupted", "rejected",
@@ -107,6 +107,7 @@ class MissionManager:
         for mission_id in interrupted:
             self.event("system", "warning", "Mission was running when the dashboard restarted. "
                        "Marked interrupted; it will NOT resume by itself.", mission_id)
+            self.release_stock(mission_id)
         for mission_id in expired:
             self.event("system", "info", "Unconfirmed mission expired after restart.", mission_id)
 
@@ -233,6 +234,11 @@ class MissionManager:
                 raise MissionError("Confirm that the robot's path is clear before starting a real mission.")
             if load_inventory() and self.validate(mission["items"], mission["route"], load_inventory()):
                 raise MissionError("Stock changed since the order was checked. Submit it again.")
+            # Reserve the stock now (all or nothing), so no other order can take these units
+            ok, _ = reserve([{"item": i["item"], "qty": i["qty"]} for i in mission["items"]])
+            if not ok:
+                raise MissionError("Stock changed since the order was checked. Submit it again.")
+            self.store.update_mission(mission_id, stock_reserved=1)
 
             planner = f"NVIDIA Nemotron ({model_name(MODEL_AGENT)})" if has_llm() else "offline autopilot (no API key)"
             self.store.update_mission(mission_id, status="running", confirmed_at=now_iso(), planner=planner)
@@ -245,6 +251,17 @@ class MissionManager:
                                            daemon=True)
             self.thread.start()
         return self.store.get_mission(mission_id)
+
+    def release_stock(self, mission_id):
+        """Give back the reserved stock of every unit the mission did not put in the basket (once)."""
+        if not self.store.take_reservation(mission_id):
+            return
+        mission = self.store.get_mission(mission_id)
+        back = unpacked_units(mission["items"], mission.get("step_log") or [])
+        if back:
+            release(back)
+            self.event("system", "info", "Back to stock (not packed): " + ", ".join(
+                f"{qty}× {config.product_label(item)}" for item, qty in back.items()), mission_id)
 
     def discard(self, mission_id):
         mission = self.store.get_mission(mission_id)
@@ -275,6 +292,7 @@ class MissionManager:
             packed = self.store.get_mission(mission_id)["packed"]
             self.store.update_mission(mission_id, status=status, finished_at=now_iso(), bill=bill,
                                       problems=problems, packed=packed)
+            self.release_stock(mission_id)
             with self.lock:
                 self.current_id, self.action = None, None
                 self.last_finished = (mission_id, status, time.monotonic())

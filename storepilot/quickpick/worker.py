@@ -25,8 +25,9 @@ _worker_lock = threading.Lock()
 def process_single_order(order_id: int, on_step: Optional[Callable] = None):
     """
     Process one order. Updates the database with status, step_log, etc.
-    Reduces stock only after the robot reports a unit in the basket,
-    and never more than the ordered qty (an extra item is not sold).
+    Its stock was reserved when the order was placed; when it ends (whatever happened)
+    the units that did not reach the basket go back to stock. An extra unit is not sold.
+    Orders placed before stock reservation reduce stock per packed unit instead.
     """
     order = store.get_order(order_id)
     if not order:
@@ -35,7 +36,9 @@ def process_single_order(order_id: int, on_step: Optional[Callable] = None):
     items = order["items"]
     inventory = load_inventory()
 
-    # Ordered qty per item, and how many we already took from stock
+    reserved = bool(order.get("stock_reserved"))
+
+    # Ordered qty per item, and how many units are packed (never more than ordered)
     ordered = {}
     for entry in items:
         ordered[entry["item"]] = ordered.get(entry["item"], 0) + entry["qty"]
@@ -73,7 +76,8 @@ def process_single_order(order_id: int, on_step: Optional[Callable] = None):
                 # Reduce stock for it, never more than ordered (an extra unit is not sold)
                 if taken.get(item_name, 0) < ordered.get(item_name, 0):
                     taken[item_name] = taken.get(item_name, 0) + 1
-                    store.reduce_stock(item_name, 1)
+                    if not reserved:  # old order: its stock was not reserved when placed
+                        store.reduce_stock(item_name, 1)
                     store.update_order_task(order_id, f"Packed {item_name}")
                 else:
                     store.update_order_task(order_id, f"Extra {item_name} (not charged)")
@@ -104,6 +108,12 @@ def process_single_order(order_id: int, on_step: Optional[Callable] = None):
         error_msg = f"Worker error: {str(e)}"
         traceback.print_exc()
         store.fail_order(order_id, [error_msg])
+
+    finally:
+        # Reserved units that are not in the basket go back to stock
+        back = store.release_unpacked(store.get_order(order_id))
+        if back:
+            print(f"[Worker] Order #{order_id}: back to stock: {back}")
 
 
 def worker_loop():

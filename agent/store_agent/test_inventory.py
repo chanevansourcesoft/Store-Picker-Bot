@@ -91,6 +91,19 @@ def test_parallel_takes_do_not_lose_updates():
     print("PASS: test_parallel_takes_do_not_lose_updates")
 
 
+def test_reserve_is_all_or_nothing():
+    use_temp_stock()
+    start = inventory.get_stock()
+    ok, problems = inventory.reserve([{"item": "frooti", "qty": 2}, {"item": "mentos", "qty": 999}])
+    assert not ok and problems == [f"Not enough 'mentos': need 999, have {start['mentos']}."], problems
+    assert inventory.get_stock() == start, "nothing reserved when one item is short"
+    assert inventory.reserve([{"item": "frooti", "qty": 2}, {"item": "frooti", "qty": 1}]) == (True, [])
+    assert inventory.get_stock()["frooti"] == start["frooti"] - 3
+    inventory.release({"frooti": 2, "pizza": 5})
+    assert inventory.get_stock()["frooti"] == start["frooti"] - 1
+    print("PASS: test_reserve_is_all_or_nothing")
+
+
 def run_all_tests():
     print("Running inventory tests...\n")
     test_catalog_matches_policy()
@@ -99,6 +112,7 @@ def run_all_tests():
     test_stock_starts_from_catalog_and_is_saved()
     test_catalog_file_is_never_written()
     test_parallel_takes_do_not_lose_updates()
+    test_reserve_is_all_or_nothing()
     print("\nAll inventory tests passed!")
 
 

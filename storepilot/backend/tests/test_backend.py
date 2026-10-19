@@ -27,7 +27,11 @@ from storepilot.health import AIStatus
 from storepilot.missions import MissionError, MissionManager, mentioned
 from storepilot.telemetry import Telemetry
 
+from store_agent import inventory as stock_store
 from store_agent.inventory import DEFAULT_INVENTORY
+
+# Missions reserve stock: use a temporary stock file, never the real one
+stock_store.STOCK_FILE = Path(tempfile.mkdtemp()) / "stock.json"
 
 INVENTORY = lambda: DEFAULT_INVENTORY  # noqa: E731
 
@@ -105,6 +109,7 @@ def test_offline_mission_runs_after_confirm_only():
         p.start()
     try:
         store, robot, tel, m = services()
+        start = stock_store.get_stock()
         draft = m.submit_order("2 chips and 1 frooti please, and a pizza")
         assert draft["status"] == "awaiting_confirmation", draft
         assert [(i["item"], i["qty"]) for i in draft["items"]] == [("chips_packet", 2), ("frooti", 1)]
@@ -112,7 +117,9 @@ def test_offline_mission_runs_after_confirm_only():
         time.sleep(0.3)
         assert robot.fetch_status()["station"] == "home", "nothing moves before confirmation"
 
+        assert stock_store.get_stock() == start, "nothing is reserved before confirmation"
         m.confirm(draft["id"])
+        assert stock_store.get_stock()["chips_packet"] == start["chips_packet"] - 2, "reserved at confirm"
         done = wait_finished(store, draft["id"])
         assert done["status"] == "completed", done
         assert done["packed"] == 3 and done["planner"].startswith("offline autopilot")
@@ -121,6 +128,9 @@ def test_offline_mission_runs_after_confirm_only():
         assert sum(" placed in basket (" in t for t in texts) == 3, texts
         assert any("GR00T instruction “pick up the Frooti" in t for t in texts), texts
         assert any(t.startswith("Mission completed: 3/3") for t in texts)
+        stock = stock_store.get_stock()
+        assert (stock["chips_packet"], stock["frooti"]) == (start["chips_packet"] - 2, start["frooti"] - 1), stock
+        assert store.get_mission(draft["id"])["stock_reserved"] == 0
         tel.shutdown()
     finally:
         for p in patches:
@@ -160,12 +170,14 @@ def test_stop_aborts_and_never_resumes_mission():
     try:
         robot = SimRobot(INVENTORY, time_scale=0.3, pick_fail=0, nav_fail=0)
         store, robot, tel, m = services(adapter=robot)
+        start = stock_store.get_stock()["frooti"]
         draft = m.submit_order("3 frooti")
         m.confirm(draft["id"])
         time.sleep(0.4)
         assert m.stop()["success"]
         done = wait_finished(store, draft["id"])
         assert done["status"] == "aborted", done
+        assert stock_store.get_stock()["frooti"] == start - done["packed"], "unpacked units go back to stock"
         time.sleep(0.1)
         assert m.robot_state(tel.snapshot())[0] == "paused"
         ok, reason = m.readiness()
@@ -184,7 +196,10 @@ def test_stop_aborts_and_never_resumes_mission():
 def test_restart_marks_running_interrupted():
     db = Path(tempfile.mkdtemp()) / "t.db"
     store = Store(db)
-    running = store.create_mission(text="x", mode="mock", status="running", total=1)
+    running = store.create_mission(text="x", mode="mock", status="running", total=2, stock_reserved=1,
+                                   items=[{"item": "mentos", "qty": 2}])
+    assert stock_store.reserve([{"item": "mentos", "qty": 2}])[0]
+    before = stock_store.get_stock()["mentos"]
     waiting = store.create_mission(text="y", mode="mock", status="awaiting_confirmation", total=1)
     patches = offline()
     for p in patches:
@@ -192,6 +207,7 @@ def test_restart_marks_running_interrupted():
     try:
         store2, _, tel, m = services(db=db)
         assert store2.get_mission(running)["status"] == "interrupted"
+        assert stock_store.get_stock()["mentos"] == before + 2, "an interrupted mission gives its stock back"
         assert store2.get_mission(waiting)["status"] == "expired"
         assert m.current_id is None, "nothing resumes after a restart"
         tel.shutdown()

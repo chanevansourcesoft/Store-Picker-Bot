@@ -180,6 +180,65 @@ def test_stock_uses_item_field_not_message():
         reset_inventory()
 
 
+def test_unpacked_units_go_back_to_stock():
+    """3 chips ordered (reserved), 1 packed, then the robot gives up: 2 go back to stock."""
+    db_path = setup_test_db()
+    reset_inventory()
+    try:
+        before = store.get_stock()
+        order_id, problems = store.create_order([{"item": "chips_packet", "qty": 3}])
+        assert order_id, problems
+        assert store.get_stock()["chips_packet"] == before["chips_packet"] - 3
+
+        steps = fake_steps("chips_packet") + fake_steps("chips_packet", ok=False) * 3
+        with patch("quickpick.worker.run_agent", make_fake_agent(steps)):
+            worker.process_single_order(order_id)
+        assert store.get_stock()["chips_packet"] == before["chips_packet"] - 1
+        print("PASS: test_unpacked_units_go_back_to_stock")
+    finally:
+        teardown_test_db(db_path)
+        reset_inventory()
+
+
+def test_worker_error_releases_stock():
+    db_path = setup_test_db()
+    reset_inventory()
+    try:
+        before = store.get_stock()
+        order_id, _ = store.create_order([{"item": "frooti", "qty": 2}])
+
+        def crash(order, on_step=None):
+            on_step(dict(fake_steps("frooti")[0], step=1))
+            raise RuntimeError("planner crashed")
+        with patch("quickpick.worker.run_agent", crash):
+            worker.process_single_order(order_id)
+        assert store.get_order(order_id)["status"] == "failed"
+        assert before["frooti"] - store.get_stock()["frooti"] == 1, "the packed unit stays sold"
+        print("PASS: test_worker_error_releases_stock")
+    finally:
+        teardown_test_db(db_path)
+        reset_inventory()
+
+
+def test_old_unreserved_order_reduces_at_pick():
+    """An order queued before stock reservation existed: stock goes down per packed unit, nothing is released."""
+    db_path = setup_test_db()
+    reset_inventory()
+    try:
+        before = store.get_stock()
+        order_id, _ = store.create_order([{"item": "mentos", "qty": 2}])
+        store.restore_stock("mentos", 2)
+        with store._transaction() as conn:
+            conn.execute("UPDATE orders SET stock_reserved = 0 WHERE id = ?", (order_id,))
+        with patch("quickpick.worker.run_agent", make_fake_agent(fake_steps("mentos"))):
+            worker.process_single_order(order_id)
+        assert before["mentos"] - store.get_stock()["mentos"] == 1
+        print("PASS: test_old_unreserved_order_reduces_at_pick")
+    finally:
+        teardown_test_db(db_path)
+        reset_inventory()
+
+
 def run_all_tests():
     """Run all worker tests."""
     print("Running worker tests...\n")
@@ -189,6 +248,9 @@ def run_all_tests():
     test_replay_order_3_is_not_overpacked()
     test_extra_item_does_not_reduce_stock()
     test_stock_uses_item_field_not_message()
+    test_unpacked_units_go_back_to_stock()
+    test_worker_error_releases_stock()
+    test_old_unreserved_order_reduces_at_pick()
 
     print("\nAll worker tests passed!")
 

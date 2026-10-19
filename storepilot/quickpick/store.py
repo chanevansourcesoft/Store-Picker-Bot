@@ -14,6 +14,7 @@ from typing import Optional
 
 from store_agent import inventory as stock_store
 from store_agent.inventory import ensure_stock, load_inventory
+from store_agent.order_tracker import unpacked_units
 
 # Order statuses: queued -> packing -> one of FINISHED_STATUSES (or queued -> cancelled)
 FINISHED_STATUSES = ("done", "done_with_problems", "failed", "cancelled")
@@ -77,9 +78,14 @@ def init_db():
             bill TEXT NOT NULL DEFAULT '{}',
             problems TEXT NOT NULL DEFAULT '[]',
             current_task TEXT,
-            station TEXT
+            station TEXT,
+            stock_reserved INTEGER NOT NULL DEFAULT 0
         )
     """)
+    # Databases from before stock reservation: add the column (old orders = not reserved)
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(orders)")]
+    if "stock_reserved" not in columns:
+        conn.execute("ALTER TABLE orders ADD COLUMN stock_reserved INTEGER NOT NULL DEFAULT 0")
     conn.commit()
 
 
@@ -143,27 +149,46 @@ def restore_stock(item, qty=1):
 
 def create_order(items):
     """
-    Create a new order. Returns (order_id, None) on success,
-    or (None, problems) if stock check fails.
+    Create a new order and reserve its stock at once (all or nothing), so two
+    orders can never both get the last unit. Returns (order_id, None) on success,
+    or (None, problems) if there is not enough stock.
+    Units that are not packed go back to stock when the order ends (release_unpacked).
     """
-    # Check stock first
-    ok, problems = check_stock(items)
+    ok, problems = stock_store.reserve(items)
     if not ok:
         return None, problems
 
     init_db()
 
-    with _transaction() as conn:
-        cursor = conn.execute(
-            """
-            INSERT INTO orders (created_at, items, status)
-            VALUES (?, ?, 'queued')
-            """,
-            (datetime.now().isoformat(), json.dumps(items))
-        )
-        order_id = cursor.lastrowid
+    try:
+        with _transaction() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO orders (created_at, items, status, stock_reserved)
+                VALUES (?, ?, 'queued', 1)
+                """,
+                (datetime.now().isoformat(), json.dumps(items))
+            )
+            order_id = cursor.lastrowid
+    except Exception:
+        stock_store.release(items)
+        raise
 
     return order_id, None
+
+
+def release_unpacked(order):
+    """Give back the reserved stock of every unit this order did not put in the basket.
+    Only once per order, and only for orders that reserved stock. Returns {item: qty}."""
+    init_db()
+    with _transaction() as conn:
+        cursor = conn.execute(
+            "UPDATE orders SET stock_reserved = 0 WHERE id = ? AND stock_reserved = 1", (order["id"],))
+        if cursor.rowcount != 1:
+            return {}
+    back = unpacked_units(order["items"], order.get("step_log") or [])
+    stock_store.release(back)
+    return back
 
 
 def get_order(order_id):
@@ -290,7 +315,7 @@ def fail_order(order_id, problems):
 
 def cancel_order(order_id):
     """Cancel an order that is still queued (the robot has not started it).
-    Returns True if it was cancelled. Stock is untouched: it only goes down when packed."""
+    Returns True if it was cancelled. Its reserved stock goes back."""
     init_db()
     with _transaction() as conn:
         cursor = conn.execute(
@@ -298,7 +323,10 @@ def cancel_order(order_id):
             "WHERE id = ? AND status = 'queued'",
             (json.dumps(["Cancelled by the store before packing."]), order_id)
         )
-        return cursor.rowcount == 1
+        cancelled = cursor.rowcount == 1
+    if cancelled:
+        release_unpacked(get_order(order_id))
+    return cancelled
 
 
 def delete_order(order_id):

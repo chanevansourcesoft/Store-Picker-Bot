@@ -281,6 +281,52 @@ def test_cancel_order():
         reset_inventory()
 
 
+def test_order_reserves_stock():
+    """Stock is taken when the order is placed, so a second order cannot get the same units.
+    Cancelling gives it back."""
+    db_path = setup_test_db()
+    try:
+        reset_inventory()
+        first, _ = store.create_order([{"item": "chips_packet", "qty": 7}])
+        assert store.get_stock()["chips_packet"] == 3, "reserved at order time"
+        second, problems = store.create_order([{"item": "chips_packet", "qty": 4}])
+        assert second is None and "have 3" in problems[0], problems
+
+        # all or nothing: one short item reserves nothing
+        none, problems = store.create_order([{"item": "mentos", "qty": 1}, {"item": "chips_packet", "qty": 4}])
+        assert none is None and store.get_stock()["mentos"] == 15
+
+        assert store.cancel_order(first)
+        assert store.get_stock()["chips_packet"] == 10
+        assert store.release_unpacked(store.get_order(first)) == {}, "released only once"
+        assert store.get_stock()["chips_packet"] == 10
+        print("PASS: test_order_reserves_stock")
+    finally:
+        teardown_test_db(db_path)
+        reset_inventory()
+
+
+def test_parallel_orders_never_oversell():
+    """10 customers order the last 10 Hide & Seek, 3 each, at the same time: only 3 orders fit."""
+    import threading
+    db_path = setup_test_db()
+    try:
+        reset_inventory()
+        results = []
+        threads = [threading.Thread(target=lambda: results.append(
+            store.create_order([{"item": "hide_and_seek", "qty": 3}])[0])) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert sum(1 for r in results if r) == 3, results
+        assert store.get_stock()["hide_and_seek"] == 1
+        print("PASS: test_parallel_orders_never_oversell")
+    finally:
+        teardown_test_db(db_path)
+        reset_inventory()
+
+
 def run_all_tests():
     """Run all store tests."""
     print("Running store tests...\n")
@@ -293,6 +339,8 @@ def run_all_tests():
     test_get_orders()
     test_get_next_queued_order()
     test_cancel_order()
+    test_order_reserves_stock()
+    test_parallel_orders_never_oversell()
 
     print("\nAll store tests passed!")
 
