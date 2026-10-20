@@ -60,13 +60,18 @@ listed there.
 
 ## 3. Start the lidar
 
+The lidar runs under a watchdog, [tools/lidar_watchdog.py](tools/lidar_watchdog.py). It starts the
+A1 driver and restarts it when `/scan_raw` stops for 5 seconds or the driver quits, for example
+after the lidar is unplugged and plugged back in. Ctrl+C stops the driver cleanly.
+
 ```bash
-# With Docker (Jetson): runs in the background and restarts by itself
+# With Docker (Jetson): runs in the background, starts again after a reboot
 docker compose up -d lidar
 docker compose logs -f lidar        # Ctrl+C stops the logs only
+docker compose stop lidar           # stop it
 
 # Without Docker (PC)
-ros2 launch peripherals sllidar_a1.launch.py
+python3 tools/lidar_watchdog.py
 ```
 
 On the robot's own image, `lidar_watchdog.service` already runs the lidar. Do not start a second
@@ -74,7 +79,10 @@ driver on the same computer: only one program can hold the port.
 
 ## 4. Drive the base
 
-Wheels off the ground the first time. Two terminals:
+Wheels off the ground the first time. Two terminals.
+
+Keep the robot still for the first 2 seconds after the launch starts: the IMU measures its gyro
+bias then (see "IMU bias" below).
 
 ```bash
 # Terminal 1: board, base, TF, scan filter, odometry
@@ -103,26 +111,25 @@ SLAM, maps and Nav2: see [mecanum_nav/README.md](src/mecanum_nav/README.md). Wit
 
 ## Moving from the old Jetson
 
-The base used to run on an 8 GB Jetson. Some things it used are not in this repo yet: the IMU
-calibration, the lidar watchdog, the saved maps and the exact package versions. To bring them over:
+The base used to run on an 8 GB Jetson whose files could not be copied. What it had that this repo
+lacked was rebuilt here:
 
-1. Copy [tools/collect_from_old_jetson.sh](tools/collect_from_old_jetson.sh) to the old Jetson
-   (USB stick or `scp`) and run it there:
-   ```bash
-   bash collect_from_old_jetson.sh               # workspace at ~/ros2_ws
-   ```
-   If ROS runs in a Docker container on that Jetson, run it once on the Jetson and once inside the
-   container (`docker exec -it <name> bash`).
-2. It only reads and copies. It writes `~/old_jetson_bundle_<...>.tar.gz`: send that file.
-
-The file is then used to add the missing packages, the watchdog and the maps here, and to pin the
-same versions in the Dockerfile.
+- **IMU calibration** (`calibration`, `imu_calib`): replaced by the `imu_bias` node (see Notes).
+- **`lidar_watchdog.service`**: replaced by [tools/lidar_watchdog.py](tools/lidar_watchdog.py),
+  which the `lidar` service in Docker runs (see section 3).
+- **Saved maps**: a new map of the store area is mapped here (see mecanum_nav/README.md).
 
 ## Notes
 
-- **IMU calibration:** the `calibration` and `imu_calib` packages come with the robot's own image
-  and are not in this repo. Without them the IMU filter uses the raw IMU (the gyro bias is not
-  removed first), and the launch prints a line saying so.
+- **IMU bias:** the robot's own image used the `calibration` and `imu_calib` packages, which are
+  not in this repo. Here `peripherals`' `imu_bias` node does the same job: at startup it averages
+  the first 100 gyro readings (about 2 s, robot standing still), then publishes the IMU with that
+  bias removed on `imu_corrected`, which the Madgwick filter reads. Its log shows
+  `Gyro bias (rad/s): ...`. If the robot moved during those 2 s, start the launch again.
+  An accel calibration in `imu_calib`'s format (`SM` and `bias`) can be passed with
+  `accel_calib_file:=/path/to/file.yaml` to `peripherals imu_filter.launch.py`; without one the
+  accel values pass through. When `imu_calib` is installed (the robot's own image), it is used
+  instead.
 - **Lidar types:** the image builds only the A1 driver (`sllidar_ros2`). For G4 or LD19, add
   `ydlidar_ros2_driver` or `ldlidar_stl_ros2` to the Dockerfile.
 - **Not in the image:** RViz (run it on a PC on the same network with the same `ROS_DOMAIN_ID`),

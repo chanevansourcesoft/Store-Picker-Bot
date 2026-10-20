@@ -36,9 +36,12 @@ services:
   ros:
     <<: *ros
 
-  # The A1 lidar driver on its own, like lidar_watchdog.service on the robot's image.
+  # The A1 lidar driver under tools/lidar_watchdog.py, like lidar_watchdog.service on the robot's
+  # image: restarted when /scan_raw stalls or the lidar is re-plugged.
   # Do not run it while that service is running on the same computer: only one may hold the port.
   lidar:
     <<: *ros
-    command: ros2 launch peripherals sllidar_a1.launch.py
+    command: python3 tools/lidar_watchdog.py
     restart: unless-stopped
+    # The watchdog gives the driver up to 10 s to stop cleanly.
+    stop_grace_period: 20s

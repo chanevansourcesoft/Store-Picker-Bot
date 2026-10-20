@@ -3,13 +3,17 @@ from ament_index_python.packages import PackageNotFoundError, get_package_share_
 
 from launch_ros.actions import Node
 from launch import LaunchDescription, LaunchService
-from launch.actions import LogInfo
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 
 def generate_launch_description():
     compiled = os.environ['need_compile']
     # The calibration and imu_calib packages are not in this repo (they come with the robot's own
-    # image). Without them the filter takes the raw IMU directly: it still works, the gyro bias is
-    # just not removed first.
+    # image). Without them peripherals' imu_bias does the same job on the same topics: it measures
+    # the gyro bias at startup (robot standing still) and publishes imu_corrected.
+    # accel_calib_file: optional accel calibration in imu_calib's format (SM + bias). Empty = none.
+    accel_calib_file = LaunchConfiguration('accel_calib_file', default='')
+    accel_calib_file_arg = DeclareLaunchArgument('accel_calib_file', default_value=accel_calib_file)
     try:
         if compiled == 'True':
             calibration_package_path = get_package_share_directory('calibration')
@@ -27,6 +31,18 @@ def generate_launch_description():
         output='screen',
         parameters=[{"calib_file": calib_file if have_calib else ''
                      }],
+        remappings=[
+            ('raw', 'ros_robot_controller/imu_raw'),
+            ('corrected', 'imu_corrected')
+            ]
+        )
+
+    imu_bias_node = Node(
+        package='peripherals',
+        executable='imu_bias',
+        name='imu_calib',
+        output='screen',
+        parameters=[{'calib_file': accel_calib_file}],
         remappings=[
             ('raw', 'ros_robot_controller/imu_raw'),
             ('corrected', 'imu_corrected')
@@ -68,18 +84,14 @@ def generate_launch_description():
         ],
         remappings=[
             ('/tf', 'tf'),
-            ('/imu/data_raw', 'imu_corrected' if have_calib else 'ros_robot_controller/imu_raw'),
+            ('/imu/data_raw', 'imu_corrected'),
             ('imu/data', 'imu')
             ]
     )
 
-    if not have_calib:
-        return LaunchDescription([
-            LogInfo(msg='imu_filter: no calibration/imu_calib package, using the raw IMU'),
-            imu_filter_node
-        ])
     return LaunchDescription([
-        imu_calib_node,
+        accel_calib_file_arg,
+        imu_calib_node if have_calib else imu_bias_node,
         imu_filter_node
     ])
 
