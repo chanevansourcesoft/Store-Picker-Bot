@@ -1,0 +1,789 @@
+# Nav2 parameters for the 4WD MECANUM robot.
+# Derived from navigation/config/nav2_params.yaml (the Ackermann config) so its tuning
+# history survives; every mecanum-specific change is marked "MECANUM:" with the reason.
+# The Ackermann file is untouched and still drives the JetAcker.
+
+amcl:
+  ros__parameters:
+    use_sim_time: False
+    # Odometry noise model. Lowered 0.2 -> 0.1 for this robot: odometry here is rf2o LASER
+    # scan matching (see controller.launch.py / ekf.yaml), not wheel encoders, so it does not
+    # suffer the wheel slip these defaults assume -- and mecanum wheels slip more than most,
+    # which is exactly why wheel odometry is not used. Trusting odometry more makes the
+    # particle cloud tighter and the pose steadier between scan updates.
+    # alpha5 only exists for the omni motion model (strafe noise) and is ignored by the
+    # differential one, so it does nothing on the Ackermann robot but matters here.
+    # OLD: all 0.2
+    alpha1: 0.1
+    alpha2: 0.1
+    alpha3: 0.1
+    alpha4: 0.1
+    alpha5: 0.1
+    base_frame_id: "base_footprint"
+    beam_skip_distance: 0.5
+    beam_skip_error_threshold: 0.9
+    beam_skip_threshold: 0.3
+    do_beamskip: false
+    global_frame_id: "map"
+    lambda_short: 0.1
+    laser_likelihood_max_dist: 2.0
+    # 10.0 -> 12.0: the A1's actual maximum range. In a space this large the longest beams
+    # are the most distinctive ones (they reach far walls rather than nearby pillars, which
+    # all look alike), so throwing away the 10-12 m band was discarding the most useful
+    # information for telling one part of the map from another. Costs nothing extra --
+    # these beams are already in the scan.
+    # 2026-10-15: 12.0 -> 8.0. The A1 can see 12 m, but the map is a 7.0 x 5.0 m room -- a
+    # beam reporting 10 m has left the mapped area and tells AMCL nothing about where the robot
+    # is. Capping at 8.0 keeps the filter on beams that can actually be compared to the map.
+    # (slam_toolbox already builds the map with max_laser_range 8.0, so this also makes the two
+    # agree on what counts as a usable return.)
+    # OLD: 10.0, then 12.0
+    laser_max_range: 8.0
+    laser_min_range: 0.2
+    laser_model_type: "likelihood_field"
+    # 60 -> 120 (2026-08-04). This space is large and self-similar (rows of near-identical
+    # pillars, see config/goal_map.png), which is the worst case for scan matching: with
+    # few beams many distinct places produce almost the same likelihood, so the filter
+    # drifts to a look-alike spot. More beams per update make each match more distinctive.
+    # Costs CPU on every update -- if the Jetson starts missing control cycles, come back
+    # down towards 90. (Policy inference itself is only ~0.4 ms, so there is headroom.)
+    # 2026-10-15: 120 -> 240 (of the A1's 1080). More beams per update means each pose
+    # hypothesis is tested against more of the room, which matters most in a bare room where
+    # many places look alike. Costs CPU on every update -- measured headroom before this
+    # change: load 1.11 on 6 cores, about 18%.
+    # OLD: 60, then 120
+    max_beams: 240
+    max_particles: 3000
+    min_particles: 500
+    odom_frame_id: "odom"
+    pf_err: 0.05
+    pf_z: 0.99
+    # Adaptive-MCL recovery. With both at 0.0 (the previous setting) AMCL never injects
+    # random particles, so once it loses the pose it stays lost -- no amount of driving
+    # brings it back, only a manual "2D Pose Estimate" or a restart. That is exactly the
+    # reported "localization kharab ho jati hai aur phir theek nahi hoti". AMCL compares a
+    # fast vs slow running average of how well the particles match the scan; when the fast
+    # one falls well below the slow one it scatters fresh particles so the filter can
+    # re-converge elsewhere. 0.1 / 0.001 are the values from AMCL's own documentation.
+    # Recovery only runs on an AMCL update, and updates only happen once the robot has
+    # moved update_min_d / update_min_a -- so the robot must be DRIVING for this to help.
+    # Trade-off: in a repetitive space the pose may occasionally jump to a look-alike spot
+    # rather than staying smoothly wrong -- still better than being permanently lost.
+    # 2026-10-12 MECANUM: both back to 0.0. The trade-off noted above landed on the wrong
+    # side for this robot. Random particle injection is a cure for "lost and never recovers",
+    # but the symptom here is the opposite: the pose was JUMPING around after a clean manual
+    # 2D Pose Estimate, so the robot kept re-planning from a position it was not at and never
+    # reached the goal.
+    # Why it misfires here: injection triggers when AMCL's fast-average match score drops
+    # below its slow-average. In a small, bare conference room, scanned against a map built
+    # weeks ago by a DIFFERENT robot with the lidar at a different height, the match score is
+    # mediocre ALL the time -- so AMCL concludes it is lost on a regular basis and scatters
+    # particles, teleporting the pose to a look-alike spot. The filter was never actually lost;
+    # the map just does not match well enough to keep the score high.
+    # With 0.0 the pose stays continuous and drifts at worst, which is far easier to drive
+    # with and to debug. Cost: a genuinely kidnapped robot stays lost until a manual 2D Pose
+    # Estimate -- acceptable, since that is how the pose gets set here anyway.
+    # Re-enable (0.1 / 0.001) only on a large map built by THIS robot, where the match score
+    # is high enough that a drop really does mean lost.
+    # OLD: recovery_alpha_fast: 0.1
+    # OLD: recovery_alpha_slow: 0.001
+    recovery_alpha_fast: 0.0
+    recovery_alpha_slow: 0.0
+    # 1 -> 2: resampling on every single update steadily kills particle diversity (the same
+    # few particles get copied over and over), so the filter commits to one hypothesis early.
+    # Where many places look alike, that early commitment is exactly how it locks onto the
+    # wrong one. Resampling every other update keeps alternative hypotheses alive longer.
+    resample_interval: 2
+    # MECANUM: was DifferentialMotionModel. A differential model assumes the robot can only
+    # move along its heading and rotate; it has no term for sideways translation, so every
+    # strafe looks to AMCL like an unexplained jump and the particle cloud is penalised for
+    # motion the robot genuinely performed. OmniMotionModel adds that term, and makes alpha5
+    # (translation noise orthogonal to heading) meaningful -- it is ignored by the
+    # differential model.
+    robot_model_type: "nav2_amcl::OmniMotionModel"
+    save_pose_rate: 0.5
+    # 2026-10-15: 0.2 -> 0.08. This is the standard deviation of the likelihood field, i.e.
+    # how much range error AMCL considers normal. At 0.2 a particle sitting 20 cm away from the
+    # truth scores almost as well as the correct one, so the filter simply cannot localise more
+    # precisely than that -- it is the ceiling on how sharp the pose can ever be.
+    # MEASURED on this lidar: scan-to-scan median range change 0.0014 m with the robot still.
+    # The sensor is roughly 140x more precise than 0.2 was assuming.
+    # 0.08 is deliberately not tighter: the map itself is a 0.05 m grid and the room has
+    # furniture that moves, so some slack has to remain for map error rather than sensor error.
+    # OLD: sigma_hit: 0.2
+    sigma_hit: 0.08
+    tf_broadcast: true
+    transform_tolerance: 1.0
+    # How far the robot must move before AMCL runs an update (and therefore before it can
+    # correct drift or trigger the recovery above). Lowered 2026-08-04: 0.25 m / 0.2 rad
+    # let a quarter metre of odometry error accumulate uncorrected, and odometry here comes
+    # from rf2o laser matching with no wheel encoders to back it up, so that error is not
+    # small. Correcting roughly twice as often keeps the estimate tighter.
+    # 2026-10-15: 0.1 -> 0.05 rad, and update_min_d 0.12 -> 0.05 m below.
+    # AMCL only corrects the pose after the robot has moved this far; between updates the pose
+    # is pure odometry, and this robot's odometry has no wheel encoders at all -- it is laser
+    # scan matching only. At 0.10 m/s, 0.12 m meant a correction roughly once every 1.2 s and
+    # everything in between was dead reckoning. 0.05 m roughly doubles the correction rate.
+    # OLD: update_min_a: 0.1
+    update_min_a: 0.05
+    # OLD: update_min_d: 0.12
+    update_min_d: 0.05
+    # Beam-model mixture weights (must sum to ~1). Were 0.5 / 0.5, i.e. "half of every scan
+    # is unexplained noise" -- that flattens the likelihood function, so a correct pose and a
+    # wrong one score almost the same. In a self-similar space (rows of near-identical
+    # pillars) that is the difference between converging and drifting to a look-alike spot.
+    # 0.8 / 0.15 sharpens the match while keeping enough z_rand to tolerate things that are
+    # NOT in the map (people, moved furniture). If localization becomes twitchy around
+    # unmapped obstacles, walk z_hit back toward 0.65 and z_rand up.
+    z_hit: 0.8
+    z_max: 0.05
+    z_rand: 0.15
+    z_short: 0.05
+    scan_topic: scan
+    # Was hardcoded to (0,0,0) -- AMCL always "believed" it started at map origin
+    # regardless of where the robot physically was, causing wrong localization anywhere
+    # else. False -> AMCL does proper GLOBAL localization: particles spread across the
+    # whole free space of the map and converge from real scan-matching as the robot
+    # moves, correct no matter where it actually starts. Takes a little driving to
+    # converge tightly at first, but is accurate everywhere instead of only at one point.
+    set_initial_pose: True
+    initial_pose: 
+      x: 0.0
+      y: 0.0
+      yaw: 0.0
+
+amcl_map_client:
+  ros__parameters:
+    use_sim_time: False
+
+amcl_rclcpp_node:
+  ros__parameters:
+    use_sim_time: False
+
+bt_navigator:
+  ros__parameters:
+    use_sim_time: False
+    global_frame: map
+    robot_base_frame: base_footprint
+    odom_topic: /odom
+    bt_loop_duration: 10
+    default_server_timeout: 20
+    #enable_groot_monitoring: True
+    #groot_zmq_publisher_port: 1666
+    #groot_zmq_server_port: 1667
+    # Ackermann BT: Spin recovery replaced by BackUp (car-like base cannot rotate in place)
+    # MECANUM tree: the Ackermann one deleted the Spin recovery because a car-like base cannot
+    # rotate in place. This robot can, so Spin is back -- it is the cheapest and often the most
+    # effective recovery there is, since rotating gives the lidar a fresh view without moving
+    # the robot anywhere it could collide.
+    default_nav_to_pose_bt_xml: "/home/ubuntu/ros2_ws/src/mecanum_nav/config/navigate_to_pose_w_replanning_and_recovery_mecanum.xml"
+    # 'default_nav_through_poses_bt_xml' and 'default_nav_to_pose_bt_xml' are use defaults:
+    # nav2_bt_navigator/navigate_to_pose_w_replanning_and_recovery.xml
+    # nav2_bt_navigator/navigate_through_poses_w_replanning_and_recovery.xml
+    # They can be set here or via a RewrittenYaml remap from a parent launch file to Nav2.
+    # Trimmed from 47 entries to 18 on 2026-10-12. Every library here is dlopen'd when
+    # bt_navigator configures, and on this Jetson that step MEASURED 30.7 s of a 194 s cold
+    # bringup -- the single largest item. The list only needs the BT nodes the loaded trees
+    # actually reference.
+    #
+    # Kept = the union of what two trees need:
+    #   this robot's navigate_to_pose tree (config/..._mecanum.xml), and
+    #   nav2's stock navigate_through_poses tree, which bt_navigator ALSO loads by default.
+    # Leaving a node out that either tree references makes bt_navigator fail to configure, so
+    # the through-poses entries are required even though nothing here sends through-poses goals.
+    # BehaviorTree.CPP built-ins (Sequence, Fallback, Inverter, ReactiveSequence,
+    # ReactiveFallback) need no plugin and were never in the list.
+    #
+    # If you add a node to the BT, add its library here or the tree will not load.
+    plugin_lib_names:
+      - nav2_compute_path_to_pose_action_bt_node
+      - nav2_compute_path_through_poses_action_bt_node
+      - nav2_follow_path_action_bt_node
+      - nav2_spin_action_bt_node
+      - nav2_wait_action_bt_node
+      - nav2_back_up_action_bt_node
+      - nav2_clear_costmap_service_bt_node
+      - nav2_goal_updated_condition_bt_node
+      - nav2_globally_updated_goal_condition_bt_node
+      - nav2_is_path_valid_condition_bt_node
+      - nav2_path_expiring_timer_condition
+      - nav2_rate_controller_bt_node
+      - nav2_recovery_node_bt_node
+      - nav2_pipeline_sequence_bt_node
+      - nav2_round_robin_node_bt_node
+      - nav2_remove_passed_goals_action_bt_node
+      - nav2_navigate_to_pose_action_bt_node
+      - nav2_navigate_through_poses_action_bt_node
+bt_navigator_navigate_through_poses_rclcpp_node:
+  ros__parameters:
+    use_sim_time: False
+
+bt_navigator_navigate_to_pose_rclcpp_node:
+  ros__parameters:
+    use_sim_time: False
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: odom
+      robot_base_frame: base_footprint
+      use_sim_time: False
+      rolling_window: true
+      width: 3
+      height: 3
+      resolution: 0.05
+      # Real JetAcker outline (base_footprint at rear axle: 0.296 m body + front wheels,
+      # ~0.2 m wide). Also feeds local_costmap/published_footprint, which the collision
+      # monitor's "approach" polygon uses for velocity-aware stopping.
+      # MECANUM footprint. The Ackermann one was 0.48 m long and OFFSET: +0.30 ahead, -0.18
+      # behind, because base_footprint sat at the rear axle. On this robot base_footprint is
+      # under the chassis CENTRE, and the chassis is 0.250 x 0.150 with wheels reaching
+      # +/-0.1115 in y (0.0965 joint offset + 0.015 half wheel width). So it is symmetric and
+      # much smaller. Keeping the old polygon would reserve 13 cm of phantom clearance ahead
+      # and claim 5 cm of real wheel as free space on each side.
+      footprint: "[[0.135, 0.120], [0.135, -0.120], [-0.135, -0.120], [-0.135, 0.120]]"
+      plugins: ["voxel_layer", "inflation_layer"]
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        # reverted 2026-07-30: 0.45/3.5 caused hesitant/roundabout paths in congested
+        # areas -- real collision safety comes from footprint (hard boundary, below) and
+        # the RL controller's own lidar-based estop/corridor checks (unaffected by this
+        # value either way), so a wider inflation was pure cost-preference overhead with
+        # no safety benefit in tight spaces. Narrowed further (0.35->0.25) same reasoning.
+        cost_scaling_factor: 5.0
+        # MECANUM: 0.25 -> 0.20. Scaled with the robot: circumscribed radius is now 0.18 m
+        # against the Ackermann 0.33 m.
+        # OLD: inflation_radius: 0.25
+        inflation_radius: 0.20
+      voxel_layer:
+        plugin: "nav2_costmap_2d::VoxelLayer"
+        enabled: True
+        publish_voxel_map: True
+        origin_z: 0.0
+        z_resolution: 0.05
+        z_voxels: 16
+        max_obstacle_height: 2.0
+        mark_threshold: 0
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: True
+          marking: True
+          data_type: "LaserScan"
+          # 2026-08-20: raytrace 3.0 -> 4.0, obstacle 2.5 -> 3.5. An obstacle was only marked
+          # into the costmap once it was within 2.5 m, and the plan then took ~1.1 s more to
+          # route around it, so the robot was already ~1.9 m in before the plan changed.
+          # Marking at 3.5 m buys a full extra metre of reaction distance.
+          # raytrace_max_range must stay ABOVE obstacle_max_range or stale marks never clear.
+          # OLD: raytrace_max_range: 3.0
+          # OLD: obstacle_max_range: 2.5
+          # REVERTED 2026-08-25 to 3.0 / 2.5. Marking further out bought reaction distance at
+          # 0.50 m/s; at 0.20 m/s it only marks more transient clutter, which is part of why
+          # plans started hugging objects.
+          # OLD: raytrace_max_range: 4.0
+          # OLD: obstacle_max_range: 3.5
+          raytrace_max_range: 3.0
+          # Rays shorter than this do not CLEAR cells.
+          # The A1 cannot measure closer than ~0.15 m, and the front bumper is only 0.055 m
+          # ahead of the lidar -- so anything within ~0.10 m of the bumper is invisible. With
+          # 0.0 the short/invalid rays that remain were raytracing through the cells where the
+          # obstacle actually is, erasing it from the costmap exactly when the robot was
+          # closest. The robot then drove the last 10 cm blind, into it.
+          # 0.18 is just past the sensor's own minimum: normal rays still clear everything, only
+          # the ones too short to be trustworthy stop doing so. Kept small on purpose -- a large
+          # value would let phantom obstacles pile up in a ring around the robot.
+          # OLD: raytrace_min_range: 0.0
+          raytrace_min_range: 0.18
+          obstacle_max_range: 2.5
+          obstacle_min_range: 0.0
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: True
+      always_send_full_costmap: True
+  local_costmap_rclcpp_node:
+    ros__parameters:
+      use_sim_time: False
+
+  local_costmap_client:
+    ros__parameters:
+      use_sim_time: False
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      # 2026-08-20: 1.0 -> 5.0 (publish 1.0 -> 2.0). The LOCAL costmap already ran at 5 Hz,
+      # so the controller saw a new obstacle instantly while the PLANNER did not hear about
+      # it for a further second. Total time from an obstacle appearing to the global plan
+      # routing around it was lidar 0.13 + costmap 1.0 + BT replan 1.0 + Hybrid-A* 0.30 =
+      # 2.43 s, which at 0.5 m/s is 1.21 m of travel. The robot therefore reached ~1.3 m from
+      # the obstacle while still tracking the OLD plan straight through it -- the policy
+      # steered away, rejoin_cross_track (0.45) handed steering back to pure pursuit which
+      # pulled it back in, and the resulting tug-of-war ended in e-stop -> reverse -> repeat.
+      # That is the '5-6 forward/reverse attempts to bypass one object' behaviour.
+      # OLD: update_frequency: 1.0
+      # OLD: publish_frequency: 1.0
+      # REVERTED 2026-08-25 to 1.0 / 1.0 (this is the GLOBAL costmap; the local one above was
+      # always 5 Hz). The 5 Hz global was to cut replan latency at 0.50 m/s, and it was the
+      # one change that raised CPU load on an already unstable container.
+      # OLD: update_frequency: 5.0
+      # OLD: publish_frequency: 2.0
+      # 2026-09-10: 1.0 -> 5.0 / 2.0 (GLOBAL costmap; the local one was always 5 Hz).
+      # RESTORED after being reverted on 08-25. That revert was aimed at the speed raise, but
+      # this is not a speed parameter -- it is replan latency, and removing it brought back the
+      # dynamic-obstacle problem.
+      # Why it matters: an obstacle only reaches the PLANNER through this costmap. At 1 Hz the
+      # chain from "person steps in front" to "plan routes around them" was
+      # lidar 0.13 + costmap 1.0 + BT replan 1.0 + Hybrid-A* 0.30 = 2.43 s, which at 0.45 m/s
+      # is 1.09 m of travel. The plan therefore only became correct at 1.41 m from the
+      # obstacle -- but blend_clear_dist hands steering to the POLICY at 1.50 m. So the good
+      # plan arrived after the policy had already taken over and was ignoring it, and the
+      # robot never actually drove the route around the obstacle.
+      # It also controls CLEARING: a person who has moved leaves stale marks for up to 1 s.
+      # If nav2_container gets unstable, drop this to 3.0 first -- it is the only change here
+      # that raises CPU load.
+      # OLD: update_frequency: 1.0
+      # OLD: publish_frequency: 1.0
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: map
+      robot_base_frame: base_footprint
+      use_sim_time: False
+      # Real robot outline so global plans keep feasible clearance instead of hugging
+      # walls a 0.05 m "dot" could pass but the 0.2 m-wide car cannot (dead-end trap).
+      # MECANUM footprint. The Ackermann one was 0.48 m long and OFFSET: +0.30 ahead, -0.18
+      # behind, because base_footprint sat at the rear axle. On this robot base_footprint is
+      # under the chassis CENTRE, and the chassis is 0.250 x 0.150 with wheels reaching
+      # +/-0.1115 in y (0.0965 joint offset + 0.015 half wheel width). So it is symmetric and
+      # much smaller. Keeping the old polygon would reserve 13 cm of phantom clearance ahead
+      # and claim 5 cm of real wheel as free space on each side.
+      footprint: "[[0.135, 0.120], [0.135, -0.120], [-0.135, -0.120], [-0.135, 0.120]]"
+      resolution: 0.05
+      track_unknown_space: true
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: True
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          clearing: True
+          marking: True
+          data_type: "LaserScan"
+          # 2026-08-20: raytrace 3.0 -> 4.0, obstacle 2.5 -> 3.5. An obstacle was only marked
+          # into the costmap once it was within 2.5 m, and the plan then took ~1.1 s more to
+          # route around it, so the robot was already ~1.9 m in before the plan changed.
+          # Marking at 3.5 m buys a full extra metre of reaction distance.
+          # raytrace_max_range must stay ABOVE obstacle_max_range or stale marks never clear.
+          # OLD: raytrace_max_range: 3.0
+          # OLD: obstacle_max_range: 2.5
+          # REVERTED 2026-08-25 to 3.0 / 2.5. Marking further out bought reaction distance at
+          # 0.50 m/s; at 0.20 m/s it only marks more transient clutter, which is part of why
+          # plans started hugging objects.
+          # OLD: raytrace_max_range: 4.0
+          # OLD: obstacle_max_range: 3.5
+          # 2026-09-10: 3.0 / 2.5 -> 4.0 / 3.5 on the GLOBAL costmap only (the local one stays
+          # at 2.5 -- it is a 3x3 m rolling window, so a longer range there buys nothing).
+          # This is where an obstacle first becomes visible to the planner, so it sets how much
+          # runway pure pursuit gets before blend_clear_dist (1.50 m) hands steering to the
+          # policy. Marking at 2.5 m left only 0.49 m of runway even with the faster replan
+          # above; 3.5 m gives 1.49 m (~3.3 s at 0.45 m/s), which is enough to steer around an
+          # obstacle smoothly instead of reaching the e-stop and reversing.
+          # raytrace_max_range must stay ABOVE obstacle_max_range or stale marks never clear.
+          # OLD: raytrace_max_range: 3.0
+          # OLD: obstacle_max_range: 2.5
+          raytrace_max_range: 4.0
+          # Same reason as the local costmap above: below the sensor's 0.15 m minimum a ray
+          # cannot be trusted to mean "this space is empty".
+          # OLD: raytrace_min_range: 0.0
+          raytrace_min_range: 0.18
+          obstacle_max_range: 3.5
+          obstacle_min_range: 0.0
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: True
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        # 2026-08-09: widened again (0.25 -> 0.35) with a much gentler decay (5.5 -> 3.0),
+        # to stop the global plan hugging obstacles. This is the GLOBAL costmap only -- the
+        # local one stays at 0.25/5.0 deliberately. When both were widened on 2026-07-30 the
+        # result was hesitant, roundabout behaviour in tight spots; only the global one
+        # shapes where the path is drawn, so the local costmap does not need to change.
+        #
+        # Beyond inflation_radius the cost is exactly zero, so the planner has no reason at
+        # all to keep further away than this number -- 0.25 was the actual cap on how much
+        # clearance the plan could ever prefer. cost_scaling_factor is the decay rate: at 5.5
+        # the cost had already collapsed by ~0.2 m, so even inside the radius there was
+        # barely any gradient pushing the path outward. 3.0 keeps a real gradient across the
+        # whole 0.35 m.
+        #
+        # Measured from map_01: median clearance in drivable space is only 0.25 m and the
+        # most open point in the entire map is 1.25 m. So a uniform 0.30 m of clearance is
+        # not physically available everywhere -- this is a PREFERENCE, not a guarantee.
+        # Inflation never blocks anything (only the footprint does), so narrow-but-passable
+        # gaps stay usable; they just cost more, and the planner takes an open route instead
+        # when one exists.
+        # 2026-08-31: 3.0/0.35 -> 2.0/0.75 so plans run down the MIDDLE of free space instead
+        # of hugging whichever side happens to be shorter.
+        # nav2 inflation cost is 253*exp(-scale*(d-inscribed)) up to inflation_radius and
+        # EXACTLY ZERO past it. At 0.35 m that meant every point more than 0.35 m from an
+        # obstacle scored identically, so in a 1.4 m corridor the whole central 0.7 m band was
+        # flat zero cost and the planner had no reason to sit in the middle -- it just took the
+        # shortest line, which runs along one wall. That is the one-sided path being seen.
+        # A plan only prefers the centre if the inflation reaches the middle from BOTH walls,
+        # i.e. inflation_radius >= half the corridor width. 0.75 covers corridors up to 1.5 m.
+        # In a 1.4 m corridor the cost now goes 81 -> 109 -> 147 as the robot moves 0, 0.15,
+        # 0.30 m off centre, so the centreline is a genuine minimum.
+        # This does NOT close narrow gaps -- inflation never blocks, only lethal/inscribed
+        # cells do. It makes tight routes more expensive, traded against length by the Smac
+        # planner's cost_penalty (3.5). If it starts taking silly detours, lower cost_penalty
+        # rather than shrinking this radius again.
+        # The LOCAL costmap inflation is deliberately left at 0.25 so the controller can still
+        # squeeze through tight spaces the global plan routes it into.
+        # OLD: cost_scaling_factor: 3.0
+        # OLD: inflation_radius: 0.35
+        # 2026-09-01: scaling 2.0 -> 4.0, radius kept at 0.75.
+        # The 0.75 radius is what makes plans run down the middle, so it stays. But at
+        # scaling 2.0 the ABSOLUTE cost in the open part of a corridor was high (81 at the
+        # centre of a 1.4 m corridor), and with cost_penalty 3.5 that made traversing such a
+        # corridor cost 2.12x its length -- so the planner would go up to 112% out of its way
+        # to avoid one entirely, producing long detours away from the goal.
+        # Centring and corridor-avoidance are different things and can be separated:
+        #   centring needs only a GRADIENT, and costs a few cm of path length
+        #   avoiding a corridor depends on the ABSOLUTE level, and costs metres
+        # A steeper scaling keeps the gradient while collapsing the absolute level -- at 4.0
+        # the same corridor centre costs 26 instead of 81, but still reads 26/39/58/86 as the
+        # robot moves 0/0.1/0.2/0.3 m off centre, so the centreline is just as preferred.
+        # OLD: cost_scaling_factor: 2.0
+        cost_scaling_factor: 4.0
+        # MECANUM: 0.75 -> 0.45. The reasoning in the comments above is about keeping the
+        # gradient wide enough to centre the robot in a corridor, and that still holds -- but it
+        # is relative to robot size. This chassis is 0.27 m long and 0.24 m wide including
+        # wheels, against the Ackermann 0.48 m x 0.26 m, and its circumscribed radius is 0.18 m
+        # not 0.33 m. 0.45 keeps the "inflation_radius >= half the corridor width" property for
+        # corridors up to 0.9 m, which is what this robot can actually fit through.
+        # Raise toward 0.6 if it hugs walls; lower if it refuses narrow doorways.
+        # OLD: inflation_radius: 0.75
+        inflation_radius: 0.45
+      always_send_full_costmap: True
+  global_costmap_client:
+    ros__parameters:
+      use_sim_time: False
+  global_costmap_rclcpp_node:
+    ros__parameters:
+      use_sim_time: False 
+
+map_server:
+  ros__parameters:
+    use_sim_time: False
+    #topic_name: map
+    #frame_id: map
+    yaml_filename: ""
+
+map_saver:
+  ros__parameters:
+    use_sim_time: False
+    save_map_timeout: 5.0
+    free_thresh_default: 0.25
+    occupied_thresh_default: 0.65
+    map_subscribe_transient_local: True
+
+# Hybrid-A* instead of NavFn: NavFn plans in (x,y) only and ignores heading, so its paths
+# leave the robot's position in directions an Ackermann can only reach by spinning in place.
+# Hybrid-A* plans in (x,y,theta) with car-like primitives and a minimum turning radius --
+# every path starts from the FRONT of the robot along its current heading and is drivable.
+# DUBIN (forward-only) matches the RL policy; escapes in reverse stay the controller's job.
+planner_server:
+  ros__parameters:
+    expected_planner_frequency: 2.0
+    use_sim_time: False
+    planner_plugins: ["GridBased", "Escape"]
+
+    # MECANUM: was nav2_smac_planner/SmacPlannerHybrid.
+    #
+    # Hybrid-A* searches in SE2 (x, y, heading) and only ever expands along curves the vehicle
+    # can physically drive, which is exactly what an Ackermann base needs and exactly what this
+    # robot does not. Every one of its distinguishing parameters encodes a car constraint:
+    # motion_model_for_search DUBIN (forward-only bounded curvature), minimum_turning_radius
+    # 0.35, reverse_penalty, non_straight_penalty, angle_quantization_bins. A mecanum base can
+    # translate in any direction and rotate independently, so a heading-constrained search costs
+    # a great deal of CPU to rule out paths that are in fact perfectly drivable -- notably it
+    # cannot produce the sideways moves that are the whole reason for fitting these wheels.
+    #
+    # SmacPlanner2D searches x/y only and leaves heading free, which matches the robot's actual
+    # freedom, and is far cheaper on this Jetson. The controller decides how to orient while
+    # following the path.
+    #
+    # The cost_penalty tuning history from the Ackermann config is preserved below: that analysis
+    # was about corridor centring versus path length, which is geometry and still applies.
+    GridBased:
+      plugin: "nav2_smac_planner/SmacPlanner2D"
+      tolerance: 1.0                 # plan to within 1 m if the goal itself is boxed in
+      downsample_costmap: false
+      downsampling_factor: 1
+      allow_unknown: true
+      max_iterations: 1000000
+      max_on_approach_iterations: 1000
+      max_planning_time: 2.0
+      # Small weight, same reasoning as the Ackermann config: in a straight corridor the centre
+      # line and an off-centre line are the SAME length, so centring costs no path length and
+      # needs only a light touch to win; avoiding a corridor altogether costs 10-25 m, which a
+      # small penalty will never buy. 0.5 allowed about an 11% detour in a 1.0 m corridor.
+      cost_penalty: 0.5
+      use_final_approach_orientation: false
+      smooth_path: True
+      smoother:
+        max_iterations: 1000
+        w_smooth: 0.3
+        w_data: 0.2
+        tolerance: 1.0e-10
+
+    # ESCAPE planner, kept from the Ackermann config. Its original purpose was that
+    # SmacPlannerHybrid refuses outright -- "Starting point in lethal space! Cannot create
+    # feasible plan" -- when the robot's pose overlaps lethal cells, and because those cells come
+    # from the STATIC map no amount of costmap clearing recovers it; navigation stayed dead until
+    # relaunch (recorded 2026-07-28 19:42). SmacPlanner2D is less prone to this, but the failure
+    # mode has not gone away, and NavFn clears the robot's own cell before planning. Cheap
+    # insurance, so it stays.
+    Escape:
+      plugin: "nav2_navfn_planner/NavfnPlanner"
+      tolerance: 1.0
+      use_astar: true
+      allow_unknown: true
+
+planner_server_rclcpp_node:
+  ros__parameters:
+    use_sim_time: False
+
+smoother_server:
+  ros__parameters:
+    use_sim_time: False
+    smoother_plugins: ["simple_smoother"]
+    simple_smoother:
+      plugin: "nav2_smoother::SimpleSmoother"
+      tolerance: 1.0e-10
+      max_its: 1000
+      do_refinement: True
+
+behavior_server:
+  ros__parameters:
+    costmap_topic: local_costmap/costmap_raw
+    footprint_topic: local_costmap/published_footprint
+    cycle_frequency: 10.0
+    # 2026-10-14: drive_on_heading and assisted_teleop REMOVED. Neither behaviour tree loaded by
+    # bt_navigator references them -- this robot's navigate_to_pose tree uses Spin, BackUp and
+    # ClearEntireCostmap, and nav2's stock navigate_through_poses tree adds only Wait.
+    # Each plugin costs ~6 s to load on this Jetson (pluginlib rescans every plugin manifest in
+    # the ROS install on each createSharedInstance), measured in the container log, so dropping
+    # two unused ones takes ~12 s off every bringup.
+    # Wait is KEPT: the through-poses tree needs it, and a missing plugin makes the whole
+    # behaviour server fail to configure.
+    # OLD: ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
+    behavior_plugins: ["spin", "backup", "wait"]
+    spin:
+      plugin: "nav2_behaviors/Spin"
+    backup:
+      plugin: "nav2_behaviors/BackUp"
+    wait:
+      plugin: "nav2_behaviors/Wait"
+    global_frame: odom
+    robot_base_frame: base_footprint
+    transform_tolerance: 0.1
+    use_sim_time: false
+    # 2026-10-16: 1.0 -> 0.25. How far ahead a recovery behaviour checks the costmap before it
+    # will move. When the robot is ALREADY touching something its own footprint overlaps lethal
+    # cells, so a 1 s projection finds a collision whichever way it tries to go -- BackUp
+    # refuses to start and the robot sits there with every escape route open. That is exactly
+    # the "something 2 cm away and it will not reverse out" freeze.
+    # At 0.25 s and 10 Hz that is 2-3 simulated steps, roughly 3 cm of look-ahead: still enough
+    # to refuse driving into something NEW, short enough that being in contact does not veto
+    # the escape itself.
+    # Note the recovery behaviours publish straight to /cmd_vel, bypassing the velocity
+    # smoother and the collision monitor, so this parameter is the ONLY thing that can block
+    # them. Nothing downstream will stop an escape once it starts.
+    # OLD: simulate_ahead_time: 2.0, then 1.0
+    simulate_ahead_time: 0.25
+    # 2026-10-12: 1.0 -> 0.7. The behaviour server publishes to /cmd_vel DIRECTLY, bypassing
+    # the velocity smoother and the collision monitor, so recovery speeds are not governed by
+    # anything above -- a Spin at 1.0 rad/s stayed fast even after everything else was slowed.
+    # OLD: max_rotational_vel: 1.0
+    max_rotational_vel: 0.7
+    min_rotational_vel: 0.4
+    rotational_acc_lim: 3.2
+
+waypoint_follower:
+  ros__parameters:
+    loop_rate: 20
+    stop_on_failure: false
+    waypoint_task_executor_plugin: "wait_at_waypoint"   
+    wait_at_waypoint:
+      plugin: "nav2_waypoint_follower::WaitAtWaypoint"
+      enabled: True
+      waypoint_pause_duration: 200
+
+velocity_smoother:
+  ros__parameters:
+    use_sim_time: False
+    smoothing_frequency: 20.0
+    scale_velocities: False
+    feedback: "OPEN_LOOP"
+    # 2026-08-18: raised with throttle_scale 0.35 -> 0.70. This MUST stay >= throttle_scale:
+    # the smoother clips linear.x but passes angular.z through (scale_velocities: False), so
+    # any clipping inflates the executed curvature.
+    # OLD: max_velocity: [0.36, 0.0, 1.0]
+    # 2026-08-18: angular limits raised with throttle_scale 0.70. For Ackermann, angular.z is
+    # NOT independent -- it is v*tan(steer)/wheelbase. With scale_velocities: False the
+    # smoother clips linear and angular separately, so an angular cap below what the commanded
+    # curvature needs silently distorts the executed steering: at 0.70 m/s and full lock the
+    # controller asks for 0.70*tan(0.60)/0.213 = 2.25 rad/s, and the old 1.0 cap turned a
+    # 0.600 rad (34 deg) command into 0.295 rad (17 deg). 2.4 sits just above that worst case
+    # so the angular limit never binds. Accel 1.8 -> 4.0: reaching 2.25 rad/s now takes
+    # ~0.56 s instead of 1.25 s.
+    # OLD: max_velocity: [0.75, 0.0, 1.0]
+    # MECANUM: y was 0.0 -- a hard zero on strafe. With 0.0 here the smoother clamps every
+    # sideways command the controller produces to nothing, so the robot would plan holonomic
+    # paths and then refuse to execute the sideways part. This is the single parameter most
+    # likely to make "nav2 ignores strafe" look like a controller bug.
+    # y is set below x deliberately: mecanum rollers slip more in strafe than in forward drive,
+    # so sideways motion is both less efficient and less accurate.
+    # 2026-10-12: brought down alongside the DWB limits. This is a CEILING, not a setpoint --
+    # it clips whatever the controller asks for. Kept a little above DWB's 0.22/0.18/0.9 so it
+    # does not clip normal driving (clipping x but not yaw distorts the commanded curvature),
+    # while still capping anything that tries to go faster.
+    # OLD: max_velocity: [0.75, 0.0, 2.4]
+    # OLD: max_velocity: [0.5, 0.4, 2.0]
+    max_velocity: [0.3, 0.25, 1.2]
+    # OLD: min_velocity: [-0.36, 0.0, -1.0]
+    # OLD: min_velocity: [-0.36, 0.0, -2.4]
+    # OLD: min_velocity: [-0.5, -0.4, -2.0]
+    min_velocity: [-0.3, -0.25, -1.2]
+    # angular accel tightened 3.2 -> 1.8 rad/s^2 (2026-07-28): second-stage smoothing for
+    # left-right weave during normal RL-driven navigation, complementing each RL
+    # controller's own steer_ema_alpha filter (this acts on angular.z downstream, after
+    # the controller, at the shared velocity_smoother -- affects all of v1-v5 and TEB/DWB).
+    # OLD: max_accel: [2.5, 0.0, 1.8]
+    # OLD: max_accel: [2.5, 0.0, 4.0]
+    max_accel: [2.5, 2.5, 4.0]
+    # OLD: max_decel: [-2.5, 0.0, -1.8]
+    # OLD: max_decel: [-2.5, 0.0, -4.0]
+    max_decel: [-2.5, -2.5, -4.0]
+    odom_topic: odom
+    odom_duration: 0.1
+    deadband_velocity: [0.0, 0.0, 0.0]
+    velocity_timeout: 1.0
+
+# Safety layer between the velocity smoother and the motors, so the robot stops BEFORE
+# touching a wall and the progress checker then triggers behavior-server recoveries.
+# "approach" projects the footprint along the commanded velocity and only limits motion
+# TOWARD an obstacle. A static "stop" polygon here would also zero the reverse commands
+# of the BackUp recovery while wall points sit inside the front box, trapping the robot
+# in dead-ends. Footprint coordinates are in base_footprint frame, x forward, y left (m).
+collision_monitor:
+  ros__parameters:
+    use_sim_time: false
+    base_frame_id: "base_footprint"
+    odom_frame_id: "odom"
+    cmd_vel_in_topic: "cmd_vel_smoothed"
+    # 2026-08-18 THE speed cap. The hardware driver's odom_publisher node subscribes to
+    # /cmd_vel with app_cmd_vel_callback (odom_publisher_node.py:173-186), which HARD CLAMPS
+    # linear.x to 0.2 m/s and angular.z to 0.5 rad/s before forwarding to cmd_vel_callback.
+    # That callback is a phone-app safety limit -- nav2 was only going through it because
+    # nav2's default output topic happens to be the same one. Every throttle_scale change
+    # ever made (0.25 -> 0.35 -> 0.70) was silently cut to 0.2 m/s at this point.
+    # /controller/cmd_vel is this robot's normal programmatic-control topic (joystick, voice
+    # control and every example node publish there); it reaches the SAME cmd_vel_callback,
+    # just without the clamps. The app clamp stays intact for the app.
+    # Absolute path on purpose: the driver subscribes to an absolute /controller/cmd_vel, so
+    # a relative name would break if this stack were ever pushed into a namespace.
+    # REVERT: put this back to "cmd_vel" and the 0.2 m/s cap returns.
+    # OLD: cmd_vel_out_topic: "cmd_vel"
+    cmd_vel_out_topic: "/controller/cmd_vel"
+    transform_tolerance: 0.2
+    source_timeout: 1.0      # lidar silent for 1s -> treat as unsafe and stop
+    base_shift_correction: True
+    stop_pub_timeout: 2.0
+    polygons: ["FootprintApproach"]
+    FootprintApproach:
+      type: "polygon"
+      action_type: "approach"
+      # approach polygons take their shape from footprint_topic (points would be ignored);
+      # the local costmap publishes the real JetAcker footprint configured there
+      footprint_topic: "local_costmap/published_footprint"
+      # 2026-08-18: 1.2 -> 0.8, with throttle_scale 0.35 -> 0.70.
+      # This is a BRAKING horizon only -- collision_monitor never steers, so obstacle DODGING
+      # is unaffected (that is the controller's blend_clear_dist: 2.5 handover to the policy).
+      # Effect: allowed speed is v_out = d_free / this, so 1.2 -> 0.8 is a flat 1.5x wherever
+      # the monitor is active (turns, head-on approaches, paths not aligned with the corridor).
+      # It does NOT change speed in open corridors -- forward clearance there is ~4 m and the
+      # monitor never engages.
+      # Safety at 0.70 m/s: full speed is now held until the gap is 0.86 m (was 1.14 m), which
+      # leaves 0.56 m of free space; worst-case stop needs 0.245 m (0.210 s reaction across
+      # lidar 7.9 Hz + controller 30 Hz + smoother 20 Hz, then 0.098 m of decel at 2.5 m/s^2)
+      # -> 0.315 m margin. Do not go below 0.8; at 0.6 the margin nearly vanishes.
+      # estop_distance (0.30 m, in nav2_controller_rl_v5.yaml) is a separate hard layer and
+      # still applies unchanged.
+      # REVERTED 2026-08-18 (same day) back to 1.2 on the user's call: dead-end escapes were
+      # taking too many attempts and it was getting stuck even in easy ones, so the more
+      # conservative braking horizon was preferred.
+      # NOTE for whoever revisits this: tbc also sets the REVERSE veto zone
+      # (reverse_speed 0.10 * tbc + footprint rear 0.18), so 1.2 gives 0.30 m vs 0.26 m at
+      # 0.8 -- i.e. 1.2 makes backing out of a dead end slightly HARDER, not easier. If the
+      # many-attempts problem persists the cause is far more likely the controller's
+      # first-attempt give-up rule (travelled < 0.10 && !front_open -> fail "boxed in")
+      # in rl_controller_v5.cpp, not this parameter.
+      # TRIED 0.8 (1.5x speed near obstacles), reverted:
+      # 2026-08-31: 1.2 -> 0.9. collision_monitor projects the footprint forward for this long
+      # AND rotates it on the way, so while turning it demands far more LATERAL room than the
+      # robot actually occupies: at 0.45 m/s and full lock it wanted 0.29 m clear on each side
+      # beyond the 0.26 m body. 0.9 brings that to 0.23 m.
+      # Note this also shrinks the REVERSE veto zone (reverse_speed 0.10 * tbc + 0.18 rear),
+      # 0.30 -> 0.27 m, so backing out of a dead end gets slightly EASIER, not harder -- the
+      # opposite of the assumption behind the earlier revert of this value.
+      # Braking is still safe: worst case stop at 0.45 m/s needs 0.135 m and 0.9 s of horizon
+      # covers 0.40 m.
+      # OLD: time_before_collision: 1.2
+      time_before_collision: 0.9
+      # 2026-08-18: 0.1 -> 0.05. collision_monitor quantizes predicted collision time to this
+      # step, so the scaled output velocity moves in jumps (0.088 m/s at 0.1 s / 0.70 m/s;
+      # 0.044 m/s at 0.05 s). It sits AFTER velocity_smoother in the chain
+      # (cmd_vel_smoothed -> collision_monitor -> cmd_vel), so nothing smooths those jumps --
+      # they go straight to the motors, and they doubled when throttle went 0.35 -> 0.70.
+      # Costs 2x collision checks/cycle; revert this FIRST if nav2_container gets unstable.
+      # OLD: simulation_time_step: 0.1
+      # REVERTED 2026-08-25 to 0.1. The finer step only mattered because the quantisation
+      # jumps scale with speed, and it doubles collision checks on a container that already
+      # segfaults.
+      # OLD: simulation_time_step: 0.05
+      simulation_time_step: 0.1
+      # tolerate a few boundary points already grazing the footprint (robot touching a wall)
+      # so the RL controller's reverse escape is not zeroed while in contact
+      # Lidar points inside the projected footprint that are IGNORED -- the stop fires only
+      # ABOVE this, so 8 meant 9+ points were needed. Against the A1's 3 beams per degree:
+      #     chair leg (30 mm) at 1.0 m  ->  5.2 points   ignored at 8, caught at 3
+      #     table leg (50 mm) at 1.0 m  ->  8.6 points   ignored at 8, caught at 3
+      # 8 came from the Ackermann build, where graze points kept vetoing the RL controller's
+      # own reverse escape. That controller is not in this stack.
+      # OLD: max_points: 8
+      max_points: 3
+      visualize: True
+      polygon_pub_topic: "polygon_approach"
+      # v1 safety net, re-enabled: with the controller's e-stop now correctly oriented
+      # (lidar_angle_offset fix) the robot stops 0.30 m short, so the freeze-on-contact
+      # trap (points inside footprint -> all cmd_vel zeroed) should no longer be reachable.
+      # (2026-08-03: briefly disabled to test whether this polygon caused the
+      # nav2_container segfault -- it did NOT, the crash persisted with it off, so it's
+      # restored here.)
+      enabled: True
+    observation_sources: ["scan"]
+    scan:
+      type: "scan"
+      # 2026-10-19: /scan_raw -> /scan. The collision monitor was the node actually freezing
+      # the robot: it read the UNFILTERED scan, so it saw the arm 13 cm away, computed an
+      # immediate collision and zeroed every command for ever. The filtered topic has the
+      # robot's own body removed, so the monitor now reacts to the room instead of to the robot.
+      # OLD: topic: "/scan_raw"
+      topic: "/scan"
+      enabled: True

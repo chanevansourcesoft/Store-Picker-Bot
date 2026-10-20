@@ -1,0 +1,49 @@
+# Laser filter chain for the MECANUM robot: /scan_raw -> /scan
+#
+# Separate from peripherals/config/lidar_filters_config_a1.yaml so the Ackermann robot keeps
+# its own. The difference is filter2 below.
+#
+# 2026-10-19: a robotic arm was mounted on the top plate directly behind the LiDAR. The LiDAR
+# sees its own arm as an obstacle 13 cm away that never moves, so the collision monitor stopped
+# the robot permanently and it would not drive at all.
+#
+# MEASURED (10 scans averaged, stationary): persistent returns at robot bearings -170.5 to
+# -150.8 deg, 0.127 to 0.149 m. Converted into base_footprint (the LiDAR sits 80 mm forward of
+# centre) those land at x -0.045..-0.050, y -0.021..-0.073 -- inside the chassis, which is
+# +-0.125 x and +-0.1115 y. So they are the robot itself, not the room.
+# The other close bands measured at the same time (-143..-99 deg at 0.27-0.30 m, and -37 deg at
+# 0.25 m) convert to y -0.16, -0.30 and -0.15: OUTSIDE the robot, i.e. real objects on the
+# desk. Those must keep being seen, which is why this is a box around the robot and not an
+# angular sector cut.
+#
+# A box filter is the right tool rather than blanking a bearing range: it removes only what is
+# physically inside the robot's own outline, so a wall 2 m behind is still reported on exactly
+# the same bearings the arm occupies. Cutting the sector would have blinded the robot backwards.
+/**:
+  ros__parameters:
+    filter1:
+      name: range_filter
+      type: laser_filters/LaserScanRangeFilter
+      params:
+        use_message_range_limits: false
+        lower_threshold: 0.15     # the A1 cannot measure closer than this
+        upper_threshold: 12.0
+        lower_replacement_value: -.inf
+        upper_replacement_value: .inf
+
+    filter2:
+      name: self_filter
+      type: laser_filters/LaserScanBoxFilter
+      params:
+        box_frame: base_footprint
+        # Sized to the robot's own outline plus about 2 cm: chassis is +-0.125 x, +-0.1115 y
+        # including the wheels. Deliberately NOT larger -- every centimetre beyond the robot is
+        # a centimetre of real obstacle being erased right where it matters most.
+        min_x: -0.15
+        max_x: 0.15
+        min_y: -0.13
+        max_y: 0.13
+        # 2D scan, so z is wide open; the box only has to bound x and y.
+        min_z: -1.0
+        max_z: 1.0
+        invert: false           # false = remove what is INSIDE the box

@@ -1,0 +1,119 @@
+# DWB local planner, configured HOLONOMIC for the mecanum base.
+#
+# Derived from navigation/config/nav2_controller_dwb.yaml. That file is car-adjacent in two ways
+# that silently remove sideways motion, and both are fixed here:
+#
+#   max_vel_y: 0.0              -> no strafe trajectory is ever sampled
+#   min_y_velocity_threshold: 0.5 -> ANY |vy| below 0.5 m/s is treated as zero and discarded.
+#                                  0.5 m/s is faster than this robot's strafe limit, so every
+#                                  strafe the planner produced was thrown away before reaching
+#                                  the motors. This one is nasty: nothing errors, strafe simply
+#                                  never happens, and it looks like a hardware fault.
+#
+# Why DWB rather than TEB or MPPI:
+#   TEB (nav2_controller_teb.yaml) is explicitly car-like -- min_turning_radius 0.7, wheelbase
+#   0.213, allow_init_with_backwards_motion false. It cannot use a holonomic degree of freedom and
+#   its own config comments record it freezing when it found no feasible trajectory.
+#   MPPI is the better holonomic controller and worth moving to later, but it costs considerably
+#   more CPU than DWB on this Jetson. Start here, measure, then decide.
+
+controller_server:
+  ros__parameters:
+    use_sim_time: False
+    controller_frequency: 10.0
+
+    # All three thresholds at 0.001. These are "treat anything smaller as zero" cutoffs, and for a
+    # holonomic robot y must be as permissive as x -- see the header.
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.001
+    min_theta_velocity_threshold: 0.001
+
+    failure_tolerance: 0.3
+    progress_checker_plugin: "progress_checker"
+    goal_checker_plugins: ["general_goal_checker"]
+    controller_plugins: ["FollowPath"]
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.5
+      movement_time_allowance: 10.0
+
+    general_goal_checker:
+      stateful: True
+      plugin: "nav2_controller::SimpleGoalChecker"
+      xy_goal_tolerance: 0.15
+      # Tightened from the Ackermann 0.25. That was loose on purpose -- the comments in the RL
+      # configs say "Ackermann cannot turn in place -> keep yaw tolerance loose (no final
+      # spin-to-heading)". This robot CAN turn in place, so hitting the commanded heading is
+      # nearly free and worth asking for.
+      yaw_goal_tolerance: 0.15
+
+    FollowPath:
+      plugin: "dwb_core::DWBLocalPlanner"
+      debug_trajectory_details: True
+
+      # --- velocity limits ---
+      min_vel_x: -0.26          # reverse allowed; no reason to forbid it on a holonomic base
+      max_vel_x: 0.4
+      min_vel_y: -0.3           # MECANUM: strafe. Was 0.0.
+      max_vel_y: 0.3            # MECANUM: strafe. Was 0.0.
+      max_vel_theta: 1.5
+      min_speed_xy: 0.0
+      # Must be at least sqrt(max_vel_x^2 + max_vel_y^2) = 0.5, or diagonal motion gets clipped
+      # into an arc: the planner asks for forward+sideways together and the cap trims it unevenly.
+      max_speed_xy: 0.55
+      min_speed_theta: 0.0
+
+      acc_lim_x: 2.5
+      acc_lim_y: 2.5            # MECANUM: was 0.0
+      acc_lim_theta: 3.2
+      decel_lim_x: -2.5
+      decel_lim_y: -2.5         # MECANUM: was 0.0
+      decel_lim_theta: -3.2
+
+      # --- trajectory sampling ---
+      # vy_samples raised 5 -> 10: with y now a real degree of freedom the sample grid has to
+      # cover it properly, otherwise the planner can only pick coarse strafe speeds and the
+      # motion comes out steppy. Total trajectories is vx*vy*vtheta samples, so this is also the
+      # main CPU knob -- drop vtheta_samples to 15 first if the controller misses its 10 Hz.
+      vx_samples: 20
+      vy_samples: 10
+      vtheta_samples: 20
+      sim_time: 1.7
+      linear_granularity: 0.05
+      angular_granularity: 0.025
+      transform_tolerance: 0.2
+      xy_goal_tolerance: 0.15
+      trans_stopped_velocity: 0.1
+      short_circuit_trajectory_evaluation: True
+      stateful: True
+
+      critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign",
+                "PathDist", "GoalDist"]
+
+      BaseObstacle.scale: 0.02
+
+      # PathAlign and GoalAlign reward pointing the robot's NOSE along the path. On a
+      # differential or Ackermann base that is essential, because the nose direction is the only
+      # direction it can travel. Here it is optional: the robot can follow a path sideways or
+      # diagonally while facing anywhere. Left ON but at roughly half the Ackermann weight, so it
+      # still prefers to face where it is going -- which keeps the forward-facing lidar pointed at
+      # the space it is driving into, a real safety benefit -- without overriding a strafe that is
+      # the sensible move.
+      # Set both to 0.0 for maximum use of strafing; raise toward 32/24 to make it behave more
+      # like a conventional base.
+      # OLD (Ackermann): PathAlign.scale 32.0, GoalAlign.scale 24.0
+      PathAlign.scale: 16.0
+      PathAlign.forward_point_distance: 0.1
+      GoalAlign.scale: 12.0
+      GoalAlign.forward_point_distance: 0.1
+
+      PathDist.scale: 32.0
+      GoalDist.scale: 24.0
+      RotateToGoal.scale: 32.0
+      RotateToGoal.slowing_factor: 5.0
+      RotateToGoal.lookahead_time: -1.0
+
+controller_server_rclcpp_node:
+  ros__parameters:
+    use_sim_time: False

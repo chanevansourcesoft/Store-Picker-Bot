@@ -1,0 +1,89 @@
+# Physical constants for the 4WD mecanum robot. ONE place -- every script and launch file in
+# mecanum_nav reads these, so a corrected measurement never has to be chased through code.
+#
+# Values below are taken from simulations/jetacker_description/urdf/mecanum_robot.urdf:
+#   wheelbase      = 2 x 0.0875  (wheel joint x offsets)
+#   track_width    = 2 x 0.0965  (wheel joint y offsets)
+#   wheel_diameter = 2 x 0.040   (roller ring at 0.034 + roller radius 0.006; also why
+#                                 base_footprint -> base_link is 0.040)
+#
+# These are NOT the Ackermann numbers. driver/controller/controller/ackermann.py uses
+# wheelbase 0.213, track 0.222, wheel_diameter 0.101, and the mecanum.py in the working tree
+# still carries 0.216 / 0.195 / 0.097 copied from it. Using those here inflates the rotation
+# term by ~12% and under-converts m/s to rps by ~21%, so the robot drives slower than
+# commanded and over-rotates -- and odometry calibration then chases a fault that is really
+# just arithmetic.
+#
+# MEASURE AND CORRECT if the as-built robot differs: wheelbase and track centre-to-centre
+# between wheel contact patches, wheel_diameter across the ROLLERS (the outer envelope the
+# robot actually rolls on), not across the hub.
+
+# Keyed on /** (any node name) rather than 'mecanum_base:'. ROS matches parameter YAML by
+# node name, so a name-keyed block silently applies NOTHING if the node is ever renamed or
+# namespaced -- and the node then runs on its in-code defaults with no warning. That bit
+# once already: a test run under a different name fell back to invert_right -1.0 and the
+# robot drove in a circle. Every other config in this workspace (ekf.yaml, slam.yaml) uses
+# /** for the same reason.
+/**:
+  ros__parameters:
+    wheelbase: 0.175          # m, front axle to rear axle
+    track_width: 0.193        # m, left wheel to right wheel
+    wheel_diameter: 0.080     # m, over the rollers
+
+    # Motor id -> wheel. MEASURED on this robot with scripts/check_motor_mapping.py
+    # (2026-10-08), not assumed:
+    #     id 1 -> rear-right      id 2 -> rear-left
+    #     id 3 -> front-right     id 4 -> front-left
+    # Note ids 1 and 4 are DIAGONALLY swapped relative to the obvious 1=FL,2=RL,3=FR,4=RR
+    # guess. Getting this wrong does not merely mirror the motion: the kinematics applies a
+    # different formula to each corner, so a swapped diagonal turns a commanded strafe into a
+    # rotation. All four wheels do turn, so this robot is genuinely 4WD and can strafe.
+    id_front_left: 4
+    id_rear_left: 2
+    id_front_right: 3
+    id_rear_right: 1
+
+    # PER-WHEEL inversion. DERIVED FROM ROBOT BEHAVIOUR (2026-10-09), which is more reliable
+    # than eyeballing a wheel: on a mecanum wheel the rollers spin visibly while the hub turns,
+    # so "which way is the wheel going" is genuinely easy to misread. Robot-level motion is not.
+    #
+    # Observed with all four set to +1.0:
+    #     key d  (sends FL+ RL- FR- RR+)  ->  robot drove straight FORWARD
+    #     key a  (sends FL- RL+ FR+ RR-)  ->  robot drove straight BACK
+    #     key w  (sends FL+ RL+ FR+ RR+)  ->  robot moved sideways / scrubbed
+    #     key q                            ->  spun
+    #
+    # For "FL+ RL- FR- RR+" to be pure forward motion, the two motors given a NEGATIVE command
+    # must be the ones that drive forward when commanded negative. So rear-left and front-right
+    # are wired with reversed polarity, and those two are a DIAGONAL -- which is why the old
+    # invert_left/invert_right pair could not express it and why every key did the wrong thing.
+    #
+    # If the robot drives backward on w after this, flip all four signs at once: that is the one
+    # remaining global ambiguity and it does not affect strafe or rotation.
+    invert_front_left: 1.0
+    invert_rear_left: -1.0
+    invert_front_right: -1.0
+    invert_rear_right: 1.0
+
+    # Command limits applied in the base node, before the kinematics. The board itself has no
+    # limiter, so this is the only thing standing between a bad command and a wall.
+    max_linear_x: 0.5         # m/s forward/back
+    max_linear_y: 0.4         # m/s strafe -- lower than x on purpose, see below
+    max_angular_z: 2.0        # rad/s
+
+    # Move along ONE axis at a time: drive, or strafe, or turn -- never a blend.
+    # Nav2's controller always emits a mixed twist, which a holonomic base executes as a curve
+    # in an arbitrary direction. With this true, only the largest component is executed, so the
+    # robot travels in straight segments and switches axis between them.
+    # Default ON because this is how the robot is wanted: straight segments, one axis at a
+    # time. Turn it off for a run with  axis_lock:=false  if you want blended holonomic motion.
+    axis_lock: true
+    # Margin another axis must beat the running one by before the robot switches. Too low and
+    # the two largest components swap every cycle near the crossover and the robot judders;
+    # too high and it overshoots a turn before giving up the straight.
+    axis_lock_hysteresis: 1.4
+
+    # Stop the wheels if no command arrives for this long. Without it the board LATCHES the last
+    # speed forever: kill a teleop mid-drive and the robot keeps going with nothing left running
+    # to stop it. This is the single most important safety line in the file.
+    cmd_vel_timeout: 0.5      # s

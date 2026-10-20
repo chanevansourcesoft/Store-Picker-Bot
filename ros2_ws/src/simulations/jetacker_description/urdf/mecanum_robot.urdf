@@ -1,0 +1,2870 @@
+<?xml version="1.0"?>
+<!--
+  4WD mecanum robot, as built: stock chassis + wooden electronics deck +
+  raised acrylic top plate + RPLidar A1 at the front of the top plate.
+
+  Frames (REP-103: x forward, y left, z up). "Front" = the LiDAR end.
+    base_footprint : on the ground under the chassis centre
+    base_link      : chassis centre at wheel-axle height (40 mm above ground)
+    *_motor_link   : gear motor + encoder behind each wheel (gearbox output face)
+    jetson_link    : centre of the Jetson board, on the wooden deck
+    battery_link   : battery pack under the deck (assumed)
+    camera_link / camera_optical_frame : front camera (assumed placement)
+    imu_link       : IMU frame on the deck
+    arm_mount_link : top-plate mounting frame for a future arm
+    lidar_link     : LiDAR scan centre (scan plane), 151 mm above ground
+    *_wheel_link   : wheel hub; *_roller_N_link : the 10 passive rollers on each wheel
+
+  Heights above ground:
+    bottom plate 17-20 mm | wooden deck 63.5-66.5 mm | top plate 103-106 mm
+-->
+<robot name="mecanum_robot">
+
+  <material name="black"><color rgba="0.05 0.05 0.05 1.0"/></material>
+  <material name="dark_grey"><color rgba="0.20 0.20 0.20 1.0"/></material>
+  <material name="silver"><color rgba="0.75 0.75 0.75 1.0"/></material>
+  <material name="wood"><color rgba="0.76 0.60 0.42 1.0"/></material>
+  <material name="jetson_blue"><color rgba="0.10 0.45 0.65 1.0"/></material>
+
+  <!-- ===================== Base ===================== -->
+  <link name="base_footprint"/>
+
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 0.040" rpy="0 0 0"/>
+  </joint>
+
+  <link name="base_link">
+    <!-- Acrylic top plate 250 x 150 x 3 mm, raised on standoffs -->
+    <visual>
+      <origin xyz="0 0 0.0645" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.250 0.150 0.003"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <!-- Wooden electronics deck 210 x 140 x 3 mm -->
+    <visual>
+      <origin xyz="0 0 0.025" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.210 0.140 0.003"/>
+      </geometry>
+      <material name="wood"/>
+    </visual>
+    <!-- Bottom chassis plate 200 x 130 x 3 mm -->
+    <visual>
+      <origin xyz="0 0 -0.0215" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.200 0.130 0.003"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <!-- Standoffs between deck and top plate -->
+    <visual>
+      <origin xyz="0.095 0.060 0.04475" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.003" length="0.0365"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="0.095 -0.060 0.04475" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.003" length="0.0365"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.095 0.060 0.04475" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.003" length="0.0365"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <visual>
+      <origin xyz="-0.095 -0.060 0.04475" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.003" length="0.0365"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+
+    <!-- One box from the bottom plate to the top plate -->
+    <collision>
+      <origin xyz="0 0 0.0215" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.250 0.150 0.089"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <origin xyz="0 0 0.015" rpy="0 0 0"/>
+      <mass value="0.75"/>
+      <inertia ixx="0.001901" ixy="0" ixz="0"
+               iyy="0.004401" iyz="0"
+               izz="0.005313"/>
+    </inertial>
+  </link>
+
+  <!-- ===================== Drive motors ===================== -->
+  <!-- 37 mm DC gear motors with hall quadrature encoders (JGB37-520 class), 0.15 kg each.
+       Frame origin = centre of the gearbox output face; local +y points along the
+       shaft toward the wheel (right-side motors are yawed 180 deg). -->
+
+  <link name="front_left_motor_link">
+    <!-- Output shaft -->
+    <visual>
+      <origin xyz="0 0.01525 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.003" length="0.0305"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    <!-- Gearbox -->
+    <visual>
+      <origin xyz="0 -0.011 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.0185" length="0.022"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    <!-- Motor body -->
+    <visual>
+      <origin xyz="0 -0.037 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.0165" length="0.030"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    <!-- Encoder board -->
+    <visual>
+      <origin xyz="0 -0.056 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.0165" length="0.008"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 -0.030 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.0185" length="0.060"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 -0.030 0" rpy="0 0 0"/>
+      <mass value="0.15"/>
+      <inertia ixx="0.0000578" ixy="0" ixz="0"
+               iyy="0.0000257" iyz="0"
+               izz="0.0000578"/>
+    </inertial>
+  </link>
+
+  <joint name="front_left_motor_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="front_left_motor_link"/>
+    <origin xyz="0.0875 0.066 0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="front_right_motor_link">
+    <!-- Output shaft -->
+    <visual>
+      <origin xyz="0 0.01525 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.003" length="0.0305"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    <!-- Gearbox -->
+    <visual>
+      <origin xyz="0 -0.011 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.0185" length="0.022"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    <!-- Motor body -->
+    <visual>
+      <origin xyz="0 -0.037 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.0165" length="0.030"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    <!-- Encoder board -->
+    <visual>
+      <origin xyz="0 -0.056 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.0165" length="0.008"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 -0.030 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.0185" length="0.060"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 -0.030 0" rpy="0 0 0"/>
+      <mass value="0.15"/>
+      <inertia ixx="0.0000578" ixy="0" ixz="0"
+               iyy="0.0000257" iyz="0"
+               izz="0.0000578"/>
+    </inertial>
+  </link>
+
+  <joint name="front_right_motor_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="front_right_motor_link"/>
+    <origin xyz="0.0875 -0.066 0" rpy="0 0 3.14159"/>
+  </joint>
+
+  <link name="rear_left_motor_link">
+    <!-- Output shaft -->
+    <visual>
+      <origin xyz="0 0.01525 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.003" length="0.0305"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    <!-- Gearbox -->
+    <visual>
+      <origin xyz="0 -0.011 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.0185" length="0.022"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    <!-- Motor body -->
+    <visual>
+      <origin xyz="0 -0.037 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.0165" length="0.030"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    <!-- Encoder board -->
+    <visual>
+      <origin xyz="0 -0.056 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.0165" length="0.008"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 -0.030 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.0185" length="0.060"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 -0.030 0" rpy="0 0 0"/>
+      <mass value="0.15"/>
+      <inertia ixx="0.0000578" ixy="0" ixz="0"
+               iyy="0.0000257" iyz="0"
+               izz="0.0000578"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_left_motor_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="rear_left_motor_link"/>
+    <origin xyz="-0.0875 0.066 0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="rear_right_motor_link">
+    <!-- Output shaft -->
+    <visual>
+      <origin xyz="0 0.01525 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.003" length="0.0305"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    <!-- Gearbox -->
+    <visual>
+      <origin xyz="0 -0.011 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.0185" length="0.022"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    <!-- Motor body -->
+    <visual>
+      <origin xyz="0 -0.037 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.0165" length="0.030"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    <!-- Encoder board -->
+    <visual>
+      <origin xyz="0 -0.056 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.0165" length="0.008"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 -0.030 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.0185" length="0.060"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 -0.030 0" rpy="0 0 0"/>
+      <mass value="0.15"/>
+      <inertia ixx="0.0000578" ixy="0" ixz="0"
+               iyy="0.0000257" iyz="0"
+               izz="0.0000578"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_right_motor_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="rear_right_motor_link"/>
+    <origin xyz="-0.0875 -0.066 0" rpy="0 0 3.14159"/>
+  </joint>
+
+  <!-- ===================== Mecanum wheels ===================== -->
+  <!-- 80 mm wheels: hub + 10 free-spinning rollers at 45 deg to the axle.
+       Wheelbase 175 mm, track 193 mm.
+       Handedness: seen from above, the top rollers form an X
+       (front_left / rear_right = +45 deg, front_right / rear_left = -45 deg).
+       Inverse kinematics for this layout (r = 0.040, k = 0.0875 + 0.0965 = 0.184):
+         front_left  = (vx - vy - k*wz) / r
+         front_right = (vx + vy + k*wz) / r
+         rear_left   = (vx + vy - k*wz) / r
+         rear_right  = (vx - vy + k*wz) / r
+       Only the four *_wheel_joint are driven; all *_roller_*_joint are passive.
+       Roller contact = 5 spheres on a barrel profile, so the wheel rolls on a true 40 mm radius.
+       Wheel limits assume the 12 V / ~300 rpm motor version (31.4 rad/s, 0.5 N*m): edit to match yours. -->
+
+  <!-- ========== front_left (+45 deg rollers) ========== -->
+  <link name="front_left_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.027" length="0.030"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.025" length="0.030"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <mass value="0.06"/>
+      <inertia ixx="0.0000154" ixy="0" ixz="0"
+               iyy="0.0000154" iyz="0"
+               izz="0.0000219"/>
+    </inertial>
+  </link>
+
+  <joint name="front_left_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="front_left_wheel_link"/>
+    <origin xyz="0.0875 0.0965 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="0.5" velocity="31.4"/>
+    <dynamics damping="0.01" friction="0.01"/>
+  </joint>
+
+  <link name="front_left_roller_0_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_left_roller_0_joint" type="continuous">
+    <parent link="front_left_wheel_link"/>
+    <child link="front_left_roller_0_link"/>
+    <origin xyz="0 0 0.034" rpy="0 0 0.7854"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_left_roller_1_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_left_roller_1_joint" type="continuous">
+    <parent link="front_left_wheel_link"/>
+    <child link="front_left_roller_1_link"/>
+    <origin xyz="0.01998 0 0.02751" rpy="0.47458 0.42863 0.89058"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_left_roller_2_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_left_roller_2_joint" type="continuous">
+    <parent link="front_left_wheel_link"/>
+    <child link="front_left_roller_2_link"/>
+    <origin xyz="0.03234 0 0.01051" rpy="1.14007 0.73758 1.27109"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_left_roller_3_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_left_roller_3_joint" type="continuous">
+    <parent link="front_left_wheel_link"/>
+    <child link="front_left_roller_3_link"/>
+    <origin xyz="0.03234 0 -0.01051" rpy="2.00153 0.73758 1.8705"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_left_roller_4_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_left_roller_4_joint" type="continuous">
+    <parent link="front_left_wheel_link"/>
+    <child link="front_left_roller_4_link"/>
+    <origin xyz="0.01998 0 -0.02751" rpy="2.66701 0.42863 2.25101"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_left_roller_5_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_left_roller_5_joint" type="continuous">
+    <parent link="front_left_wheel_link"/>
+    <child link="front_left_roller_5_link"/>
+    <origin xyz="0 0 -0.034" rpy="3.14159 0 2.35619"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_left_roller_6_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_left_roller_6_joint" type="continuous">
+    <parent link="front_left_wheel_link"/>
+    <child link="front_left_roller_6_link"/>
+    <origin xyz="-0.01998 0 -0.02751" rpy="-2.66701 -0.42863 2.25101"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_left_roller_7_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_left_roller_7_joint" type="continuous">
+    <parent link="front_left_wheel_link"/>
+    <child link="front_left_roller_7_link"/>
+    <origin xyz="-0.03234 0 -0.01051" rpy="-2.00153 -0.73758 1.8705"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_left_roller_8_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_left_roller_8_joint" type="continuous">
+    <parent link="front_left_wheel_link"/>
+    <child link="front_left_roller_8_link"/>
+    <origin xyz="-0.03234 0 0.01051" rpy="-1.14007 -0.73758 1.27109"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_left_roller_9_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_left_roller_9_joint" type="continuous">
+    <parent link="front_left_wheel_link"/>
+    <child link="front_left_roller_9_link"/>
+    <origin xyz="-0.01998 0 0.02751" rpy="-0.47458 -0.42863 0.89058"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <!-- ========== front_right (-45 deg rollers) ========== -->
+  <link name="front_right_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.027" length="0.030"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.025" length="0.030"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <mass value="0.06"/>
+      <inertia ixx="0.0000154" ixy="0" ixz="0"
+               iyy="0.0000154" iyz="0"
+               izz="0.0000219"/>
+    </inertial>
+  </link>
+
+  <joint name="front_right_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="front_right_wheel_link"/>
+    <origin xyz="0.0875 -0.0965 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="0.5" velocity="31.4"/>
+    <dynamics damping="0.01" friction="0.01"/>
+  </joint>
+
+  <link name="front_right_roller_0_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_right_roller_0_joint" type="continuous">
+    <parent link="front_right_wheel_link"/>
+    <child link="front_right_roller_0_link"/>
+    <origin xyz="0 0 0.034" rpy="0 0 -0.7854"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_right_roller_1_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_right_roller_1_joint" type="continuous">
+    <parent link="front_right_wheel_link"/>
+    <child link="front_right_roller_1_link"/>
+    <origin xyz="0.01998 0 0.02751" rpy="-0.47458 0.42863 -0.89058"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_right_roller_2_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_right_roller_2_joint" type="continuous">
+    <parent link="front_right_wheel_link"/>
+    <child link="front_right_roller_2_link"/>
+    <origin xyz="0.03234 0 0.01051" rpy="-1.14007 0.73758 -1.27109"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_right_roller_3_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_right_roller_3_joint" type="continuous">
+    <parent link="front_right_wheel_link"/>
+    <child link="front_right_roller_3_link"/>
+    <origin xyz="0.03234 0 -0.01051" rpy="-2.00153 0.73758 -1.8705"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_right_roller_4_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_right_roller_4_joint" type="continuous">
+    <parent link="front_right_wheel_link"/>
+    <child link="front_right_roller_4_link"/>
+    <origin xyz="0.01998 0 -0.02751" rpy="-2.66701 0.42863 -2.25101"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_right_roller_5_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_right_roller_5_joint" type="continuous">
+    <parent link="front_right_wheel_link"/>
+    <child link="front_right_roller_5_link"/>
+    <origin xyz="0 0 -0.034" rpy="-3.14159 0 -2.35619"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_right_roller_6_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_right_roller_6_joint" type="continuous">
+    <parent link="front_right_wheel_link"/>
+    <child link="front_right_roller_6_link"/>
+    <origin xyz="-0.01998 0 -0.02751" rpy="2.66701 -0.42863 -2.25101"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_right_roller_7_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_right_roller_7_joint" type="continuous">
+    <parent link="front_right_wheel_link"/>
+    <child link="front_right_roller_7_link"/>
+    <origin xyz="-0.03234 0 -0.01051" rpy="2.00153 -0.73758 -1.8705"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_right_roller_8_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_right_roller_8_joint" type="continuous">
+    <parent link="front_right_wheel_link"/>
+    <child link="front_right_roller_8_link"/>
+    <origin xyz="-0.03234 0 0.01051" rpy="1.14007 -0.73758 -1.27109"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="front_right_roller_9_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="front_right_roller_9_joint" type="continuous">
+    <parent link="front_right_wheel_link"/>
+    <child link="front_right_roller_9_link"/>
+    <origin xyz="-0.01998 0 0.02751" rpy="0.47458 -0.42863 -0.89058"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <!-- ========== rear_left (-45 deg rollers) ========== -->
+  <link name="rear_left_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.027" length="0.030"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.025" length="0.030"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <mass value="0.06"/>
+      <inertia ixx="0.0000154" ixy="0" ixz="0"
+               iyy="0.0000154" iyz="0"
+               izz="0.0000219"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_left_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="rear_left_wheel_link"/>
+    <origin xyz="-0.0875 0.0965 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="0.5" velocity="31.4"/>
+    <dynamics damping="0.01" friction="0.01"/>
+  </joint>
+
+  <link name="rear_left_roller_0_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_left_roller_0_joint" type="continuous">
+    <parent link="rear_left_wheel_link"/>
+    <child link="rear_left_roller_0_link"/>
+    <origin xyz="0 0 0.034" rpy="0 0 -0.7854"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_left_roller_1_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_left_roller_1_joint" type="continuous">
+    <parent link="rear_left_wheel_link"/>
+    <child link="rear_left_roller_1_link"/>
+    <origin xyz="0.01998 0 0.02751" rpy="-0.47458 0.42863 -0.89058"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_left_roller_2_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_left_roller_2_joint" type="continuous">
+    <parent link="rear_left_wheel_link"/>
+    <child link="rear_left_roller_2_link"/>
+    <origin xyz="0.03234 0 0.01051" rpy="-1.14007 0.73758 -1.27109"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_left_roller_3_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_left_roller_3_joint" type="continuous">
+    <parent link="rear_left_wheel_link"/>
+    <child link="rear_left_roller_3_link"/>
+    <origin xyz="0.03234 0 -0.01051" rpy="-2.00153 0.73758 -1.8705"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_left_roller_4_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_left_roller_4_joint" type="continuous">
+    <parent link="rear_left_wheel_link"/>
+    <child link="rear_left_roller_4_link"/>
+    <origin xyz="0.01998 0 -0.02751" rpy="-2.66701 0.42863 -2.25101"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_left_roller_5_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_left_roller_5_joint" type="continuous">
+    <parent link="rear_left_wheel_link"/>
+    <child link="rear_left_roller_5_link"/>
+    <origin xyz="0 0 -0.034" rpy="-3.14159 0 -2.35619"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_left_roller_6_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_left_roller_6_joint" type="continuous">
+    <parent link="rear_left_wheel_link"/>
+    <child link="rear_left_roller_6_link"/>
+    <origin xyz="-0.01998 0 -0.02751" rpy="2.66701 -0.42863 -2.25101"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_left_roller_7_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_left_roller_7_joint" type="continuous">
+    <parent link="rear_left_wheel_link"/>
+    <child link="rear_left_roller_7_link"/>
+    <origin xyz="-0.03234 0 -0.01051" rpy="2.00153 -0.73758 -1.8705"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_left_roller_8_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_left_roller_8_joint" type="continuous">
+    <parent link="rear_left_wheel_link"/>
+    <child link="rear_left_roller_8_link"/>
+    <origin xyz="-0.03234 0 0.01051" rpy="1.14007 -0.73758 -1.27109"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_left_roller_9_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_left_roller_9_joint" type="continuous">
+    <parent link="rear_left_wheel_link"/>
+    <child link="rear_left_roller_9_link"/>
+    <origin xyz="-0.01998 0 0.02751" rpy="0.47458 -0.42863 -0.89058"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <!-- ========== rear_right (+45 deg rollers) ========== -->
+  <link name="rear_right_wheel_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.027" length="0.030"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.025" length="0.030"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <mass value="0.06"/>
+      <inertia ixx="0.0000154" ixy="0" ixz="0"
+               iyy="0.0000154" iyz="0"
+               izz="0.0000219"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_right_wheel_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="rear_right_wheel_link"/>
+    <origin xyz="-0.0875 -0.0965 0" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="0.5" velocity="31.4"/>
+    <dynamics damping="0.01" friction="0.01"/>
+  </joint>
+
+  <link name="rear_right_roller_0_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_right_roller_0_joint" type="continuous">
+    <parent link="rear_right_wheel_link"/>
+    <child link="rear_right_roller_0_link"/>
+    <origin xyz="0 0 0.034" rpy="0 0 0.7854"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_right_roller_1_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_right_roller_1_joint" type="continuous">
+    <parent link="rear_right_wheel_link"/>
+    <child link="rear_right_roller_1_link"/>
+    <origin xyz="0.01998 0 0.02751" rpy="0.47458 0.42863 0.89058"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_right_roller_2_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_right_roller_2_joint" type="continuous">
+    <parent link="rear_right_wheel_link"/>
+    <child link="rear_right_roller_2_link"/>
+    <origin xyz="0.03234 0 0.01051" rpy="1.14007 0.73758 1.27109"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_right_roller_3_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_right_roller_3_joint" type="continuous">
+    <parent link="rear_right_wheel_link"/>
+    <child link="rear_right_roller_3_link"/>
+    <origin xyz="0.03234 0 -0.01051" rpy="2.00153 0.73758 1.8705"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_right_roller_4_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_right_roller_4_joint" type="continuous">
+    <parent link="rear_right_wheel_link"/>
+    <child link="rear_right_roller_4_link"/>
+    <origin xyz="0.01998 0 -0.02751" rpy="2.66701 0.42863 2.25101"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_right_roller_5_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_right_roller_5_joint" type="continuous">
+    <parent link="rear_right_wheel_link"/>
+    <child link="rear_right_roller_5_link"/>
+    <origin xyz="0 0 -0.034" rpy="3.14159 0 2.35619"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_right_roller_6_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_right_roller_6_joint" type="continuous">
+    <parent link="rear_right_wheel_link"/>
+    <child link="rear_right_roller_6_link"/>
+    <origin xyz="-0.01998 0 -0.02751" rpy="-2.66701 -0.42863 2.25101"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_right_roller_7_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_right_roller_7_joint" type="continuous">
+    <parent link="rear_right_wheel_link"/>
+    <child link="rear_right_roller_7_link"/>
+    <origin xyz="-0.03234 0 -0.01051" rpy="-2.00153 -0.73758 1.8705"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_right_roller_8_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_right_roller_8_joint" type="continuous">
+    <parent link="rear_right_wheel_link"/>
+    <child link="rear_right_roller_8_link"/>
+    <origin xyz="-0.03234 0 0.01051" rpy="-1.14007 -0.73758 1.27109"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <link name="rear_right_roller_9_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.036"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="-0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00600"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.009 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00541"/>
+      </geometry>
+    </collision>
+    <collision>
+      <origin xyz="0.018 0 0" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.00370"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 1.5708 0"/>
+      <mass value="0.004"/>
+      <inertia ixx="0.000000569" ixy="0" ixz="0"
+               iyy="0.000000569" iyz="0"
+               izz="0.000000072"/>
+    </inertial>
+  </link>
+
+  <joint name="rear_right_roller_9_joint" type="continuous">
+    <parent link="rear_right_wheel_link"/>
+    <child link="rear_right_roller_9_link"/>
+    <origin xyz="-0.01998 0 0.02751" rpy="-0.47458 -0.42863 0.89058"/>
+    <axis xyz="1 0 0"/>
+    <dynamics damping="0.0005" friction="0.0"/>
+  </joint>
+
+  <!-- ===================== Jetson ===================== -->
+  <!-- Jetson developer kit (100 x 80 x 29 mm, 0.25 kg) on the wooden deck, rear half.
+       Frame origin = centre of the board; deck surface is z = 0.0265 in base_link. -->
+  <link name="jetson_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.100 0.080 0.029"/>
+      </geometry>
+      <material name="jetson_blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.100 0.080 0.029"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.25"/>
+      <inertia ixx="0.000151" ixy="0" ixz="0"
+               iyy="0.000226" iyz="0"
+               izz="0.000342"/>
+    </inertial>
+  </link>
+
+  <joint name="jetson_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="jetson_link"/>
+    <origin xyz="-0.045 0 0.041" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ===================== LiDAR (RPLidar A1) ===================== -->
+  <!-- Frame origin = scan centre. Unit is 55 mm tall; scan plane 45 mm above the top plate. -->
+  <link name="lidar_link">
+    <!-- Base with belt motor -->
+    <visual>
+      <origin xyz="0 0 -0.0325" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.070 0.097 0.025"/>
+      </geometry>
+      <material name="black"/>
+    </visual>
+    <!-- Rotating scanner head -->
+    <visual>
+      <origin xyz="0 0 -0.005" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.035" length="0.030"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.0175" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.050" length="0.055"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 -0.0175" rpy="0 0 0"/>
+      <mass value="0.17"/>
+      <inertia ixx="0.000149" ixy="0" ixz="0"
+               iyy="0.000149" iyz="0"
+               izz="0.000213"/>
+    </inertial>
+  </link>
+
+  <!-- 80 mm ahead of centre, on the centreline; top plate surface is z = 0.066 in base_link.
+       Set the yaw (rpy) here to match how the A1's zero-angle is pointing on your robot. -->
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="lidar_link"/>
+    <origin xyz="0.080 0 0.111" rpy="0 0 0"/>
+  </joint>
+
+  <!-- The scan frame, NOT lidar_link.
+       The RPLidar A1 driver stamps every LaserScan with frame_id "lidar_frame"
+       (/home/ubuntu/.sllidar_params.yaml, owned by lidar_watchdog.service). Without this link
+       in the TF tree slam_toolbox, both costmaps and the collision monitor silently drop every
+       scan, so it must exist and must keep this exact name.
+
+       The yaw below is the A1's zero-angle direction relative to the robot. pi means the
+       sensor's 0 deg points BACKWARDS, which is how it was mounted on the Ackermann build
+       (see jetacker_description/urdf/lidar_a1.urdf.xacro).
+
+       VERIFIED ON THIS ROBOT 2026-10-09 with
+       mecanum_nav/scripts/check_lidar_orientation.py in differential mode: an obstacle placed
+       in front of the robot appeared in the FRONT sector under this pi value (0.25 m, bearing
+       -3 deg) and in the REAR sector under rpy="0 0 0". So pi is correct and this must not be
+       "corrected" to zero.
+
+       If the LiDAR is ever remounted, re-run that check. A 180 deg error still builds a map
+       that looks perfectly plausible while being mirrored, and it makes the robot swerve away
+       from phantom obstacles into real ones, with nothing warning you. -->
+  <link name="lidar_frame"/>
+
+  <joint name="lidar_frame_joint" type="fixed">
+    <parent link="lidar_link"/>
+    <child link="lidar_frame"/>
+    <origin xyz="0 0 0" rpy="0 0 3.14159265358979"/>
+  </joint>
+
+  <!-- ===================== Battery ===================== -->
+  <!-- ASSUMED: 3S LiPo-size pack (105 x 35 x 25 mm, 0.2 kg) between the motors, under the deck. -->
+  <link name="battery_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.105 0.035 0.025"/>
+      </geometry>
+      <material name="dark_grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.105 0.035 0.025"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.2"/>
+      <inertia ixx="0.0000308" ixy="0" ixz="0"
+               iyy="0.0001942" iyz="0"
+               izz="0.0002042"/>
+    </inertial>
+  </link>
+
+  <joint name="battery_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="battery_link"/>
+    <origin xyz="0 0 -0.005" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ===================== Camera ===================== -->
+  <!-- ASSUMED: forward-facing depth camera (90 x 25 x 25 mm) on the front edge of the deck,
+       below the top plate. camera_link: x forward, y left, z up. -->
+  <link name="camera_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.025 0.090 0.025"/>
+      </geometry>
+      <material name="silver"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.025 0.090 0.025"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.07"/>
+      <inertia ixx="0.0000509" ixy="0" ixz="0"
+               iyy="0.0000073" iyz="0"
+               izz="0.0000509"/>
+    </inertial>
+  </link>
+
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera_link"/>
+    <origin xyz="0.1175 0 0.045" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Optical convention: z forward, x right, y down. Attach the simulated camera here. -->
+  <link name="camera_optical_frame"/>
+
+  <joint name="camera_optical_joint" type="fixed">
+    <parent link="camera_link"/>
+    <child link="camera_optical_frame"/>
+    <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+  </joint>
+
+  <!-- ===================== IMU ===================== -->
+  <!-- Frame only, on the deck at the chassis centre, axes aligned with base_link. -->
+  <link name="imu_link"/>
+
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="imu_link"/>
+    <origin xyz="0 0 0.0265" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ===================== Arm mount ===================== -->
+  <!-- Frame only: top-plate surface behind the LiDAR. Attach the arm base here later. -->
+  <link name="arm_mount_link"/>
+
+  <joint name="arm_mount_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="arm_mount_link"/>
+    <origin xyz="-0.045 0 0.066" rpy="0 0 0"/>
+  </joint>
+
+</robot>

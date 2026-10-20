@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>mecanum_nav</name>
+  <version>0.0.0</version>
+  <description>
+    SLAM and Nav2 bringup for the 4WD mecanum-wheel robot.
+
+    This package exists so the Ackermann (JetAcker) configuration stays untouched: nothing here
+    modifies the slam/, navigation/ or driver/ packages, it only provides mecanum-specific launch
+    files and parameters that reuse the same nodes. Run the Ackermann stack from slam/navigation
+    as before; run the mecanum stack from here.
+  </description>
+  <maintainer email="ubuntu@todo.todo">ubuntu</maintainer>
+  <license>TODO: License declaration</license>
+
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>joint_state_publisher</exec_depend>
+  <exec_depend>jetacker_description</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>rviz2</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

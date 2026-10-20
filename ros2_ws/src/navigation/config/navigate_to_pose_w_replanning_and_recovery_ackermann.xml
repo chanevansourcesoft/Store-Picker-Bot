@@ -1,0 +1,98 @@
+<!--
+  Copy of nav2_bt_navigator/navigate_to_pose_w_replanning_and_recovery.xml adapted for a
+  forward-only Ackermann base: Spin removed (a car-like robot cannot rotate in place, so the
+  default Spin recovery just times out), BackUp promoted to the first motion recovery so the
+  robot reverses out of dead-ends, then costmaps are cleared and the planner replans at 1 Hz.
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <!-- 2026-07-28: raised 3 -> 60. "Fail fast" was the right call only while a wedged robot
+         was unrecoverable; with the Escape planner below it can now plan its way out, so
+         giving up after ~40 s just aborts a goal that would have succeeded. The requirement
+         is: never abort, keep trying, and if the goal itself is blocked get as close as the
+         planner's 1.0 m tolerance allows. Lower this again if you ever want a genuine
+         "unreachable goal" report instead of indefinite retrying. -->
+    <RecoveryNode number_of_retries="60" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithReplanning">
+        <!-- 2026-08-20: 1.0 -> 2.0 Hz. Half the replan latency when an unmapped obstacle
+             appears; see the global_costmap update_frequency comment in nav2_params.yaml for
+             the full latency budget. planner_server's expected_planner_frequency is already
+             2.0, so this matches what that was configured for. -->
+        <RateController hz="2.0">
+          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+            <!-- Keep the current path while the goal is unchanged, the path is still
+                 collision-free, AND it isn't stale -- replan otherwise. Unconditional 1 Hz
+                 replanning regenerated the path from the robot's latest pose every second,
+                 shifting the resampled waypoints under the RL controller for no reason, so
+                 that was removed. But IsPathValid alone only checks "is this path still
+                 collision-free" -- it says nothing about whether the ROBOT is still
+                 sensibly positioned relative to it. If the robot ends up off-path (wrong
+                 turn, oscillation) while the path itself stays obstacle-free, IsPathValid
+                 never fails and the stale path gets reused forever, so the robot never
+                 gets a fresh plan from where it actually is. PathExpiringTimer bounds this:
+                 forces a real replan (from the robot's current pose) after 8 s even if
+                 nothing ever became "invalid". Resets automatically whenever the path
+                 actually changes, so a robot making good progress never notices it. -->
+            <Fallback name="KeepPathOrReplan">
+              <ReactiveSequence name="PathStillGood">
+                <Inverter>
+                  <GlobalUpdatedGoal/>
+                </Inverter>
+                <IsPathValid path="{path}"/>
+                <Inverter>
+                  <PathExpiringTimer seconds="8.0" path="{path}"/>
+                </Inverter>
+              </ReactiveSequence>
+              <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+              <!-- Hybrid-A* refuses to plan at all when the robot's own pose overlaps lethal
+                   cells ("Starting point in lethal space"), which is unrecoverable on its own:
+                   the cells come from the static map, so no amount of costmap clearing or
+                   BackUp fixes it, and every later goal fails to plan too (observed
+                   2026-07-28 -- navigation was dead until relaunch). NavFn clears the robot
+                   cell before planning, so it still returns a path out of the wedge. Only
+                   reached when GridBased has already failed; the next replan goes back to
+                   GridBased once the robot is clear. See planner_server.Escape in
+                   nav2_params.yaml. -->
+              <ComputePathToPose goal="{goal}" path="{path}" planner_id="Escape"/>
+            </Fallback>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+          </RecoveryNode>
+        </RateController>
+        <RecoveryNode number_of_retries="1" name="FollowPath">
+          <!-- 2026-08-24: the TEB fallback that used to sit here was REMOVED. It was a freeze
+               trap: after 2 RL failures the Fallback switched to FollowPathTEB permanently,
+               and TEB cannot handle the exact situation that triggered the switch. Its config
+               has allow_init_with_backwards_motion: False (so it can never reverse away from a
+               static obstacle) and min_turning_radius: 0.7 m against this robot's real 0.31 m,
+               so with something parked 0.3 m ahead it finds no feasible trajectory at all.
+               The Fallback then stayed in the TEB branch and the robot simply stood still,
+               with the one controller that CAN reverse out never getting another turn.
+               RL now retries instead, with a local costmap clear between attempts. Each RL
+               attempt already runs its own 3 step reverse escalation internally (direction
+               chosen by rear clearance, forced flip on attempt 2, corridor aware steer), so
+               6 outer retries is a lot of genuinely different maneuvers. If they all fail the
+               outer NavigateRecovery still has BackUp plus costmap clears, 60 times.
+               FollowPathTEB stays declared in controller_plugins and can still be selected by
+               parameter, but its settings need fixing first: min_turning_radius 0.32,
+               allow_init_with_backwards_motion true, and a real footprint instead of the
+               0.05 m circle it currently claims. -->
+          <RecoveryNode number_of_retries="6" name="FollowPathRL">
+            <FollowPath path="{path}" controller_id="FollowPath"/>
+            <ClearEntireCostmap name="ClearLocalCostmap-RL" service_name="local_costmap/clear_entirely_local_costmap"/>
+          </RecoveryNode>
+          <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+        </RecoveryNode>
+      </PipelineSequence>
+      <ReactiveFallback name="RecoveryFallback">
+        <GoalUpdated/>
+        <RoundRobin name="RecoveryActions">
+          <BackUp backup_dist="0.40" backup_speed="0.08"/>
+          <Sequence name="ClearingActions">
+            <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
+            <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
+          </Sequence>
+        </RoundRobin>
+      </ReactiveFallback>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>
