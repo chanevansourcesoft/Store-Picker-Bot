@@ -231,11 +231,11 @@ Replay an episode on the follower arm (here episode 0 of one dataset):
 
 ```bash
 # With Docker (Jetson)
-docker compose run --rm policy lerobot-replay \
-  --robot.type=so100_follower --robot.port=FOLLOWER_PORT --robot.id=picker_follower \
+docker compose run --rm policy bash -c 'lerobot-replay \
+  --robot.type=so100_follower --robot.port="$FOLLOWER_PORT" --robot.id=picker_follower \
   --dataset.repo_id=local/dataset_v1_12102026_153045 \
   --dataset.root=data_collection/dataset/dataset_v1_12102026_153045 \
-  --dataset.episode=0
+  --dataset.episode=0'
 
 # Without Docker (PC)
 lerobot-replay \

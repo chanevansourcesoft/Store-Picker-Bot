@@ -54,7 +54,8 @@ FOLLOWER_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_<follower serial>-if0
 LEADER_PORT=/dev/serial/by-id/usb-1a86_USB_Single_Serial_<leader serial>-if00
 ```
 
-- **With Docker:** replace `FOLLOWER_PORT` and `LEADER_PORT` in the commands below with these paths.
+- **With Docker:** nothing to do. The commands below run inside `bash -c '...'`, so the container
+  reads `"$FOLLOWER_PORT"` and `"$LEADER_PORT"` from `.env` itself.
 - **Without Docker:** load `.env` again, then the commands below work as they are:
   ```bash
   source env.sh
@@ -68,11 +69,11 @@ Skip this if the arms have already been set up.
 
 ```bash
 # With Docker (Jetson)
-docker compose run --rm policy lerobot-setup-motors \
-  --robot.type=so100_follower --robot.port=FOLLOWER_PORT
+docker compose run --rm policy bash -c 'lerobot-setup-motors \
+  --robot.type=so100_follower --robot.port="$FOLLOWER_PORT"'
 
-docker compose run --rm policy lerobot-setup-motors \
-  --teleop.type=so100_leader --teleop.port=LEADER_PORT
+docker compose run --rm policy bash -c 'lerobot-setup-motors \
+  --teleop.type=so100_leader --teleop.port="$LEADER_PORT"'
 
 # Without Docker (PC)
 lerobot-setup-motors \
@@ -90,10 +91,10 @@ Follower:
 
 ```bash
 # With Docker (Jetson)
-docker compose run --rm policy lerobot-calibrate \
+docker compose run --rm policy bash -c 'lerobot-calibrate \
   --robot.type=so100_follower \
-  --robot.port=FOLLOWER_PORT \
-  --robot.id=picker_follower
+  --robot.port="$FOLLOWER_PORT" \
+  --robot.id=picker_follower'
 
 # Without Docker (PC)
 lerobot-calibrate \
@@ -106,10 +107,10 @@ Leader:
 
 ```bash
 # With Docker (Jetson)
-docker compose run --rm policy lerobot-calibrate \
+docker compose run --rm policy bash -c 'lerobot-calibrate \
   --teleop.type=so100_leader \
-  --teleop.port=LEADER_PORT \
-  --teleop.id=picker_leader
+  --teleop.port="$LEADER_PORT" \
+  --teleop.id=picker_leader'
 
 # Without Docker (PC)
 lerobot-calibrate \

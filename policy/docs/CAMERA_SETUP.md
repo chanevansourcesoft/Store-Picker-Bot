@@ -55,10 +55,10 @@ ls -l /dev/v4l/by-id/
 ```
 
 Use the `...-video-index0` entries for the cameras: put them in the repo root `.env` as `GRIPPER_CAM` and
-`SCENE_CAM` ([DATA_COLLECTION.md](DATA_COLLECTION.md), step 2). With Docker, replace `GRIPPER_CAM` and
-`SCENE_CAM` in the commands with these paths. Without Docker, run `source env.sh` again (every time `.env`
-changes); the commands then use `"$GRIPPER_CAM"` and `"$SCENE_CAM"` as they are. Check with
-`echo "$GRIPPER_CAM" "$SCENE_CAM"`.
+`SCENE_CAM` ([DATA_COLLECTION.md](DATA_COLLECTION.md), step 2). The commands then use `"$GRIPPER_CAM"` and
+`"$SCENE_CAM"` as they are. With Docker, nothing else to do: the commands run inside `bash -c '...'`, so the
+container reads them from `.env`. Without Docker, run `source env.sh` again (every time `.env` changes) and
+check with `echo "$GRIPPER_CAM" "$SCENE_CAM"`.
 
 ## 3. Check supported formats
 
@@ -66,8 +66,8 @@ Both cameras must support 640×480 at 30 FPS:
 
 ```bash
 # With Docker (Jetson)
-docker compose run --rm policy v4l2-ctl -d GRIPPER_CAM --list-formats-ext
-docker compose run --rm policy v4l2-ctl -d SCENE_CAM --list-formats-ext
+docker compose run --rm policy bash -c 'v4l2-ctl -d "$GRIPPER_CAM" --list-formats-ext'
+docker compose run --rm policy bash -c 'v4l2-ctl -d "$SCENE_CAM" --list-formats-ext'
 
 # Without Docker (PC)
 v4l2-ctl -d "$GRIPPER_CAM" --list-formats-ext
@@ -94,8 +94,8 @@ Do this with the cameras mounted (step 1), in the lighting you will record in.
 
 ```bash
 # With Docker (Jetson)
-docker compose run --rm policy v4l2-ctl -d GRIPPER_CAM --list-ctrls
-docker compose run --rm policy v4l2-ctl -d SCENE_CAM --list-ctrls
+docker compose run --rm policy bash -c 'v4l2-ctl -d "$GRIPPER_CAM" --list-ctrls'
+docker compose run --rm policy bash -c 'v4l2-ctl -d "$SCENE_CAM" --list-ctrls'
 
 # Without Docker (PC)
 v4l2-ctl -d "$GRIPPER_CAM" --list-ctrls
@@ -138,7 +138,7 @@ Try a value on the live camera, then take test images and look at them:
 
 ```bash
 # With Docker (Jetson)
-docker compose run --rm policy v4l2-ctl -d SCENE_CAM --set-ctrl=auto_exposure=1 --set-ctrl=exposure_time_absolute=200
+docker compose run --rm policy bash -c 'v4l2-ctl -d "$SCENE_CAM" --set-ctrl=auto_exposure=1 --set-ctrl=exposure_time_absolute=200'
 docker compose run --rm policy lerobot-find-cameras opencv
 
 # Without Docker (PC)

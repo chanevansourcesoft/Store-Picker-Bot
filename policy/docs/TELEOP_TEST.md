@@ -34,8 +34,8 @@ source path/to/Store-Picker-Bot/policy/env.sh
   ```bash
   ls -l /dev/serial/by-id/
   ```
-  With Docker, replace `FOLLOWER_PORT` and `LEADER_PORT` in the command with those paths. Without Docker,
-  they come from `.env` ([ARM_SETUP.md](ARM_SETUP.md), step 1); check with `echo "$FOLLOWER_PORT" "$LEADER_PORT"`.
+  Both setups take the ports from `.env` ([ARM_SETUP.md](ARM_SETUP.md), step 1). Without Docker, check with
+  `echo "$FOLLOWER_PORT" "$LEADER_PORT"`.
 - Put both arms in a similar pose. When teleoperation starts, the follower moves straight to the leader's position at full speed.
 - Keep hands and objects clear of the follower.
 
@@ -43,9 +43,9 @@ source path/to/Store-Picker-Bot/policy/env.sh
 
 ```bash
 # With Docker (Jetson)
-docker compose run --rm policy lerobot-teleoperate \
-  --robot.type=so100_follower --robot.port=FOLLOWER_PORT --robot.id=picker_follower \
-  --teleop.type=so100_leader --teleop.port=LEADER_PORT --teleop.id=picker_leader
+docker compose run --rm policy bash -c 'lerobot-teleoperate \
+  --robot.type=so100_follower --robot.port="$FOLLOWER_PORT" --robot.id=picker_follower \
+  --teleop.type=so100_leader --teleop.port="$LEADER_PORT" --teleop.id=picker_leader'
 
 # Without Docker (PC)
 lerobot-teleoperate \
