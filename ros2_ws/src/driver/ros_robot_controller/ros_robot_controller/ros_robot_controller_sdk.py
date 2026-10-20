@@ -2,6 +2,7 @@
 # encoding: utf-8
 # stm32 python sdk
 import enum
+import os
 import time
 import queue
 import struct
@@ -95,7 +96,8 @@ class Board:
             'GAMEPAD_BUTTON_MASK_R1':        0x8000
     }
 
-    def __init__(self, device="/dev/rrc", baudrate=1000000, timeout=5):
+    # BASE_BOARD_PORT (from the repo root .env) overrides the udev name, e.g. a /dev/serial/by-id/ path
+    def __init__(self, device=os.environ.get("BASE_BOARD_PORT") or "/dev/rrc", baudrate=1000000, timeout=5):
         self.enable_recv = False
         self.frame = []
         self.recv_count = 0

@@ -1,21 +1,31 @@
 import os
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 
 from launch_ros.actions import Node
 from launch import LaunchDescription, LaunchService
+from launch.actions import LogInfo
 
 def generate_launch_description():
     compiled = os.environ['need_compile']
-    if compiled == 'True':
-        calibration_package_path = get_package_share_directory('calibration')
-    else:
-        calibration_package_path = '/home/ubuntu/ros2_ws/src/calibration'
+    # The calibration and imu_calib packages are not in this repo (they come with the robot's own
+    # image). Without them the filter takes the raw IMU directly: it still works, the gyro bias is
+    # just not removed first.
+    try:
+        if compiled == 'True':
+            calibration_package_path = get_package_share_directory('calibration')
+        else:
+            calibration_package_path = '/home/ubuntu/ros2_ws/src/calibration'
+        get_package_share_directory('imu_calib')
+        calib_file = os.path.join(calibration_package_path, 'config/imu_calib.yaml')
+        have_calib = os.path.exists(calib_file)
+    except PackageNotFoundError:
+        have_calib = False
     imu_calib_node = Node(
         package='imu_calib',
         executable='apply_calib',
         name='imu_calib',
         output='screen',
-        parameters=[{"calib_file": os.path.join(calibration_package_path, 'config/imu_calib.yaml')
+        parameters=[{"calib_file": calib_file if have_calib else ''
                      }],
         remappings=[
             ('raw', 'ros_robot_controller/imu_raw'),
@@ -58,11 +68,16 @@ def generate_launch_description():
         ],
         remappings=[
             ('/tf', 'tf'),
-            ('/imu/data_raw', 'imu_corrected'),
+            ('/imu/data_raw', 'imu_corrected' if have_calib else 'ros_robot_controller/imu_raw'),
             ('imu/data', 'imu')
             ]
     )
 
+    if not have_calib:
+        return LaunchDescription([
+            LogInfo(msg='imu_filter: no calibration/imu_calib package, using the raw IMU'),
+            imu_filter_node
+        ])
     return LaunchDescription([
         imu_calib_node,
         imu_filter_node

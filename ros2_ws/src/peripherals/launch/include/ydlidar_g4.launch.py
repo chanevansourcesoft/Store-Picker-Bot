@@ -1,3 +1,5 @@
+import os
+
 from launch_ros.actions import Node
 from launch.actions import DeclareLaunchArgument
 from launch import LaunchDescription, LaunchService
@@ -17,7 +19,7 @@ def generate_launch_description():
         name='ydlidar_ros2_driver_node',
         output='screen',
         parameters=[
-            {'port': '/dev/lidar',
+            {'port': os.environ.get('LIDAR_PORT') or '/dev/lidar',
             'frame_id': lidar_frame,
             'ignore_array': '',
             'baudrate': 230400,

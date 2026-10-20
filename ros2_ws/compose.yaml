@@ -1,0 +1,44 @@
+# Jetson (or any Linux PC with Docker). Usage (from ros2_ws/):
+#   docker compose build                                         # once
+#   docker compose run --rm ros colcon build --symlink-install   # once, and after adding files
+#   docker compose up -d lidar                                   # lidar driver, restarts by itself
+#   docker compose run --rm ros ros2 launch mecanum_nav base.launch.py
+# See README.md.
+x-ros: &ros
+  build: .
+  image: store-picker-bot/ros2:latest
+  # Host network and IPC: ROS nodes in other containers and on the host see each other.
+  network_mode: host
+  ipc: host
+  # Run as the host user so colcon's build/, install/ and log/ stay owned by you.
+  user: "${UID:-1000}:${GID:-1000}"
+  group_add:
+    - "20"  # dialout: controller board and lidar
+  env_file:
+    - path: ../.env
+      required: false
+  environment:
+    HOME: /tmp
+    ROS_LOG_DIR: /tmp/ros_log
+    # Launch files take paths from the installed packages, not /home/ubuntu/ros2_ws/src.
+    need_compile: "True"
+  volumes:
+    # Same path as on the robot's own image: maps and a few configs use it.
+    - .:/home/ubuntu/ros2_ws
+    # All of /dev so ports keep working after re-plugging; access is limited by the rules below.
+    - /dev:/dev
+  device_cgroup_rules:
+    - "c 166:* rmw" # /dev/ttyACM*: controller board
+    - "c 188:* rmw" # /dev/ttyUSB*: lidar
+  working_dir: /home/ubuntu/ros2_ws
+
+services:
+  ros:
+    <<: *ros
+
+  # The A1 lidar driver on its own, like lidar_watchdog.service on the robot's image.
+  # Do not run it while that service is running on the same computer: only one may hold the port.
+  lidar:
+    <<: *ros
+    command: ros2 launch peripherals sllidar_a1.launch.py
+    restart: unless-stopped

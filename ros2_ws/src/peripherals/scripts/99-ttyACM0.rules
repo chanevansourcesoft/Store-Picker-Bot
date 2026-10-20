@@ -1,3 +1,3 @@
-# Ignore ModemManager for ttyACM0 device
-KERNEL=="ttyACM*", SUBSYSTEM=="tty", GROUP="users", MODE="0777", SYMLINK+="rrc"
-ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d4", ENV{ID_MM_PORT_IGNORE}="1"1"
+# Controller board (CH9102, 1a86:55d4) -> /dev/rrc, and keep ModemManager away from it.
+# Matched by USB ID only, so the SO-100 arm boards (also ttyACM*) never get this name.
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d4", GROUP="dialout", MODE="0666", SYMLINK+="rrc", ENV{ID_MM_PORT_IGNORE}="1"

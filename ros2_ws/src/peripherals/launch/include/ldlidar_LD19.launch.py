@@ -1,3 +1,5 @@
+import os
+
 from launch_ros.actions import Node
 from launch.actions import DeclareLaunchArgument
 from launch import LaunchDescription, LaunchService
@@ -20,7 +22,7 @@ def generate_launch_description():
             {'topic_name': 'scan',
             'product_name': 'LDLiDAR_LD19',
             'port_baudrate': 230400,
-            'port_name': '/dev/lidar',
+            'port_name': os.environ.get('LIDAR_PORT') or '/dev/lidar',
             'frame_id': lidar_frame,
             'laser_scan_dir': True,
             'enable_angle_crop_func': False,

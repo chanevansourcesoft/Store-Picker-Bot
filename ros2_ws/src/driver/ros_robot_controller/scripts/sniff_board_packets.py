@@ -26,6 +26,7 @@ are usually only emitted when the motors actually turn.
 """
 import argparse
 import collections
+import os
 import sys
 import time
 
@@ -41,7 +42,7 @@ PACKET_FUNC_NONE = 11
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--device', default='/dev/rrc')
+    ap.add_argument('--device', default=os.environ.get('BASE_BOARD_PORT') or '/dev/rrc')
     ap.add_argument('--baud', type=int, default=1000000)
     ap.add_argument('--seconds', type=float, default=15.0)
     args = ap.parse_args()

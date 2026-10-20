@@ -1,3 +1,5 @@
+import os
+
 from launch_ros.actions import Node
 from launch.actions import DeclareLaunchArgument
 from launch import LaunchDescription, LaunchService
@@ -19,7 +21,7 @@ def generate_launch_description():
         parameters=[
             {'channel_type': 'serial',
             'serial_baudrate': 115200,
-            'serial_port': '/dev/lidar',  # 统一映射为/dev/lidar(map all to /dev/lidar)
+            'serial_port': os.environ.get('LIDAR_PORT') or '/dev/lidar',  # 统一映射为/dev/lidar(map all to /dev/lidar)
             'frame_id': lidar_frame,
             'inverted': False,
             'angle_compensate': True,
