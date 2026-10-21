@@ -126,6 +126,8 @@ main { padding: 20px; max-width: 1600px; margin: 0 auto; }
 .cam-test figcaption { font-size: 13px; margin-top: 4px; }
 .cam-test .bad { color: var(--danger); }
 
+/* record: both columns scroll on their own inside the window, so the buttons stay in view */
+#page-record .grid.two.wide-left > * { max-height: calc(100vh - 140px); overflow-y: auto; }
 /* record */
 .timer { font-size: 44px; font-weight: 700; line-height: 1.1; margin: 6px 0 12px; font-variant-numeric: tabular-nums; min-height: 48px; }
 .timer.rec { color: var(--rec); }
@@ -201,6 +203,7 @@ main { padding: 20px; max-width: 1600px; margin: 0 auto; }
 }
 @media (max-width: 900px) {
   .grid.two, .grid.three, .grid.two.wide-left, .review { grid-template-columns: 1fr; }
+  #page-record .grid.two.wide-left > * { max-height: none; overflow-y: visible; }
   .steps { grid-template-columns: repeat(2, 1fr); }
   .videos, .plots { grid-template-columns: 1fr; }
 }

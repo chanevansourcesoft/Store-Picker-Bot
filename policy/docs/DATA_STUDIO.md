@@ -38,7 +38,8 @@ steps; a step unlocks when the one before it is done.
 1. **Campaign:** a campaign is one dataset with its recording plan. Every time the app opens, pick
    the campaign and press **Open campaign** (the one used last is already selected), or create a new
    one: a name, the products, how many rounds (base positions) and how many episodes of each
-   product per round.
+   product per round. **Delete campaign** moves the selected campaign's dataset to the Trash of the
+   computer; restore it from the Trash if that was a mistake.
 2. **Check:** every line must be green; a red line says what to do.
    - Press **Take test pictures**: each camera must show its own view, sharp.
    - Press **Start test** and move every joint of the leader arm a little, including the gripper,

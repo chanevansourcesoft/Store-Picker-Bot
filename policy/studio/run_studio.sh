@@ -19,6 +19,17 @@ URL="http://127.0.0.1:$PORT"
 LOG="$HOME/.cache/store_picker_studio.log"
 mkdir -p "$HOME/.cache"
 
+# A server still running older code (the app was updated since it started) is restarted, unless it is recording.
+PING=$(curl -s "$URL/api/ping")
+if [[ -n "$PING" ]]; then
+  CODE=$(stat -c %Y "$DIR/studio.py" "$DIR/dataset_view.py" "$DIR/../data_collection/record.py" | sort -n | tail -1)
+  RUNNING_CODE=$(echo "$PING" | sed -n 's/.*"code": *\([0-9]*\).*/\1/p')
+  if [[ "$RUNNING_CODE" != "$CODE" ]] && ! echo "$PING" | grep -q '"busy": *true'; then
+    curl -s -o /dev/null -X POST "$URL/api/restart"
+    for _ in $(seq 1 40); do curl -s -o /dev/null "$URL/api/ping" || break; sleep 0.25; done
+  fi
+fi
+
 if ! curl -s -o /dev/null "$URL/api/ping"; then
   if [[ ! -x "$PY" ]]; then
     notify-send "Store Picker Bot" "Python not found: $PY" 2>/dev/null || echo "Python not found: $PY" >&2

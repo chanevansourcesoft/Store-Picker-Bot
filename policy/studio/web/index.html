@@ -24,7 +24,10 @@
         <div class="list" id="campaignList"></div>
         <div id="campaignOpen" class="edit" hidden>
           <h3 id="campaignOpenTitle"></h3>
-          <button class="primary" id="openCampaignBtn">Open campaign</button>
+          <div class="row">
+            <button class="primary" id="openCampaignBtn">Open campaign</button>
+            <button class="danger" id="deleteCampaignBtn">Delete campaign</button>
+          </div>
         </div>
       </div>
       <div class="card">
@@ -91,8 +94,8 @@
         <div class="status-line"><span class="state" id="recState"></span><span class="muted" id="recSub"></span></div>
         <div class="timer" id="recTimer"></div>
         <div class="live" id="live">
-          <div class="vbox"><img id="liveScene" alt=""><span class="cap">Scene camera</span><span class="wait" id="liveSceneWait">No picture</span></div>
-          <div class="vbox"><img id="liveGripper" alt=""><span class="cap">Gripper camera</span><span class="wait" id="liveGripperWait">No picture</span></div>
+          <div class="vbox"><img id="liveScene" alt=""><span class="cap">Scene camera</span><span class="wait" id="liveSceneWait">Live view starts with the round</span></div>
+          <div class="vbox"><img id="liveGripper" alt=""><span class="cap">Gripper camera</span><span class="wait" id="liveGripperWait">Live view starts with the round</span></div>
         </div>
         <div class="controls-big">
           <button class="primary big" id="startBtn">Start <kbd>Space</kbd></button>

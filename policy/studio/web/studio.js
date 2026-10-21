@@ -193,6 +193,27 @@ $("openCampaignBtn").onclick = async () => {
     go(autoPage());
   } catch (e) { toast(e.message); }
 };
+$("deleteCampaignBtn").onclick = () => {
+  const folder = selectedCampaign || (camp() && (camp().draft ? "__draft__" : camp().folder));
+  const row = S.campaigns.find((r) => r.folder === folder);
+  if (folder === "__draft__") {
+    askRest("Delete this campaign?", "It has not recorded anything yet: only its plan is forgotten.", "Delete campaign",
+      () => deleteCampaign(folder), true);
+  } else if (row) {
+    askRest(`Delete ${folder}?`, `Its ${row.done} recorded episode(s) are moved to the Trash of this computer. ` +
+      "They can be restored from the Trash until it is emptied.", "Move to the Trash", () => deleteCampaign(folder), true);
+  }
+};
+async function deleteCampaign(folder) {
+  try {
+    await api("/api/campaign/delete", { folder });
+    S = await api("/api/studio");
+    selectedCampaign = null;
+    if (!camp()) confirmed = false;
+    toast(folder === "__draft__" ? "Campaign deleted." : `${folder} moved to the Trash.`, 5000);
+    go("campaign");
+  } catch (e) { toast(e.message, 7000); }
+}
 $("newCampaignBtn").onclick = async () => {
   try {
     await api("/api/campaign/new", {
@@ -323,7 +344,7 @@ const PHASES = {
   saving: ["Saving…", "warn", "Wait until it says Ready. Meanwhile put the product back on the shelf."],
   done: ["Round complete", "ok", "Put the follower arm in its rest pose, then press the button below. Its motors then switch off."],
 };
-let liveTimer = null;
+let liveTimer = null;  // runs while the live view is on
 function renderRecord() {
   const c = camp();
   if (!c) return;
@@ -387,31 +408,30 @@ function renderRecord() {
   // live view
   const live = running && !["starting", "connecting"].includes(ph);
   $("live").classList.toggle("rec", running && ph === "recording");
-  if (live && !liveTimer) liveTimer = setInterval(updateLive, 250);
-  if (!live && liveTimer) { clearInterval(liveTimer); liveTimer = null; showLive(false); }
+  if (live && !liveTimer) {
+    for (const w of ["liveSceneWait", "liveGripperWait"]) $(w).textContent = "Waiting for the camera…";
+    for (const [cam, img] of LIVE) $(img).src = `/live/${cam}.mjpg?t=${Date.now()}`;  // one stream per camera
+    liveTimer = setInterval(checkLive, 1000);
+  }
+  if (!live && liveTimer) { clearInterval(liveTimer); liveTimer = null; stopLive(); }
 }
-function showLive(on) {
-  for (const [img, wait] of [["liveScene", "liveSceneWait"], ["liveGripper", "liveGripperWait"]]) {
-    if (!on) { $(img).removeAttribute("src"); $(wait).hidden = false; $(wait).textContent = "No picture"; }
+const LIVE = [["scene_cam", "liveScene", "liveSceneWait"], ["gripper_cam", "liveGripper", "liveGripperWait"]];
+function stopLive() {
+  for (const [, img, wait] of LIVE) {
+    $(img).removeAttribute("src");  // closes the stream
+    $(wait).hidden = false; $(wait).textContent = "Live view starts with the round";
   }
 }
-let liveTick = 0;
-async function updateLive() {
-  const t = Date.now();
-  for (const [cam, img, wait] of [["scene_cam", "liveScene", "liveSceneWait"], ["gripper_cam", "liveGripper", "liveGripperWait"]]) {
-    const el = $(img);
-    if (el.dataset.loading) continue;
-    el.dataset.loading = "1";
-    const next = new Image();
-    next.onload = () => { el.src = next.src; $(wait).hidden = true; delete el.dataset.loading; };
-    next.onerror = () => { delete el.dataset.loading; };
-    next.src = `/live/${cam}.jpg?t=${t}`;
-  }
-  if (++liveTick % 4) return;
+for (const [cam, img] of LIVE) {  // a dropped stream reconnects while the round runs
+  $(img).onerror = () => setTimeout(() => { if (liveTimer) $(img).src = `/live/${cam}.mjpg?t=${Date.now()}`; }, 1000);
+}
+async function checkLive() {
   try {  // a camera whose picture stops changing is shown as stopped
     const ages = await api("/api/live");
-    for (const [cam, wait] of [["scene_cam", "liveSceneWait"], ["gripper_cam", "liveGripperWait"]]) {
-      if (ages[cam] != null && ages[cam] > 3) { $(wait).hidden = false; $(wait).textContent = "Camera stopped"; }
+    for (const [cam, , wait] of LIVE) {
+      const age = ages[cam];
+      if (age != null && age <= 3) $(wait).hidden = true;
+      else if (age != null) { $(wait).hidden = false; $(wait).textContent = "Camera stopped"; }
     }
   } catch {}
 }
@@ -432,8 +452,10 @@ $("startRoundBtn").onclick = async () => {
   } catch (e) { toast(e.message, 7000); }
   $("startRoundBtn").disabled = false;
 };
-function askRest(title, text, ok, action) {
+function askRest(title, text, ok, action, danger = false) {
   $("restTitle").textContent = title; $("restText").textContent = text; $("restOkBtn").textContent = ok;
+  $("restOkBtn").className = danger ? "danger" : "primary";
+  $("restCancelBtn").textContent = danger ? "Cancel" : "Not yet";
   restAction = action;
   $("restModal").hidden = false;
 }

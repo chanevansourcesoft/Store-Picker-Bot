@@ -566,10 +566,10 @@ class KeyControl(Control):
 
 
 class Preview:
-    """App only: a small JPEG of each camera's newest frame, a few times per second, for the live
+    """App only: a small JPEG of each camera's newest frame, 15 times per second, for the live
     view. It takes the frames the robot's cameras already capture, so nothing else opens them."""
 
-    def __init__(self, cameras, folder, fps=4):
+    def __init__(self, cameras, folder, fps=15):
         self.cameras = cameras
         self.folder = Path(folder)
         self.folder.mkdir(parents=True, exist_ok=True)

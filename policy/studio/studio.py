@@ -53,6 +53,9 @@ DEVICES = ["FOLLOWER_PORT", "LEADER_PORT", "GRIPPER_CAM", "SCENE_CAM"]
 CAMERAS = {record.GRIPPER_CAM: "GRIPPER_CAM", record.SCENE_CAM: "SCENE_CAM"}
 JOINTS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
 IDLE_EXIT_S = 180  # stop the server this long after the window stopped sending heartbeats
+# The code this server runs: run_studio.sh restarts an idle server whose code is older than the files.
+CODE_FILES = [STUDIO_DIR / "studio.py", STUDIO_DIR / "dataset_view.py", RECORD_SCRIPT]
+CODE_STAMP = max(int(p.stat().st_mtime) for p in CODE_FILES)
 
 
 def device_env():
@@ -498,6 +501,25 @@ class Studio:
         self.state["draft"] = {"name": name, "plan": plan}
         self._campaign_changed()
 
+    def delete_campaign(self, folder):
+        """Move a campaign's dataset to the desktop Trash (it can be restored from there).
+        A campaign that has not recorded anything yet is only forgotten."""
+        if self.busy():
+            raise ValueError("Wait until the current round has finished.")
+        if folder == "__draft__":
+            self.state.pop("draft", None)
+            self._campaign_changed()
+            return
+        if not load_campaign(folder):
+            raise ValueError(f"{folder} is not a dataset recorded with a plan.")
+        result = subprocess.run(["gio", "trash", str(campaign_root(folder))], capture_output=True, text=True)
+        if result.returncode != 0:
+            raise ValueError(f"Could not move {folder} to the Trash: {result.stderr.strip() or 'gio trash failed'}")
+        print(f"[INFO] Campaign {folder} moved to the Trash.", flush=True)
+        if self.state.get("folder") == folder:
+            self.state.pop("folder", None)
+            self._campaign_changed()
+
     def _campaign_changed(self):
         self._save_state()
         self._open_view()
@@ -765,6 +787,30 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.NOT_FOUND, "no picture")
         self._file(path, "image/jpeg", cache=False)
 
+    def _live_stream(self, name):
+        """The live view as one MJPEG stream: every new snapshot record.py writes is pushed to the
+        window right away. Ends with the round (or when the window closes the connection)."""
+        if name not in CAMERAS:
+            return self._error(HTTPStatus.NOT_FOUND, "not found")
+        path = LIVE_DIR / f"{name}.jpg"
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        last = None
+        while STUDIO.recording():
+            try:
+                stamp = path.stat().st_mtime_ns
+                if stamp != last:
+                    data = path.read_bytes()  # record.py replaces the file in one step, so it is always whole
+                    last = stamp
+                    self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n" % len(data)
+                                     + data + b"\r\n")
+                    self.wfile.flush()
+            except FileNotFoundError:
+                pass
+            time.sleep(0.02)
+
     def do_GET(self):
         path = urlparse(self.path).path.strip("/")
         parts = [unquote(p) for p in path.split("/") if p]
@@ -774,13 +820,15 @@ class Handler(BaseHTTPRequestHandler):
             if parts[0] == "static" and len(parts) == 2:
                 return self._static(parts[1])
             if path == "api/ping":
-                return self._json({"ok": True})
+                return self._json({"ok": True, "code": CODE_STAMP, "busy": STUDIO.busy()})
             if path == "api/studio":
                 return self._json(STUDIO.snapshot())
             if path == "api/checks":
                 return self._json({"checks": STUDIO.checks()})
             if path == "api/arms":
                 return self._json(STUDIO.arm_test.status())
+            if len(parts) == 2 and parts[0] == "live" and parts[1].endswith(".mjpg"):
+                return self._live_stream(parts[1].removesuffix(".mjpg"))
             if len(parts) == 2 and parts[0] == "live":
                 return self._picture(LIVE_DIR, parts[1].removesuffix(".jpg"))
             if len(parts) == 2 and parts[0] == "camera_test":
@@ -814,6 +862,12 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path.strip("/")
         try:
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            if path == "api/restart":  # run_studio.sh, after the app was updated
+                if STUDIO.busy():
+                    return self._error(HTTPStatus.CONFLICT, "A round is running.")
+                self._json({"ok": True})
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+                return
             if path == "api/heartbeat":
                 STUDIO.last_heartbeat = time.time()
                 return self._json({"ok": True})
@@ -826,6 +880,8 @@ class Handler(BaseHTTPRequestHandler):
             with STUDIO.lock:
                 if path == "api/campaign/open":
                     STUDIO.open_campaign(body.get("folder"))
+                elif path == "api/campaign/delete":
+                    STUDIO.delete_campaign(body.get("folder"))
                 elif path == "api/campaign/new":
                     STUDIO.new_campaign(body)
                 elif path == "api/arms/start":
