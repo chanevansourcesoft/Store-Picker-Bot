@@ -4,7 +4,8 @@
 #
 # Usage:
 #   ./resume_groot.sh <run folder>            # a folder in policy/training/outputs/
-#   NUM_GPUS=1 ./resume_groot.sh 13102026_090000_dataset_v1_12102026_153045
+#   ./resume_groot.sh 13102026_090000_dataset_v1_12102026_153045
+#   NUM_GPUS=2 ./resume_groot.sh <run folder>   # for a run started on 2 GPUs
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,8 +31,18 @@ if ! command -v lerobot-train >/dev/null; then
   exit 1
 fi
 
-NUM_GPUS="${NUM_GPUS:-2}"
-GPU="${GPU:-$(seq -s, 0 $((NUM_GPUS - 1)))}"
+# Same defaults as train_groot.sh: one GPU, GPU 1 (GPU 0 also drives the display).
+NUM_GPUS="${NUM_GPUS:-1}"
+if [[ "$NUM_GPUS" -gt 1 ]]; then
+  GPU="${GPU:-$(seq -s, 0 $((NUM_GPUS - 1)))}"
+else
+  GPU="${GPU:-1}"
+fi
+
+# HF_TOKEN for the gated nvidia/Cosmos-Reason2-2B backbone, from the repo root .env.
+if [[ -f "$SCRIPT_DIR/../../.env" ]]; then
+  set -a; source "$SCRIPT_DIR/../../.env"; set +a
+fi
 export CUDA_VISIBLE_DEVICES="$GPU"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 

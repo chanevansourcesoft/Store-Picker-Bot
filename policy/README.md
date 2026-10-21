@@ -102,7 +102,8 @@ instead: see [TRAINING.md](docs/TRAINING.md).
      cd policy
      uv sync --frozen --managed-python
      ```
-   - **An existing conda env** with LeRobot 0.6.1, e.g. the sim project's `lerobot_env`. Add the servo
+   - **An existing conda env** with LeRobot 0.6.x, e.g. the sim project's `lerobot_env` (it has LeRobot 0.6.2,
+     not yet released, on the training PC; see [TRAINING.md](docs/TRAINING.md#lerobot-versions)). Add the servo
      library once (it only adds `feetech-servo-sdk` and `pyserial`):
      ```bash
      conda activate lerobot_env
@@ -115,7 +116,7 @@ instead: see [TRAINING.md](docs/TRAINING.md).
    ```bash
    source policy/env.sh
    ```
-   It prints the environment it uses and `LeRobot 0.6.1`. A GPU is not needed for the arms or recording.
+   It prints the environment it uses and its LeRobot version (`0.6.1` with uv). A GPU is not needed for the arms or recording.
    After every change to `.env`, run `source policy/env.sh` again: a terminal only sees `.env` as it was
    when `env.sh` was last loaded.
 

@@ -3,8 +3,6 @@
 How to fine-tune GR00T N1.7 on the recorded datasets, on the local training PC (2× RTX 5090, 32 GB each).
 The scripts are in `training/`. They use the same GR00T settings as the SO-101 sim project.
 
-> Not tested yet on this PC. The memory settings for 32 GB GPUs (step 5) are a best guess.
-
 ## 1. Set up the PC (once)
 
 Before you start:
@@ -13,17 +11,37 @@ Before you start:
   Check with `nvidia-smi`.
 - A Hugging Face account that has accepted the access terms of
   https://huggingface.co/nvidia/Cosmos-Reason2-2B (GR00T N1.7 uses it as its backbone), and an access token
-  from https://huggingface.co/settings/tokens.
+  from https://huggingface.co/settings/tokens. Put it in `HF_TOKEN` in the repo root `.env`
+  (copy `.env.example`). The training scripts read it from there.
 
-Then run one script:
+Then choose **one** Python environment.
+
+### Option A: the existing conda env `lerobot_env` (used on the training PC)
+
+The sim project's `lerobot_env` (Python 3.12, LeRobot installed from `~/lerobot`) already works. Add the GR00T
+packages once, without changing torch or LeRobot:
 
 ```bash
-git clone <repo url> store-picker-bot
-cd store-picker-bot/policy/training
+conda activate lerobot_env
+pip install --dry-run -e "$HOME/lerobot[groot,accelerate-dep]"   # check: must not replace torch or lerobot
+pip install -e "$HOME/lerobot[groot,accelerate-dep]"
+hf download nvidia/GR00T-N1.7-3B
+hf download nvidia/Cosmos-Reason2-2B                              # gated: needs HF_TOKEN
+```
+
+Run the training in a terminal where `lerobot_env` is active.
+
+**`policy/.venv` must not exist** with this option. If it exists, the training scripts use it instead of the
+active conda env.
+
+### Option B: a new environment with `setup.sh`
+
+```bash
+cd policy/training
 ./setup.sh
 ```
 
-It does everything else and can be run again at any time (finished steps are skipped):
+It can be run again at any time (finished steps are skipped):
 
 1. checks the NVIDIA driver,
 2. installs a C compiler if missing (asks for your password; one package is built from source),
@@ -35,6 +53,8 @@ It does everything else and can be run again at any time (finished steps are ski
 7. downloads the GR00T base model and backbone (about 12 GB; skip with `./setup.sh --no-download`).
 
 The training scripts use `policy/.venv` by themselves: no environment needs to be activated.
+Note: this environment has LeRobot **0.6.1**, which does not know the precision setting the training script
+uses now (see [LeRobot versions](#lerobot-versions)). Use option A until this is fixed.
 
 ## 2. Get the datasets
 
@@ -60,41 +80,59 @@ All inputs must have the same cameras and FPS, which is always true for datasets
 ## 4. Train
 
 ```bash
-cd training
-./train_groot.sh all_products_13102026_090000
+conda activate lerobot_env
+cd policy/training
+GPU=1 STEPS=10000 ./train_groot.sh dataset_v1_21102026_183539
 ```
 
 The run is saved in `training/outputs/<DDMMYYYY_HHMMSS>_<dataset>/`. A checkpoint is written every
 5,000 steps to `checkpoints/<step>/pretrained_model/` (about 11 GB each), and `checkpoints/last` points to the newest.
 Training prints the loss every 10 steps.
 
+On one RTX 5090 with the defaults, training uses about **20 GB** and runs about **1 step per second**:
+10,000 steps take about **2 h 45 min**.
+
+While it trains, do not start anything else on the training GPU (for example a policy server).
+
 Settings are changed with environment variables in front of the command:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `NUM_GPUS` | `2` | Number of GPUs. Each one holds a full copy of the model and gets `BATCH_SIZE` samples per step |
-| `GPU` | `0,1` | Which GPUs to use, e.g. `GPU=1` with `NUM_GPUS=1` |
-| `BATCH_SIZE` | `8` | Samples per GPU per step |
+| `GPU` | `1` | Which GPU to use. GPU 0 also runs the screen |
 | `STEPS` | `30000` | Training steps |
+| `BATCH_SIZE` | `64` | Samples per GPU per step (same as the sim project) |
 | `SAVE_FREQ` | `5000` | Steps between checkpoints |
-| `MEMORY_MODE` | `bf16` | See step 5 |
+| `MEMORY_MODE` | `low` | See step 5 |
+| `NUM_WORKERS` | `16` | Processes that read the videos for training |
+| `NUM_GPUS` | `1` | Number of GPUs. Read "Two GPUs" below first |
 
-Example: `NUM_GPUS=1 GPU=1 STEPS=10000 ./train_groot.sh all_products_13102026_090000`.
 Extra arguments are passed to `lerobot-train`.
+
+### Two GPUs
+
+`NUM_GPUS=2 BATCH_SIZE=32 ./train_groot.sh <dataset>` trains on both GPUs (32 samples each, 64 per step).
+Each GPU holds a full copy of the model.
+
+**On this PC it is slower than one GPU.** GPU 1 sits in a slot with only 4 PCIe lanes (PCIe 4.0 x4), and the GPUs
+must exchange about 1 GB after every step. Measured: 44 samples per second with two GPUs, 66 with one.
+Two GPUs only help if both sit in x16 slots. Check the slots with (while training runs):
+
+```bash
+nvidia-smi --query-gpu=index,pcie.link.gen.current,pcie.link.width.current --format=csv
+```
 
 ## 5. Memory modes
 
-GR00T N1.7 has about 3.5 billion parameters. Using two GPUs makes training faster, but each GPU still needs
-the whole model, so the memory per GPU is what matters.
+GR00T N1.7 has about 3.5 billion parameters.
 
 | `MEMORY_MODE` | What it does | GPU memory |
 |---|---|---|
-| `full` | NVIDIA's recipe: fp32 weights, everything trainable is trained | about 40 GB or more: needs larger GPUs than the training PC |
-| `bf16` (default) | bf16 weights, diffusion model trained | aimed at 32 GB, not tested yet |
-| `low` | bf16 weights, diffusion model frozen | about 14 GB at batch 8 (tested in the sim project) |
+| `full` | NVIDIA's recipe: fp32 weights, everything trainable is trained | more than 32 GB: runs out of memory on the training PC, even at batch 8 |
+| `bf16` | bf16 weights, diffusion model trained (about 1.6 billion trainable parameters) | not tested yet |
+| `low` (default) | bf16 weights, diffusion model frozen (529 million trainable parameters) | about 20 GB at batch 64 |
 
-If `bf16` stops with `CUDA out of memory`, first try `BATCH_SIZE=4`, then `MEMORY_MODE=low`.
-`low` trains much less of the model; in the sim project it learned noticeably worse.
+`low` is what the sim project used for its final training (batch 64, one RTX 5090).
+If a mode stops with `CUDA out of memory`, lower `BATCH_SIZE`.
 
 ## 6. Resume an interrupted run
 
@@ -103,7 +141,19 @@ If `bf16` stops with `CUDA out of memory`, first try `BATCH_SIZE=4`, then `MEMOR
 ```
 
 It continues from `checkpoints/last` with the same step, optimizer and learning-rate schedule.
-Use the same `NUM_GPUS` as the original run.
+Use the same `NUM_GPUS` as the original run (default 1).
+
+## LeRobot versions
+
+The training PC uses LeRobot **0.6.2** from `~/lerobot` (`lerobot_env`). This version is not released yet;
+the Jetson and `setup.sh` use the released **0.6.1**.
+
+- **Precision setting:** 0.6.2 replaced `--policy.model_params_fp32=false` with `--policy.dtype=bfloat16` and
+  silently ignores the old setting (the model then loads in fp32 and runs out of memory). `train_groot.sh`
+  uses `--policy.dtype`, so it needs 0.6.2.
+- **Models:** the GR00T code is the same in both versions, so the trained model behaves the same. But a model saved
+  by 0.6.2 has a `"dtype"` line in its `pretrained_model/config.json`, and 0.6.1 refuses to load it.
+  How to prepare a model for the Jetson is not tested yet.
 
 ## Notes
 
