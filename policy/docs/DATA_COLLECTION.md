@@ -9,6 +9,9 @@ Recording uses `data_collection/record.py`. LeRobot does the recording, exactly 
 
 All commands run from the `policy/` folder.
 
+On a PC, anyone can also record and review with the **Store Picker Bot** app instead of the terminal:
+[DATA_STUDIO.md](DATA_STUDIO.md). It makes the same datasets; steps 1–3 below still apply.
+
 ## Start a terminal
 
 Every command in this guide is shown twice. Use the one for your setup.

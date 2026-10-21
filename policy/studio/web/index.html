@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Store Picker Bot</title>
+<link rel="icon" href="/static/icon.svg">
+<link rel="stylesheet" href="/static/studio.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="mark"></span>Store Picker Bot</div>
+  <div class="who"><span id="who"></span><button class="link" id="switchBtn" hidden>Change campaign</button></div>
+</header>
+<nav class="steps" id="steps"></nav>
+
+<main>
+  <!-- 1. Campaign -->
+  <section class="page" id="page-campaign">
+    <div class="grid two">
+      <div class="card">
+        <h2>Continue a campaign</h2>
+        <p class="muted">A campaign is one dataset with its recording plan. Pick yours and open it.</p>
+        <div class="list" id="campaignList"></div>
+        <div id="campaignOpen" class="edit" hidden>
+          <h3 id="campaignOpenTitle"></h3>
+          <button class="primary" id="openCampaignBtn">Open campaign</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>New campaign</h2>
+        <label>Name <input id="newName" type="text" maxlength="40"></label>
+        <div class="field-label">Products</div>
+        <div class="products" id="newProducts"></div>
+        <div class="grid two tight">
+          <label>Rounds (base positions) <select id="newRounds"></select></label>
+          <label>Episodes per product per round <input id="newPerRound" type="number" min="1" max="100" step="1"></label>
+        </div>
+        <details class="advanced">
+          <summary>Base offsets (admin)</summary>
+          <div class="grid two tight">
+            <label>Offset in cm <input id="newOffset" type="number" min="0.5" max="30" step="0.5"></label>
+            <label>Turn in degrees <input id="newTurn" type="number" min="0.5" max="30" step="0.5"></label>
+          </div>
+        </details>
+        <p class="muted small" id="newTotal"></p>
+        <button class="primary" id="newCampaignBtn">Create campaign</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. Check -->
+  <section class="page" id="page-check">
+    <div class="grid three">
+      <div class="card">
+        <h2>Computer and devices</h2>
+        <div class="checks" id="checks"></div>
+        <button id="recheckBtn">Check again</button>
+      </div>
+      <div class="card">
+        <h2>Cameras</h2>
+        <p class="muted">Take a test picture with both cameras. Check that each shows its own view and is sharp.</p>
+        <div class="cam-test" id="camTest"></div>
+        <div class="row">
+          <button id="camTestBtn">Take test pictures</button>
+          <span class="muted small" id="camTestMsg"></span>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Arm test</h2>
+        <p class="muted">Press <b>Start test</b>, then move <b>every joint</b> of the leader arm a little, including the gripper.
+          The follower arm does not move during the test.</p>
+        <div class="check" id="followerCheck"></div>
+        <div class="motors" id="motors"></div>
+        <div class="row">
+          <button id="armStartBtn">Start test</button>
+          <span class="muted small" id="armMsg"></span>
+        </div>
+      </div>
+    </div>
+    <div class="cta">
+      <div id="roundInfo" class="muted"></div>
+      <button class="primary big" id="toRecordBtn" disabled>Continue to recording</button>
+    </div>
+  </section>
+
+  <!-- 3. Record -->
+  <section class="page" id="page-record">
+    <div class="grid two wide-left">
+      <div class="card">
+        <div class="status-line"><span class="state" id="recState"></span><span class="muted" id="recSub"></span></div>
+        <div class="timer" id="recTimer"></div>
+        <div class="live" id="live">
+          <div class="vbox"><img id="liveScene" alt=""><span class="cap">Scene camera</span><span class="wait" id="liveSceneWait">No picture</span></div>
+          <div class="vbox"><img id="liveGripper" alt=""><span class="cap">Gripper camera</span><span class="wait" id="liveGripperWait">No picture</span></div>
+        </div>
+        <div class="controls-big">
+          <button class="primary big" id="startBtn">Start <kbd>Space</kbd></button>
+          <button class="save big" id="saveBtn">Save <kbd>N</kbd></button>
+          <button class="danger big" id="discardBtn">Cancel <kbd>X</kbd></button>
+        </div>
+        <div class="row">
+          <button class="primary big" id="startRoundBtn" hidden>Start round</button>
+          <button class="primary big" id="finishRoundBtn" hidden>The arm is at rest: finish the round</button>
+          <button id="pauseRoundBtn" hidden>Pause round</button>
+        </div>
+        <pre class="log" id="recLog" hidden></pre>
+      </div>
+      <div class="side">
+        <div class="card now">
+          <div class="now-block" id="nowBase"></div>
+          <div class="now-block product" id="nowProduct"></div>
+          <div class="bar"><span id="roundBar"></span></div>
+          <div class="kv" id="nowCounts"></div>
+        </div>
+        <div class="card guide">
+          <h2>How to record</h2>
+          <figure class="rest-pose" id="restPose">
+            <img src="/static/rest_pose.jpg" alt="The arm in its rest pose" onerror="document.getElementById('restPose').hidden = true">
+            <figcaption><b>Rest pose:</b> every episode starts and ends here.</figcaption>
+          </figure>
+          <ol>
+            <li>Put the base where the app says, using the floor marks. Move it only when the app asks.</li>
+            <li>Put the leader arm in its <b>rest pose</b>, then press <kbd>Space</kbd> (Start) just before you move.</li>
+            <li>Pick <b>only the product shown</b>, put it in the basket, and bring the arm <b>back to the rest pose</b>.</li>
+            <li>Press <kbd>N</kbd> (Save) as soon as the arm is back at rest. Nothing is saved until you press <kbd>N</kbd>.</li>
+            <li>Press <kbd>X</kbd> (Cancel) if the product falls, you take the wrong one, or a person or hand is in the camera view.</li>
+            <li>Wait for <b>Saved</b> before the next episode. Meanwhile, put the product back, a little differently each time.</li>
+            <li>Move smoothly, at a steady pace, with the same grasp for the same product.</li>
+            <li>Keep the other products on the shelf, and the light the same during the whole round.</li>
+          </ol>
+          <p class="muted small">The keys work while this window is in front. When the app ends a round or you pause, the follower
+            arm's motors switch off: it must be at rest first.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. Review -->
+  <section class="page" id="page-review">
+    <div class="review">
+      <aside class="card flush">
+        <div class="tabs" id="reviewTabs"></div>
+        <div class="list" id="reviewList"></div>
+        <div class="finish">
+          <div class="muted small" id="reviewProgress"></div>
+          <button class="primary" id="reviewDoneBtn" hidden>Next round</button>
+        </div>
+      </aside>
+      <div class="viewer">
+        <div class="card complete" id="planComplete" hidden>
+          <h2>The plan is complete</h2>
+          <p id="planCompleteText"></p>
+          <button class="primary" id="removeFlaggedBtn" hidden>Remove flagged episodes</button>
+          <div class="status-line" id="finishStatus" hidden><span class="state" id="finishState"></span><span class="muted" id="finishSub"></span></div>
+          <pre class="log" id="finishLog" hidden></pre>
+        </div>
+        <div class="empty card" id="reviewEmpty">Nothing to review.</div>
+        <div id="reviewPlayer" hidden>
+          <div class="title-line">
+            <h2 id="epTitle"></h2>
+            <span class="target" id="epTarget"></span>
+            <span class="muted" id="epMeta"></span>
+          </div>
+          <div class="warnings" id="epWarnings"></div>
+          <div class="videos both" id="videos"></div>
+          <div class="controls">
+            <button id="playBtn">Play</button>
+            <input type="range" id="slider" min="0" value="0">
+            <span class="fcount" id="frameLabel"></span>
+            <select id="speed" title="Speed">
+              <option value="0.5">0.5×</option><option value="1">1×</option><option value="2" selected>2×</option>
+            </select>
+          </div>
+          <div class="decide">
+            <button class="approve" id="approveBtn">Approve <kbd>A</kbd></button>
+            <button class="flag" id="flagBtn">Flag as bad <kbd>F</kbd></button>
+            <span class="decision" id="epDecision"></span>
+          </div>
+          <div class="reasons" id="reasons" hidden>
+            <span class="muted small">Why?</span>
+          </div>
+          <details class="plots-wrap">
+            <summary>Joint plots</summary>
+            <div class="legend"><span class="swatch"></span>where the follower was <span class="swatch dash"></span>what the leader commanded</div>
+            <div class="plots" id="plots"></div>
+          </details>
+          <div class="help">
+            <kbd>Space</kbd> play · <kbd>←</kbd>/<kbd>→</kbd> frame · <kbd>↑</kbd>/<kbd>↓</kbd> episode ·
+            <kbd>A</kbd> approve · <kbd>F</kbd> flag
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="modal-back" id="restModal" hidden>
+  <div class="modal">
+    <h2 id="restTitle"></h2>
+    <p id="restText"></p>
+    <div class="row">
+      <button class="primary" id="restOkBtn"></button>
+      <button id="restCancelBtn">Not yet</button>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+<script src="/static/player.js"></script>
+<script src="/static/studio.js"></script>
+</body>
+</html>

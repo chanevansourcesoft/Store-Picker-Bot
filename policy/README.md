@@ -12,6 +12,7 @@ Kept out of the ROS 2 build by `COLCON_IGNORE`.
 |---|---|
 | `calibration/` | Arm calibration files (made by `lerobot-calibrate`, kept in Git) and `calibrate_wrist_roll.py` |
 | `data_collection/` | `record.py` for recording demonstrations; recorded datasets in `data_collection/dataset/` |
+| `studio/` | Store Picker Bot app: record and review demonstrations without a terminal (PC) |
 | `training/` | GR00T training scripts for the training PC (2× RTX 5090) |
 | `instructions.json` | GR00T instruction per item id, used when recording and when picking |
 | `docs/` | Step-by-step guides |
@@ -34,6 +35,7 @@ Kept out of the ROS 2 build by `COLCON_IGNORE`.
 3. [TELEOP_TEST.md](docs/TELEOP_TEST.md): checking that the follower mirrors the leader
 4. [CAMERA_SETUP.md](docs/CAMERA_SETUP.md): mounting, device paths, formats, exposure
 5. [DATA_COLLECTION.md](docs/DATA_COLLECTION.md): recording demonstrations and moving them to the training machine
+   - [DATA_STUDIO.md](docs/DATA_STUDIO.md): the same with the Store Picker Bot app, without a terminal (PC)
 6. [TRAINING.md](docs/TRAINING.md): training GR00T on the training PC
 
 ## Getting started (Jetson)

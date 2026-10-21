@@ -27,6 +27,11 @@ the plan where it stopped. Episodes marked bad are removed later with remove_bad
 A new dataset is called dataset_v<N>_<DDMMYYYY_HHMMSS> (N = next free version), or
 <name>_<DDMMYYYY_HHMMSS> with --name.
 
+The Store Picker Bot app (policy/studio/) runs this script with --studio: commands come as
+lines on stdin (start, save, discard, bad, quit) instead of keys, events go to stdout as
+"[STUDIO] {json}" lines, one run records one round (shelf + base position) and then waits
+for quit, and --preview_dir gets small camera snapshots for the app's live view.
+
 Usage (from policy/):
     docker compose run --rm policy python3 data_collection/record.py     # Jetson (Docker)
     python data_collection/record.py                                     # PC, after `source env.sh`
@@ -95,6 +100,14 @@ SCENE_CAM = "scene_cam"
 POSITIONS_5 = ["centre", "left", "right", "closer, turned left", "further, turned right"]
 POSITIONS_7 = ["centre", "left", "right", "closer", "further", "turned left", "turned right"]
 
+STUDIO = False  # set by --studio: run by the Store Picker Bot app
+
+
+def emit(event, **fields):
+    """An event for the Store Picker Bot app (nothing in the terminal)."""
+    if STUDIO:
+        print("[STUDIO] " + json.dumps({"event": event, **fields}), flush=True)
+
 
 def round_positions(rounds):
     if rounds <= len(POSITIONS_5):
@@ -143,6 +156,9 @@ def parse_args():
                         help="Show a warning when an episode runs longer than this")
     parser.add_argument("--streaming_encoding", action="store_true",
                         help="Encode video while recording (faster save; uses more CPU during the episode)")
+    parser.add_argument("--studio", action="store_true",
+                        help="Run by the Store Picker Bot app: commands on stdin, one round per run")
+    parser.add_argument("--preview_dir", help="With --studio: folder for the live camera snapshots")
     args = parser.parse_args()
 
     missing = [flag for flag in ("follower_port", "leader_port", "gripper_cam", "scene_cam")
@@ -154,6 +170,8 @@ def parse_args():
         parser.error("--name may only contain letters, digits, '-' and '_'")
     if args.resume and (args.products or args.rounds or args.per_round):
         parser.error("--products, --rounds and --per_round are for a new dataset; --resume uses its saved plan")
+    if args.studio and not args.resume and None in (args.products, args.rounds, args.per_round):
+        parser.error("--studio needs --products, --rounds and --per_round for a new dataset (nothing is asked)")
     return args
 
 
@@ -214,7 +232,7 @@ def make_plan(args):
     print(f"\nPlan: {len(products)} product(s) x {args.rounds} round(s) x {args.per_round} episodes = {total} episodes")
     for shelf, items in shelves(plan):
         print(f"  {shelf}: {', '.join(items)}")
-    if ask("Start?", "Y").lower() not in ("y", "yes"):
+    if not STUDIO and ask("Start?", "Y").lower() not in ("y", "yes"):
         sys.exit("Nothing recorded.")
     return plan
 
@@ -299,6 +317,13 @@ def plan_progress(plan, log):
     return done, len(plan["products"]) * plan["rounds"] * plan["per_round"]
 
 
+def round_progress(plan, log, shelf, round_):
+    """Good episodes and episodes needed in one round (one base position at one shelf)."""
+    items = dict(shelves(plan))[shelf]
+    done = sum(min(plan["per_round"], log.good_count(item, round_)) for item in items)
+    return done, len(items) * plan["per_round"]
+
+
 # ---------------------------------------------------------------------------------------------
 # Hardware
 
@@ -351,8 +376,12 @@ def check_camera_rates(robot, fps, seconds=1.5):
             time.sleep(1 / (2 * fps))
         rate = new / seconds
         print(f"{name}: {rate:.0f} new frames per second")
+        emit("camera_rate", camera=name, fps=round(rate))
         if rate < 0.93 * fps:
             slow.append(f"{name} ({rate:.0f} fps)")
+    if slow and STUDIO:
+        sys.exit(f"Camera slower than {fps} fps: {', '.join(slow)}. Its frames would be saved twice. "
+                 "Ask the admin to lower exposure_time_absolute in camera_settings.json (CAMERA_SETUP.md, step 4).")
     if slow:
         print(f"WARNING: slower than {fps} fps: {', '.join(slow)}. Its frames would be saved twice. Usually the "
               "exposure time is too long: lower exposure_time_absolute in camera_settings.json and raise gain "
@@ -389,24 +418,22 @@ def apply_camera_settings(devices):
 # Keys and status line
 
 
-class KeyControl:
-    """Reads single keys from the terminal in a background thread and shows a status line.
+class Control:
+    """Commands for the recording loop, from the terminal keys (KeyControl) or from the app (StudioControl).
 
-    A key ends the running record_loop by setting events["exit_early"]; the main thread
-    then reads the command with take(). Keys that do not fit the current state are ignored.
-    Ctrl+C asks to quit like Q: the main thread finishes what it is doing (also a save) first.
-    The terminal does not turn Ctrl+C into a signal meanwhile, so no process is interrupted
-    in the middle of writing an episode; a second Ctrl+C stops at once.
+    A command ends the running record_loop by setting events["exit_early"]; the main thread
+    then reads it with take(). Commands that do not fit the current state are ignored.
+    Quitting lets the main thread finish what it is doing (also a save) first.
     """
 
     KEYS = {
         "waiting": {" ": "start", "b": "bad", "q": "quit"},
         "recording": {"n": "save", "x": "discard", "q": "quit"},
+        "done": {"q": "quit"},  # app only: the round is complete, the follower still follows the leader
     }
 
-    def __init__(self, events, warn_after_s):
+    def __init__(self, events):
         self.events = events
-        self.warn_after_s = warn_after_s
         self.lock = threading.Lock()
         self.state = None
         self.command = None
@@ -414,22 +441,6 @@ class KeyControl:
         self.where = ""
         self.started_at = 0.0
         self.running = True
-        self.fd = sys.stdin.fileno()
-        self.old_term = termios.tcgetattr(self.fd)
-        tty.setcbreak(self.fd)  # one key at a time, no echo
-        attrs = termios.tcgetattr(self.fd)
-        attrs[3] &= ~termios.ISIG  # Ctrl+C arrives as a key ("\x03") instead of a signal
-        termios.tcsetattr(self.fd, termios.TCSANOW, attrs)
-        self.thread = threading.Thread(target=self._run, daemon=True)
-        self.thread.start()
-
-    def _on_ctrl_c(self):
-        if self.quit_requested:  # second Ctrl+C: stop right away
-            _thread.interrupt_main()
-            return
-        self.quit_requested = True
-        self.events["exit_early"] = True
-        say("Ctrl+C: quitting after the current step (press Ctrl+C again to stop at once).")
 
     def set_state(self, state, where):
         with self.lock:
@@ -444,6 +455,83 @@ class KeyControl:
             command, self.command, self.state = self.command, None, None
         return "quit" if self.quit_requested and command != "save" else command
 
+    def press(self, key):
+        with self.lock:
+            command = self.KEYS.get(self.state, {}).get(key)
+            if command and self.command is None:
+                self.command = command
+                self.events["exit_early"] = True
+
+    def request_quit(self):
+        self.quit_requested = True
+        self.events["exit_early"] = True
+
+    def close(self):
+        self.running = False
+
+
+class StudioControl(Control):
+    """Commands from the app: one word per line on stdin. A closed stdin (the app stopped) quits.
+
+    Reads the raw file descriptor, not sys.stdin: saving an episode forks video encoders, and a
+    forked child closes sys.stdin, which would wait forever for this thread's read lock."""
+
+    WORDS = {"start": " ", "save": "n", "discard": "x", "bad": "b"}
+
+    def __init__(self, events):
+        super().__init__(events)
+        self.fd = sys.stdin.fileno()
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        pending = b""
+        while self.running:
+            if not select.select([self.fd], [], [], 0.2)[0]:
+                continue
+            chunk = os.read(self.fd, 1024)
+            if not chunk:
+                break
+            pending += chunk
+            while b"\n" in pending:
+                line, pending = pending.split(b"\n", 1)
+                word = line.decode(errors="ignore").strip().lower()
+                if word == "quit":
+                    self.request_quit()
+                elif word in self.WORDS:
+                    self.press(self.WORDS[word])
+        self.request_quit()
+
+    def set_state(self, state, where):
+        super().set_state(state, where)
+        emit("state", state=state)
+
+
+class KeyControl(Control):
+    """Reads single keys from the terminal in a background thread and shows a status line.
+
+    Ctrl+C asks to quit like Q. The terminal does not turn Ctrl+C into a signal meanwhile, so
+    no process is interrupted in the middle of writing an episode; a second Ctrl+C stops at once.
+    """
+
+    def __init__(self, events, warn_after_s):
+        super().__init__(events)
+        self.warn_after_s = warn_after_s
+        self.fd = sys.stdin.fileno()
+        self.old_term = termios.tcgetattr(self.fd)
+        tty.setcbreak(self.fd)  # one key at a time, no echo
+        attrs = termios.tcgetattr(self.fd)
+        attrs[3] &= ~termios.ISIG  # Ctrl+C arrives as a key ("\x03") instead of a signal
+        termios.tcsetattr(self.fd, termios.TCSANOW, attrs)
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _on_ctrl_c(self):
+        if self.quit_requested:  # second Ctrl+C: stop right away
+            _thread.interrupt_main()
+            return
+        self.request_quit()
+        say("Ctrl+C: quitting after the current step (press Ctrl+C again to stop at once).")
+
     def _run(self):
         while self.running:
             ready, _, _ = select.select([sys.stdin], [], [], 0.2)
@@ -452,11 +540,7 @@ class KeyControl:
                 if key == "\x03":
                     self._on_ctrl_c()
                     continue
-                with self.lock:
-                    command = self.KEYS.get(self.state, {}).get(key)
-                    if command and self.command is None:
-                        self.command = command
-                        self.events["exit_early"] = True
+                self.press(key)
             self._show_status()
 
     def _show_status(self):
@@ -475,14 +559,50 @@ class KeyControl:
         sys.stdout.flush()
 
     def close(self):
-        self.running = False
+        super().close()
         self.thread.join(timeout=1)
         termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old_term)
         sys.stdout.write("\n")
 
 
+class Preview:
+    """App only: a small JPEG of each camera's newest frame, a few times per second, for the live
+    view. It takes the frames the robot's cameras already capture, so nothing else opens them."""
+
+    def __init__(self, cameras, folder, fps=4):
+        self.cameras = cameras
+        self.folder = Path(folder)
+        self.folder.mkdir(parents=True, exist_ok=True)
+        self.period = 1 / fps
+        self.running = True
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _run(self):
+        import cv2
+
+        while self.running:
+            for name, cam in self.cameras.items():
+                try:
+                    frame = cam.read_latest()
+                except Exception:  # no new frame: the app shows the camera as stopped
+                    continue
+                height, width = frame.shape[:2]
+                small = cv2.resize(frame, (320, round(320 * height / width)))
+                ok, jpg = cv2.imencode(".jpg", cv2.cvtColor(small, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 70])
+                if ok:
+                    tmp = self.folder / f"{name}.jpg.tmp"
+                    tmp.write_bytes(jpg.tobytes())
+                    tmp.replace(self.folder / f"{name}.jpg")
+            time.sleep(self.period)
+
+    def close(self):
+        self.running = False
+        self.thread.join(timeout=2)
+
+
 def say(text):
-    sys.stdout.write("\r\033[K" + text + "\n")
+    sys.stdout.write(text + "\n" if STUDIO else "\r\033[K" + text + "\n")
     sys.stdout.flush()
 
 
@@ -505,9 +625,11 @@ def announce(plan, slot, previous):
 
 
 def main():
+    global STUDIO
     args = parse_args()
+    STUDIO = args.studio
     init_logging()
-    if not sys.stdin.isatty():
+    if not STUDIO and not sys.stdin.isatty():
         sys.exit("Run this in a terminal: the keys are read from it.")
 
     # Plan first, so typos are caught before the hardware is touched.
@@ -567,14 +689,18 @@ def main():
     )
 
     keys = None
+    preview = None
     dataset = None
     log = None
     saved = 0
     try:
         # Leader first so the follower is not left idle (same order as lerobot-record).
         # The follower moves straight to the leader's pose: start with both arms alike.
+        emit("connecting")
         teleop.connect()
         robot.connect()
+        if STUDIO and args.preview_dir:
+            preview = Preview(robot.cameras, args.preview_dir)
         check_camera_rates(robot, args.fps)
 
         # Open the dataset only once the hardware works, so a wrong port leaves no empty dataset behind.
@@ -595,13 +721,26 @@ def main():
         log.start_session(args.note)
         done, total = plan_progress(plan, log)
         print(f"Dataset: {root} ({dataset.num_episodes} episodes saved, plan {done}/{total})")
+        emit("ready", dataset=root.name, episodes=dataset.num_episodes, done=done, total=total)
 
-        keys = KeyControl(events, args.warn_after_s)
+        keys = StudioControl(events) if STUDIO else KeyControl(events, args.warn_after_s)
         previous = None
+        studio_round = None  # app: the (shelf, round) of this run; the run ends once it is complete
 
         with VideoEncodingManager(dataset):
             while True:
                 slot = next_slot(plan, log)
+                if STUDIO:
+                    studio_round = studio_round or (slot and slot[:2])
+                    if slot is None or slot[:2] != studio_round:
+                        # The arm keeps following the leader until the operator has put it at rest
+                        # and the app sends quit: the motors switch off when this script ends.
+                        emit("round_done", plan_complete=slot is None)
+                        say("Round complete.")
+                        keys.set_state("done", "")
+                        record_loop(dataset=None, **loop_kwargs)
+                        keys.take()
+                        break
                 if slot is None:
                     say("Plan complete: every product has all its episodes in every round.")
                     break
@@ -612,6 +751,13 @@ def main():
                 done, total = plan_progress(plan, log)
                 where = (f"{shelf} round {round_}/{plan['rounds']} | {item} "
                          f"{log.good_count(item, round_) + 1}/{plan['per_round']} | plan {done}/{total}")
+                position = plan["positions"][round_ - 1]
+                round_done, round_size = round_progress(plan, log, shelf, round_)
+                emit("slot", shelf=shelf, round=round_, rounds=plan["rounds"], position=position,
+                     where=describe_position(position, plan["offset_cm"], plan["turn_deg"]),
+                     item=item, instruction=plan["products"][item]["instruction"],
+                     count=log.good_count(item, round_) + 1, per_round=plan["per_round"],
+                     round_done=round_done, round_size=round_size, done=done, total=total)
 
                 keys.set_state("waiting", where)
                 record_loop(dataset=None, **loop_kwargs)
@@ -625,6 +771,7 @@ def main():
                     else:
                         say(f"Episode {entry['episode_index']} ({entry['item']}, round {entry['round']}) marked bad: "
                             "it will be recorded again.")
+                        emit("marked_bad", index=entry["episode_index"])
                     continue
 
                 keys.set_state("recording", f"{item} round {round_}/{plan['rounds']}")
@@ -634,18 +781,23 @@ def main():
                 if command == "save" and dataset.has_pending_frames():
                     index = dataset.num_episodes
                     say(f"Saving episode {index}...")
+                    emit("saving", index=index)
                     dataset.save_episode()
                     log.add(index, item, shelf, round_, plan["positions"][round_ - 1])
                     saved += 1
                     say(f"Saved episode {index} ({item}, round {round_}).")
+                    emit("saved", index=index, item=item, round=round_)
                 else:
                     dataset.clear_episode_buffer()
                     say(f"Episode {dataset.num_episodes} cancelled, nothing saved.")
+                    emit("discarded")
                 if command == "quit" or keys.quit_requested:
                     break
     finally:
         if keys is not None:
             keys.close()
+        if preview is not None:
+            preview.close()
         if robot.is_connected:
             robot.disconnect()
         if teleop.is_connected:
@@ -662,4 +814,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit as e:
+        if isinstance(e.code, str):
+            emit("error", message=e.code)
+        raise
+    except Exception as e:
+        emit("error", message=f"{type(e).__name__}: {e}")
+        raise

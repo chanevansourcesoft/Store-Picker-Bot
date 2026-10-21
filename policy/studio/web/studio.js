@@ -1,0 +1,600 @@
+// Store Picker Bot front-end. Talks to studio.py; the episode player comes from /static/player.js.
+const $ = (id) => document.getElementById(id);
+const STEPS = [["campaign", "Campaign"], ["check", "Check"], ["record", "Record"], ["review", "Review"]];
+const REASONS = ["Dropped the product", "Wrong product", "Product not in the basket", "Did not end in the rest pose",
+  "Hit the shelf or the basket", "Long pause or hesitation", "Person or hand in the camera view", "Other"];
+const CAMS = { scene_cam: "Scene camera", gripper_cam: "Gripper camera" };
+
+let S = null;              // last /api/studio snapshot
+let confirmed = false;     // a campaign was opened since this window opened
+let page = null;           // current page id
+let episodes = [];         // dataset episodes (review page)
+let reviewTab = "todo";
+let current = null;        // episode shown in the review
+let selectedCampaign = null;
+let armTimer = null;
+let armState = null;
+let checksOk = false;
+let prevRecording = false;
+let prevFinishing = false;
+let restAction = null;     // what the rest-pose dialog confirms
+
+const player = new EpisodePlayer({
+  videos: $("videos"), slider: $("slider"), frameLabel: $("frameLabel"), playBtn: $("playBtn"),
+  speed: $("speed"), plots: $("plots"),
+}, { onError: (m) => toast(m) });
+
+// ---------- helpers ----------
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+function toast(msg, ms = 4000) {
+  const t = $("toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(toast.t); toast.t = setTimeout(() => (t.style.display = "none"), ms);
+}
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const pad = (n) => String(n).padStart(4, "0");
+const pretty = (item) => String(item || "?").replace(/_/g, " ");
+function kv(rows) { return rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join(""); }
+const job = () => S && S.record;
+const recording = () => !!(job() && job().status === "running");
+const finishing = () => !!(S && S.finish && S.finish.status === "running");
+const phase = () => (recording() ? job().info.phase : null);
+const camp = () => S && S.campaign;
+
+// ---------- steps ----------
+function stepInfo(id) {
+  if (!confirmed || !camp()) return { open: id === "campaign", done: false };
+  const c = camp();
+  switch (id) {
+    case "campaign": return { open: true, done: true };
+    case "check": return { open: true, done: S.arm_test_passed };
+    case "record": return { open: true, done: !S.next };
+    case "review": return { open: !c.draft && c.episodes > 0, done: !c.draft && c.episodes > 0 && !c.to_review, badge: c.to_review };
+    default: return { open: false, done: false };
+  }
+}
+
+function renderSteps() {
+  $("steps").innerHTML = STEPS.map(([id, label], i) => {
+    const s = stepInfo(id);
+    const cls = ["step", s.open ? "" : "locked", s.done ? "done" : "", page === id ? "current" : ""].join(" ");
+    return `<button class="${cls}" data-step="${id}" ${s.open ? "" : "disabled"}><span class="n">${s.done ? "✓" : i + 1}</span>` +
+      `<span class="t">${label}</span>${s.badge ? `<span class="b">${s.badge}</span>` : ""}</button>`;
+  }).join("");
+  $("steps").querySelectorAll("[data-step]").forEach((b) => (b.onclick = () => go(b.dataset.step)));
+}
+
+function renderTop() {
+  $("switchBtn").hidden = !confirmed || page === "campaign" || recording();
+  const c = camp();
+  $("who").innerHTML = confirmed && c
+    ? `Campaign <b>${esc(c.name)}</b>: ${c.done} / ${c.total} episodes` : "";
+}
+
+function go(id) {
+  if (!stepInfo(id).open) return;
+  if (page === "check" && id !== "check") stopArmTest(false);
+  if (page === "review" && id !== "review") { player.clear(); current = null; }
+  page = id;
+  history.replaceState(null, "", `#${id}`);
+  document.querySelectorAll(".page").forEach((p) => p.classList.toggle("show", p.id === `page-${id}`));
+  renderSteps();
+  renderTop();
+  enter(id);
+}
+
+function autoPage() {
+  const c = camp();
+  if (!confirmed || !c) return "campaign";
+  if (recording()) return "record";
+  if (c.to_review || (!S.next && c.episodes)) return "review";
+  if (!S.arm_test_passed) return "check";
+  return "record";
+}
+
+function enter(id) {
+  if (id === "campaign") enterCampaign();
+  if (id === "check") enterCheck();
+  if (id === "record") renderRecord();
+  if (id === "review") loadEpisodes(true);
+}
+
+// ---------- refresh loop ----------
+async function refresh() {
+  try { S = await api("/api/studio"); } catch (e) { toast("Store Picker Bot is not responding: " + e.message); return; }
+  if (!page) {
+    if (recording()) { confirmed = true; go("record"); return; }  // the window was reopened during a round
+    const wanted = location.hash.slice(1);
+    go(STEPS.some(([id]) => id === wanted) && stepInfo(wanted).open ? wanted : autoPage());
+    return;
+  }
+  if (prevRecording && !recording()) roundEnded();
+  if (prevFinishing && !finishing()) {
+    toast(S.finish.status === "finished" ? "Flagged episodes removed." : "Removing the flagged episodes failed: see the message.", 6000);
+    if (page === "review") loadEpisodes(true);
+  }
+  prevRecording = recording();
+  prevFinishing = finishing();
+  renderTop();
+  renderSteps();
+  if (page === "record") renderRecord();
+  if (page === "check") renderRoundInfo();
+  if (page === "review") renderPlanComplete();
+}
+
+function roundEnded() {
+  const j = job(), info = j.info;
+  $("restModal").hidden = true;
+  if (info.round_done) {
+    toast(info.plan_complete ? "Last round complete. Review it now." : "Round complete. Review it now.", 6000);
+    if (camp() && camp().episodes) go("review");
+  } else if (j.status === "failed") {
+    toast("The recording stopped with an error: see the message on the Record page.", 8000);
+    if (page !== "record") go("record");
+  } else {
+    toast(`Round paused. ${info.saved} episode(s) saved in this session.`, 6000);
+  }
+}
+
+$("switchBtn").onclick = () => go("campaign");
+
+// ---------- 1. campaign ----------
+function enterCampaign() {
+  const rows = [...S.campaigns];
+  const c = camp();
+  if (c && c.draft) rows.unshift({ folder: "__draft__", draft: true, name: c.name, done: 0, total: c.total, products: c.products.map((p) => p.item), to_review: 0 });
+  const active = selectedCampaign || (c && (c.draft ? "__draft__" : c.folder));
+  $("campaignList").innerHTML = rows.length ? rows.map((r) => {
+    const name = r.draft ? `${r.name} (not started yet)` : r.folder;
+    const sub = `${r.done} / ${r.total} episodes · ${r.products.map(pretty).join(", ")}${r.to_review ? ` · ${r.to_review} to review` : ""}`;
+    const last = c && (r.folder === c.folder || (r.draft && c.draft));
+    return `<div class="item ${r.folder === active ? "active" : ""}" data-f="${esc(r.folder)}"><span class="name">${esc(name)}</span>` +
+      `<span class="muted small">${last ? "last used" : ""}</span><span class="sub">${esc(sub)}</span></div>`;
+  }).join("") : `<p class="muted" style="padding:12px">No campaign yet: create one on the right.</p>`;
+  $("campaignList").querySelectorAll("[data-f]").forEach((el) => (el.onclick = () => { selectedCampaign = el.dataset.f; enterCampaign(); }));
+  const sel = rows.find((r) => r.folder === active);
+  $("campaignOpen").hidden = !sel;
+  if (sel) {
+    $("campaignOpenTitle").textContent = sel.draft ? sel.name : sel.folder;
+  }
+  // new campaign form
+  $("newName").placeholder = S.next_name;
+  if (!$("newProducts").children.length) {
+    $("newProducts").innerHTML = S.catalog.map((p) => `<label><input type="checkbox" value="${esc(p.item)}" checked>` +
+      `<span>${esc(pretty(p.item))}</span><span class="shelf">${esc(p.shelf)}</span><span class="ins">"${esc(p.instruction)}"</span></label>`).join("");
+    $("newRounds").innerHTML = Array.from({ length: S.max_rounds }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join("");
+    $("newRounds").value = S.config.default_rounds;
+    $("newPerRound").value = S.config.default_per_round;
+    $("newOffset").value = S.config.default_offset_cm;
+    $("newTurn").value = S.config.default_turn_deg;
+    $("newProducts").querySelectorAll("input").forEach((i) => (i.onchange = renderNewTotal));
+    [$("newRounds"), $("newPerRound")].forEach((i) => (i.oninput = renderNewTotal));
+  }
+  renderNewTotal();
+}
+const chosenProducts = () => [...$("newProducts").querySelectorAll("input:checked")].map((i) => i.value);
+function renderNewTotal() {
+  const n = chosenProducts().length, r = Number($("newRounds").value), p = Number($("newPerRound").value);
+  $("newTotal").textContent = n ? `${n} product(s) × ${r} round(s) × ${p} episodes = ${n * r * p} episodes.` : "Choose at least one product.";
+}
+$("openCampaignBtn").onclick = async () => {
+  const folder = selectedCampaign || (camp() && (camp().draft ? "__draft__" : camp().folder));
+  try {
+    if (folder !== "__draft__") await api("/api/campaign/open", { folder });
+    S = await api("/api/studio");
+    selectedCampaign = null;
+    confirmed = true;
+    go(autoPage());
+  } catch (e) { toast(e.message); }
+};
+$("newCampaignBtn").onclick = async () => {
+  try {
+    await api("/api/campaign/new", {
+      name: $("newName").value.trim(), products: chosenProducts(), rounds: Number($("newRounds").value),
+      per_round: Number($("newPerRound").value), offset_cm: Number($("newOffset").value), turn_deg: Number($("newTurn").value),
+    });
+    S = await api("/api/studio");
+    $("newName").value = "";
+    selectedCampaign = null;
+    confirmed = true;
+    go("check");
+  } catch (e) { toast(e.message, 6000); }
+};
+
+// ---------- 2. check ----------
+async function enterCheck() {
+  renderRoundInfo();
+  renderCameraTest(S.camera_test);
+  renderArms(null);
+  await loadChecks();
+}
+async function loadChecks() {
+  $("checks").innerHTML = `<p class="muted">Checking…</p>`;
+  try {
+    const { checks } = await api("/api/checks");
+    checksOk = checks.every((c) => c.ok);
+    $("checks").innerHTML = checks.map((c) => `<div class="check ${c.ok ? "ok" : "bad"}"><span class="ic">${c.ok ? "✓" : "✕"}</span>` +
+      `<span>${esc(c.label)}</span><span class="detail">${esc(c.detail)}</span>${c.ok ? "" : `<span class="fix">${esc(c.fix)}</span>`}</div>`).join("");
+  } catch (e) { checksOk = false; $("checks").innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
+  updateToRecord();
+}
+$("recheckBtn").onclick = loadChecks;
+
+function renderCameraTest(result) {
+  $("camTest").innerHTML = Object.entries(CAMS).map(([cam, label]) => {
+    const r = result && result.cameras[cam];
+    const shot = r && r.ok ? `<img src="/camera_test/${cam}.jpg?t=${result.taken}" alt="">` : `<span>${r ? esc(r.message) : "No picture yet"}</span>`;
+    return `<figure><div class="shot">${shot}</div><figcaption class="${r && !r.ok ? "bad" : ""}">${label}${r && r.ok ? " ✓" : r ? " ✕" : ""}</figcaption></figure>`;
+  }).join("");
+  $("camTestMsg").textContent = result && result.settings_error ? result.settings_error : "";
+}
+$("camTestBtn").onclick = async () => {
+  $("camTestBtn").disabled = true;
+  $("camTestMsg").textContent = "Taking pictures…";
+  try { renderCameraTest(await api("/api/cameras/test", {})); } catch (e) { $("camTestMsg").textContent = e.message; }
+  $("camTestBtn").disabled = false;
+};
+
+function renderArms(st) {
+  armState = st;
+  const f = st && st.follower;
+  $("followerCheck").className = "check " + (f ? (f.ok ? "ok" : "bad") : "");
+  $("followerCheck").innerHTML = `<span class="ic">${f ? (f.ok ? "✓" : "✕") : "·"}</span><span>Follower arm answers</span>` +
+    `<span class="detail"></span>${f && !f.ok ? `<span class="fix">${esc(f.message)}</span>` : ""}`;
+  const joints = st ? st.joints : ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"].map((name) => ({ name }));
+  $("motors").innerHTML = joints.map((j) => {
+    const lo = j.name === "gripper" ? 0 : -100, hi = 100;
+    const pos = j.value == null ? null : Math.max(0, Math.min(100, ((j.value - lo) / (hi - lo)) * 100));
+    return `<div class="motor ${j.moved ? "ok" : ""}"><span>${j.name.replace("_", " ")}</span>` +
+      `<span class="gauge">${pos == null ? "" : `<span style="left:calc(${pos}% - 1px)"></span>`}</span>` +
+      `<span class="val">${j.value == null ? "–" : j.value.toFixed(0)}</span><span class="ic">${j.moved ? "✓" : "·"}</span></div>`;
+  }).join("");
+  if (st) {
+    const still = st.joints.filter((j) => !j.moved).map((j) => j.name.replace("_", " "));
+    $("armMsg").textContent = st.error ? st.error
+      : st.passed ? "Both arms work."
+      : st.running && st.joints.every((j) => j.value == null) ? "Reading the leader arm…"
+      : still.length ? `Move: ${still.join(", ")}` : f && !f.ok ? "Fix the follower arm, then test again." : "";
+  } else $("armMsg").textContent = S && S.arm_test_passed ? "Test passed." : "";
+  $("armStartBtn").textContent = st && st.running ? "Stop test" : "Start test";
+  updateToRecord();
+}
+async function pollArms() {
+  try {
+    const st = await api("/api/arms");
+    renderArms(st);
+    if (!st.running) { clearInterval(armTimer); armTimer = null; }
+  } catch (e) { clearInterval(armTimer); armTimer = null; }
+}
+async function stopArmTest(render = true) {
+  clearInterval(armTimer); armTimer = null;
+  try { await api("/api/arms/stop", {}); } catch {}
+  if (render) { S = await api("/api/studio"); renderArms(null); renderSteps(); }
+}
+$("armStartBtn").onclick = async () => {
+  if (armState && armState.running) return stopArmTest(true);
+  try {
+    await api("/api/arms/start", {});
+    clearInterval(armTimer);
+    armTimer = setInterval(pollArms, 200);
+  } catch (e) { toast(e.message); }
+};
+
+function nextRoundText() {
+  const n = S.next;
+  if (!n) return "The plan is complete.";
+  return `Next: <b>${esc(n.shelf)}</b>, round ${n.round} of ${n.rounds}: put the base <b>${esc(n.where)}</b>. ` +
+    `${n.size - n.done} episode(s) to record.`;
+}
+function renderRoundInfo() {
+  const c = camp();
+  if (!c) return;
+  let msg;
+  if (recording()) msg = "A round is running.";
+  else if (c.to_review) msg = `Review the last round first (${c.to_review} episode(s) waiting).`;
+  else msg = nextRoundText();
+  $("roundInfo").innerHTML = msg;
+  updateToRecord();
+}
+function updateToRecord() {
+  const c = camp();
+  const armOk = (armState && armState.passed) || (S && S.arm_test_passed);
+  $("toRecordBtn").disabled = !(c && (recording() || (checksOk && armOk && !c.to_review && S.next)));
+}
+$("toRecordBtn").onclick = async () => {
+  await stopArmTest(false);  // ends the arm test; the server remembers that it passed
+  S = await api("/api/studio");
+  go("record");
+};
+
+// ---------- 3. record ----------
+const PHASES = {
+  starting: ["Starting…", "warn", "Opening the arms and cameras. The follower arm moves to the leader arm's pose."],
+  connecting: ["Connecting to the arms…", "warn", "The follower arm moves to the leader arm's pose."],
+  ready: ["Getting ready…", "warn", ""],
+  waiting: ["Ready for the next episode", "ok", "Leader arm in the rest pose, then press Start (Space) just before you move."],
+  recording: ["Recording", "rec", "Press Save (N) once the arm is back in the rest pose, or Cancel (X)."],
+  saving: ["Saving…", "warn", "Wait until it says Ready. Meanwhile put the product back on the shelf."],
+  done: ["Round complete", "ok", "Put the follower arm in its rest pose, then press the button below. Its motors then switch off."],
+};
+let liveTimer = null;
+function renderRecord() {
+  const c = camp();
+  if (!c) return;
+  const j = job(), running = recording(), ph = phase(), info = (j && j.info) || {};
+  let title, cls, sub;
+  if (running && j.stopping) [title, cls, sub] = ["Stopping…", "warn", "The episode in progress is dropped; saved episodes are kept."];
+  else if (running) [title, cls, sub] = PHASES[ph] || PHASES.starting;
+  else if (j && j.status === "failed") [title, cls, sub] = ["Stopped with an error", "bad", info.error || "See the message below. Fix it, then start the round again."];
+  else if (!S.next) [title, cls, sub] = ["The plan is complete", "ok", "Review the last episodes on the Review step."];
+  else if (c.to_review) [title, cls, sub] = ["Review first", "warn", `${c.to_review} episode(s) of the last round are waiting on the Review step.`];
+  else [title, cls, sub] = ["Ready to start a round", "ok", "Put the base where it says on the right, the leader arm in its rest pose, then press Start round."];
+  $("recState").textContent = title; $("recState").className = "state " + cls; $("recSub").textContent = sub;
+
+  // timer
+  const t = $("recTimer");
+  if (running && ph === "recording") {
+    const s = info.elapsed || 0;
+    t.textContent = `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
+    t.className = "timer " + (s > S.config.long_episode_s ? "long" : "rec");
+    if (s > S.config.long_episode_s) $("recSub").textContent = "Long episode: press Save (N) or Cancel (X).";
+  } else { t.textContent = ""; t.className = "timer"; }
+
+  // buttons
+  $("startBtn").disabled = !(running && ph === "waiting" && !j.stopping);
+  $("saveBtn").disabled = $("discardBtn").disabled = !(running && ph === "recording" && !j.stopping);
+  $("startRoundBtn").hidden = running || !S.next || !!c.to_review;
+  $("finishRoundBtn").hidden = !(running && ph === "done" && !j.stopping);
+  $("pauseRoundBtn").hidden = !running || ph === "done" || j.stopping;
+  $("recLog").hidden = !(j && j.status === "failed");
+  if (j && j.status === "failed") $("recLog").textContent = j.log.join("\n");
+
+  // what to do now
+  const slot = running && info.slot && ph !== "done" ? info.slot : null;
+  const n = S.next;
+  const base = slot || n;
+  const roundOver = running && ph === "done";
+  $("nowBase").className = "now-block" + (!running && n ? " changed" : "");
+  if (roundOver) {
+    $("nowBase").innerHTML = `<div class="lbl">Base</div><div class="big">Round complete</div>` +
+      `<div class="muted small">${n ? `After the review, the next round is at ${esc(n.shelf)}: ${esc(n.where)}.` : "That was the last round."}</div>`;
+  } else {
+    $("nowBase").innerHTML = base
+      ? `<div class="lbl">Base · ${esc(base.shelf)} · round ${base.round} of ${base.rounds}</div><div class="big">${esc(base.where)}</div>` +
+        `<div class="muted small">${!running ? "Drive or push the base there now, using the floor marks." : "Do not move the base during the round."}</div>`
+      : `<div class="lbl">Base</div><div class="big">All rounds are recorded</div>`;
+  }
+  $("nowProduct").hidden = roundOver || !(slot || n);
+  if (slot) {
+    $("nowProduct").innerHTML = `<div class="lbl">Pick this product</div><div class="big">${esc(pretty(slot.item))}</div>` +
+      `<div class="muted">"${esc(slot.instruction)}"</div><div class="small">Episode ${slot.count} of ${slot.per_round} for this product in this round</div>`;
+  } else if (n) {
+    $("nowProduct").innerHTML = `<div class="lbl">Products in this round</div>` +
+      n.items.map((i) => `<div>${esc(pretty(i.item))}: <b>${i.done} / ${i.need}</b></div>`).join("");
+  }
+  const rd = slot ? slot.round_done : n ? n.done : 0, rs = slot ? slot.round_size : n ? n.size : 0;
+  $("roundBar").style.width = roundOver || !rs ? "100%" : `${Math.min(100, (100 * rd) / rs)}%`;
+  const rows = [["This round", roundOver ? "complete" : rs ? `${rd} / ${rs}` : "–"], ["Whole plan", `${slot ? slot.done : c.done} / ${c.total}`]];
+  if (running) rows.push(["Saved now", info.saved], ["Cancelled", info.discarded]);
+  $("nowCounts").innerHTML = kv(rows);
+
+  // live view
+  const live = running && !["starting", "connecting"].includes(ph);
+  $("live").classList.toggle("rec", running && ph === "recording");
+  if (live && !liveTimer) liveTimer = setInterval(updateLive, 250);
+  if (!live && liveTimer) { clearInterval(liveTimer); liveTimer = null; showLive(false); }
+}
+function showLive(on) {
+  for (const [img, wait] of [["liveScene", "liveSceneWait"], ["liveGripper", "liveGripperWait"]]) {
+    if (!on) { $(img).removeAttribute("src"); $(wait).hidden = false; $(wait).textContent = "No picture"; }
+  }
+}
+let liveTick = 0;
+async function updateLive() {
+  const t = Date.now();
+  for (const [cam, img, wait] of [["scene_cam", "liveScene", "liveSceneWait"], ["gripper_cam", "liveGripper", "liveGripperWait"]]) {
+    const el = $(img);
+    if (el.dataset.loading) continue;
+    el.dataset.loading = "1";
+    const next = new Image();
+    next.onload = () => { el.src = next.src; $(wait).hidden = true; delete el.dataset.loading; };
+    next.onerror = () => { delete el.dataset.loading; };
+    next.src = `/live/${cam}.jpg?t=${t}`;
+  }
+  if (++liveTick % 4) return;
+  try {  // a camera whose picture stops changing is shown as stopped
+    const ages = await api("/api/live");
+    for (const [cam, wait] of [["scene_cam", "liveSceneWait"], ["gripper_cam", "liveGripperWait"]]) {
+      if (ages[cam] != null && ages[cam] > 3) { $(wait).hidden = false; $(wait).textContent = "Camera stopped"; }
+    }
+  } catch {}
+}
+
+async function command(cmd) {
+  try { await api("/api/record/cmd", { cmd }); S = await api("/api/studio"); renderRecord(); } catch (e) { toast(e.message); }
+}
+$("startBtn").onclick = () => command("start");
+$("saveBtn").onclick = () => command("save");
+$("discardBtn").onclick = () => command("discard");
+$("startRoundBtn").onclick = async () => {
+  $("startRoundBtn").disabled = true;
+  try {
+    await api("/api/record/start", {});
+    S = await api("/api/studio");
+    prevRecording = true;
+    renderRecord();
+  } catch (e) { toast(e.message, 7000); }
+  $("startRoundBtn").disabled = false;
+};
+function askRest(title, text, ok, action) {
+  $("restTitle").textContent = title; $("restText").textContent = text; $("restOkBtn").textContent = ok;
+  restAction = action;
+  $("restModal").hidden = false;
+}
+$("restOkBtn").onclick = async () => {
+  $("restModal").hidden = true;
+  if (restAction) await restAction();
+};
+$("restCancelBtn").onclick = () => ($("restModal").hidden = true);
+async function stopRound() {
+  try { await api("/api/record/stop", {}); toast("Stopping…"); } catch (e) { toast(e.message); }
+}
+$("finishRoundBtn").onclick = () => askRest("Finish the round?",
+  "The follower arm's motors switch off: it must rest in its rest pose, or be held, so it does not drop.",
+  "The arm is at rest: finish", stopRound);
+$("pauseRoundBtn").onclick = () => askRest("Pause the round?",
+  "Saved episodes are kept and you can continue later; an episode that is still recording is dropped. " +
+  "The follower arm's motors switch off: put it in its rest pose, or hold it, first.", "Pause the round", stopRound);
+
+// ---------- 4. review ----------
+const isTodo = (e) => e.in_log && !e.approved && !e.bad;
+async function loadEpisodes(selectFirst = false) {
+  renderPlanComplete();
+  try { episodes = (await api("/api/episodes")).episodes; } catch (e) { episodes = []; renderReviewList(); showReviewEmpty(e.message); return; }
+  renderReviewList();
+  if (selectFirst || !current || !episodes.some((e) => e.index === current.index)) {
+    const first = visibleEpisodes()[0] || episodes.find(isTodo);
+    if (first) select(first.index); else showReviewEmpty();
+  } else {
+    current = episodes.find((e) => e.index === current.index);
+    renderDecision();
+  }
+}
+function visibleEpisodes() {
+  const f = { todo: isTodo, approved: (e) => e.approved && !e.bad, flagged: (e) => e.bad, all: () => true }[reviewTab];
+  return episodes.filter(f);
+}
+function renderReviewList() {
+  const n = { todo: episodes.filter(isTodo).length, approved: episodes.filter((e) => e.approved && !e.bad).length,
+    flagged: episodes.filter((e) => e.bad).length, all: episodes.length };
+  const labels = { todo: "To do", approved: "Approved", flagged: "Flagged", all: "All" };
+  $("reviewTabs").innerHTML = Object.keys(labels).map((k) => `<button data-tab="${k}" class="${reviewTab === k ? "on" : ""}">${labels[k]} ${n[k]}</button>`).join("");
+  $("reviewTabs").querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { reviewTab = b.dataset.tab; renderReviewList(); }));
+  const rows = visibleEpisodes();
+  $("reviewList").innerHTML = rows.length ? rows.map((e) => {
+    const tag = e.approved && !e.bad ? `<span class="tag approved">✓</span>` : e.bad ? `<span class="tag flagged">✕</span>`
+      : e.warnings.length ? `<span class="tag warn">!</span>` : "";
+    const where = e.in_log ? `${pretty(e.item)} · ${e.shelf} round ${e.round}` : "not in the episode log";
+    return `<div class="item ${current && current.index === e.index ? "active" : ""}" data-i="${e.index}"><span class="name">Episode ${pad(e.index)}</span>${tag}` +
+      `<span class="sub">${esc(where)} · ${e.seconds.toFixed(1)} s${e.bad && e.reason ? " · " + esc(e.reason) : ""}</span></div>`;
+  }).join("") : `<p class="muted" style="padding:12px">${reviewTab === "todo" ? "Everything is reviewed." : "Nothing here."}</p>`;
+  $("reviewList").querySelectorAll("[data-i]").forEach((el) => (el.onclick = () => select(Number(el.dataset.i))));
+  const c = camp();
+  $("reviewProgress").textContent = n.todo ? `${n.todo} left to review` : "All reviewed";
+  $("reviewDoneBtn").hidden = !(c && !c.to_review && S.next && !recording());
+}
+$("reviewDoneBtn").onclick = () => go(S.arm_test_passed ? "record" : "check");
+function showReviewEmpty(msg) {
+  current = null; player.clear();
+  $("reviewPlayer").hidden = true; $("reviewEmpty").hidden = false;
+  $("reviewEmpty").textContent = msg || (episodes.some(isTodo) ? "Choose an episode on the left." : "Nothing left to review.");
+}
+async function select(index) {
+  const e = episodes.find((x) => x.index === index);
+  if (!e) return;
+  current = e;
+  $("reviewEmpty").hidden = true; $("reviewPlayer").hidden = false;
+  $("epTitle").textContent = `Episode ${pad(e.index)}`;
+  $("epTarget").textContent = e.in_log ? pretty(e.item) : "";
+  $("epMeta").textContent = [e.in_log ? `${e.shelf}, round ${e.round} (${e.position})` : "", `${e.seconds.toFixed(1)} s`].filter(Boolean).join(" · ");
+  $("epWarnings").innerHTML = e.warnings.map((w) => `<span>! ${esc(w)}</span>`).join("");
+  $("reasons").hidden = true;
+  renderDecision(); renderReviewList();
+  await player.show(e);
+}
+function renderDecision() {
+  if (!current) return;
+  const d = $("epDecision");
+  d.className = "decision " + (current.bad ? "flagged" : current.approved ? "approved" : "");
+  d.textContent = !current.in_log ? "Recorded outside a plan: cannot be reviewed here."
+    : current.bad ? `Flagged: ${current.reason || "bad"} (it is recorded again)` : current.approved ? "Approved" : "Not reviewed yet";
+  $("approveBtn").disabled = $("flagBtn").disabled = !current.in_log;
+}
+async function decide(decision, reason = "") {
+  if (!current || !current.in_log) return;
+  try {
+    await api("/api/review", { index: current.index, decision, reason });
+    Object.assign(current, { approved: decision === "approve", bad: decision === "flag", reason });
+    $("reasons").hidden = true;
+    renderDecision(); renderReviewList();
+    S = await api("/api/studio");
+    renderPlanComplete(); renderSteps(); renderTop(); renderReviewList();
+    const next = episodes.find((e) => isTodo(e) && e.index > current.index) || episodes.find(isTodo);
+    if (next) setTimeout(() => select(next.index), 250);
+    else toast(S.next ? "All episodes reviewed. Press Next round." : "All episodes reviewed.");
+  } catch (e) { toast(e.message); }
+}
+$("approveBtn").onclick = () => decide("approve");
+$("flagBtn").onclick = () => { $("reasons").hidden = !$("reasons").hidden; };
+$("reasons").insertAdjacentHTML("beforeend", REASONS.map((r) => `<button data-r="${esc(r)}">${esc(r)}</button>`).join(""));
+$("reasons").querySelectorAll("[data-r]").forEach((b) => (b.onclick = () => decide("flag", b.dataset.r)));
+function neighbour(step) {
+  const rows = visibleEpisodes();
+  const i = rows.findIndex((e) => current && e.index === current.index);
+  return rows[i + step] || null;
+}
+function renderPlanComplete() {
+  const c = camp();
+  const show = !!(c && !c.draft && !S.next && c.episodes);
+  $("planComplete").hidden = !show;
+  if (!show) return;
+  const fin = S.finish;
+  $("planCompleteText").innerHTML = c.to_review ? `Review the last ${c.to_review} episode(s) first.`
+    : c.flagged ? `${c.approved} episodes approved. <b>${c.flagged} flagged</b> episode(s) are still in the dataset: remove them ` +
+      `before training. The dataset is then renumbered, and the old copy is kept next to it as <code>${esc(c.folder)}_old</code> (the admin deletes it).`
+    : `All ${c.approved} episodes are approved. The dataset is ready: <code>policy/data_collection/dataset/${esc(c.folder)}</code>.`;
+  $("removeFlaggedBtn").hidden = !(c.flagged && !c.to_review) || finishing();
+  $("finishStatus").hidden = !fin;
+  if (fin) {
+    const st = { running: ["Removing…", "warn"], finished: ["Removed", "ok"], failed: ["Failed", "bad"], stopped: ["Stopped", "warn"] }[fin.status];
+    $("finishState").textContent = st[0]; $("finishState").className = "state " + st[1];
+    $("finishSub").textContent = fin.status === "running" ? "" : fin.log[fin.log.length - 1] || "";
+  }
+  $("finishLog").hidden = !(fin && fin.status === "failed");
+  if (fin) $("finishLog").textContent = fin.log.join("\n");
+}
+$("removeFlaggedBtn").onclick = async () => {
+  if (!confirm(`Remove the ${camp().flagged} flagged episode(s) from the dataset? The episodes are renumbered.`)) return;
+  try { await api("/api/remove_flagged", {}); S = await api("/api/studio"); prevFinishing = true; renderPlanComplete(); } catch (e) { toast(e.message, 6000); }
+};
+
+// ---------- keys ----------
+document.addEventListener("keydown", (ev) => {
+  const tag = document.activeElement.tagName;
+  if (["INPUT", "SELECT", "TEXTAREA"].includes(tag) && document.activeElement.type !== "range") return;
+  if (ev.ctrlKey || ev.metaKey || ev.altKey || !$("restModal").hidden) return;
+  if (page === "record") {
+    const cmd = { " ": "start", n: "save", N: "save", x: "discard", X: "discard" }[ev.key];
+    if (!cmd) return;
+    ev.preventDefault();  // Space must not also press a focused button
+    if (ev.repeat) return;
+    const ph = phase();
+    if ((cmd === "start" && ph === "waiting") || (cmd !== "start" && ph === "recording")) command(cmd);
+    return;
+  }
+  if (page !== "review" || !current) return;
+  if (player.handleKey(ev)) return;
+  const keys = {
+    a: () => decide("approve"), A: () => decide("approve"),
+    f: () => { $("reasons").hidden = !$("reasons").hidden; }, F: () => { $("reasons").hidden = !$("reasons").hidden; },
+    ArrowUp: () => { const e = neighbour(-1); if (e) select(e.index); },
+    ArrowDown: () => { const e = neighbour(1); if (e) select(e.index); },
+  };
+  if (keys[ev.key]) { ev.preventDefault(); keys[ev.key](); }
+});
+
+// ---------- start ----------
+async function loop() {
+  await refresh();
+  setTimeout(loop, page === "record" && recording() ? 300 : 1500);
+}
+loop();
+setInterval(() => { if (page === "review" && !recording()) loadEpisodes(); }, 5000);
+setInterval(() => api("/api/heartbeat", {}).catch(() => {}), 10000);
+api("/api/heartbeat", {}).catch(() => {});
