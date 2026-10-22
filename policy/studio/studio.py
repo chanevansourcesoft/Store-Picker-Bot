@@ -4,12 +4,14 @@ studio.py
 Store Picker Bot: a local app that guides anyone through recording demonstrations on the SO-100
 arms without a terminal: campaign (one dataset and its recording plan), checks of the computer,
 the arms and the cameras, recording one round at a time with a live camera view, and reviewing
-every episode. Start it with run_studio.sh or the desktop icon (install_desktop_icon.sh).
+every episode, then sending the dataset to the training PC and training GR00T there. Start it with
+run_studio.sh or the desktop icon (install_desktop_icon.sh).
 
 The server runs in lerobot_env. For each round it starts data_collection/record.py --studio and
 sends it the operator's commands (start, save, discard, quit) on stdin; the dataset, its plan and
-its episode log are the same as when recording in a terminal. It listens on 127.0.0.1 only and
-stops by itself a few minutes after the app window is closed, never while a round runs.
+its episode log are the same as when recording in a terminal. The Train step works over SSH
+(training_link.py). It listens on 127.0.0.1 only and stops by itself a few minutes after the app
+window is closed, never while a round runs or a dataset is being sent.
 Admin settings: studio_config.json. Guide: policy/docs/DATA_STUDIO.md.
 """
 
@@ -41,6 +43,7 @@ REMOVE_SCRIPT = DATA_COLLECTION_DIR / "remove_bad_episodes.py"
 sys.path.insert(0, str(DATA_COLLECTION_DIR))
 import record  # noqa: E402
 from dataset_view import DatasetView  # noqa: E402  (studio/dataset_view.py)
+from training_link import DISK_MARGIN_GB, GPU_BUSY_MB, MAX_STEPS, MIN_STEPS, TrainingLink  # noqa: E402
 
 CONFIG = json.loads((STUDIO_DIR / "studio_config.json").read_text())
 STATE_FILE = Path.home() / ".config" / "store_picker_studio" / "state.json"  # open campaign
@@ -54,7 +57,7 @@ CAMERAS = {record.GRIPPER_CAM: "GRIPPER_CAM", record.SCENE_CAM: "SCENE_CAM"}
 JOINTS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
 IDLE_EXIT_S = 180  # stop the server this long after the window stopped sending heartbeats
 # The code this server runs: run_studio.sh restarts an idle server whose code is older than the files.
-CODE_FILES = [STUDIO_DIR / "studio.py", STUDIO_DIR / "dataset_view.py", RECORD_SCRIPT]
+CODE_FILES = [STUDIO_DIR / "studio.py", STUDIO_DIR / "dataset_view.py", STUDIO_DIR / "training_link.py", RECORD_SCRIPT]
 CODE_STAMP = max(int(p.stat().st_mtime) for p in CODE_FILES)
 
 
@@ -454,6 +457,7 @@ class Studio:
         self.last_heartbeat = time.time()
         self.view = None
         self._open_view()
+        self.link = TrainingLink(CONFIG["training"], CACHE_DIR) if CONFIG.get("training") else None
 
     def _save_state(self):
         write_json(STATE_FILE, self.state)
@@ -477,12 +481,23 @@ class Studio:
     def busy(self):
         return any(j.running() for j in self.jobs.values())
 
+    def sending(self):
+        job = self.jobs.get("send")
+        return bool(job and job.running())
+
+    def busy_message(self):
+        if self.sending():
+            return "Wait until the dataset has been sent to the training PC."
+        if self.recording():
+            return "Wait until the current round has finished."
+        return "Wait until the flagged episodes are removed."
+
     # --- campaign ---
     def open_campaign(self, folder):
         if self.busy():
             if folder == self.state.get("folder"):
                 return  # the window was reopened during a round: nothing changes
-            raise ValueError("Wait until the current round has finished.")
+            raise ValueError(self.busy_message())
         if not load_campaign(folder):
             raise ValueError(f"{folder} is not a dataset recorded with a plan.")
         self.state["folder"] = folder
@@ -491,7 +506,7 @@ class Studio:
 
     def new_campaign(self, body):
         if self.busy():
-            raise ValueError("Wait until the current round has finished.")
+            raise ValueError(self.busy_message())
         name = str(body.get("name") or "").strip() or record.next_version_name()
         if not NAME_RE.match(name):
             raise ValueError("The name may only use letters, numbers, '-' and '_'.")
@@ -505,7 +520,7 @@ class Studio:
         """Move a campaign's dataset to the desktop Trash (it can be restored from there).
         A campaign that has not recorded anything yet is only forgotten."""
         if self.busy():
-            raise ValueError("Wait until the current round has finished.")
+            raise ValueError(self.busy_message())
         if folder == "__draft__":
             self.state.pop("draft", None)
             self._campaign_changed()
@@ -557,6 +572,8 @@ class Studio:
             "next": upcoming,
             "record": self.jobs["record"].public() if "record" in self.jobs else None,
             "finish": self.jobs["finish"].public() if "finish" in self.jobs else None,
+            "send": self.jobs["send"].public() if "send" in self.jobs else None,
+            "training_configured": self.link is not None,
             "arm_test_passed": self.arm_test_passed,
             "camera_test": self.camera_result,
             "campaigns": list_campaigns(),
@@ -601,7 +618,7 @@ class Studio:
         free_gb = shutil.disk_usage(POLICY_DIR).free / 1e9
         rows.append(("disk", "Enough disk space", free_gb >= CONFIG["min_free_disk_gb"], f"{free_gb:.0f} GB free",
                      f"Free up disk space: at least {CONFIG['min_free_disk_gb']} GB are needed."))
-        ours = {str(j.proc.pid) for j in self.jobs.values() if j.running()}
+        ours = {str(j.proc.pid) for j in self.jobs.values() if j.running() and hasattr(j, "proc")}
         others = subprocess.run(["pgrep", "-f", r"python[0-9.]* .*record\.py( |$)|lerobot-(record|teleoperate|replay|calibrate)( |$)"],
                                 capture_output=True, text=True).stdout.split()
         others = [p for p in others if p not in ours]
@@ -635,7 +652,7 @@ class Studio:
         if not current:
             raise ValueError("Choose a campaign first.")
         if self.busy():
-            raise ValueError("A round is already running.")
+            raise ValueError(self.busy_message())
         folder, plan, log = current
         counts = review_counts(plan, log)
         if counts["to_review"]:
@@ -710,6 +727,133 @@ class Studio:
         if counts["to_review"]:
             raise ValueError("Review every episode first.")
         self.jobs["finish"] = Job("finish", [sys.executable, "-u", str(REMOVE_SCRIPT), folder, "--yes"], device_env())
+
+    # --- train (on the training PC, over SSH; nothing here holds self.lock while it waits for the network) ---
+    def _link(self):
+        if self.link is None:
+            raise ValueError("No training PC is set up: the admin adds it to studio_config.json (\"training\").")
+        return self.link
+
+    def _dataset(self):
+        """(folder, counts, local stamp) of the open campaign's dataset."""
+        folder = self.state.get("folder")
+        loaded = folder and load_campaign(folder)
+        if not loaded:
+            raise ValueError("Open a campaign with recorded episodes first.")
+        plan, log = loaded
+        meta = campaign_root(folder) / "meta"
+        stamp = sum(p.stat().st_mtime_ns for p in meta.rglob("*") if p.is_file())
+        counts = review_counts(plan, log)
+        done, total = record.plan_progress(plan, log)
+        return folder, {**counts, "done": done, "total": total}, stamp
+
+    def _send_blocker(self, counts):
+        if self.recording():
+            return "A round is running: send the dataset when it has finished."
+        if counts["to_review"] or counts["in_open_round"]:
+            return "Review every episode first (Review step)."
+        if counts["flagged"]:
+            return "Remove the flagged episodes first (Review step, at the end of the plan)."
+        if not counts["episodes"]:
+            return "The dataset has no episodes yet."
+        return None
+
+    def train_overview(self):
+        link = self._link()
+        status = link.status()
+        out = {"status": status, "default_steps": CONFIG["training"]["default_steps"],
+               "min_steps": MIN_STEPS, "max_steps": MAX_STEPS}
+        try:
+            folder, counts, stamp = self._dataset()
+        except ValueError as e:
+            out["dataset"] = {"error": str(e)}
+            return out
+        dataset = {"folder": folder, **counts, "blocker": self._send_blocker(counts)}
+        if status.get("ok") and not self.sending():
+            try:
+                dataset["same"] = link.dataset_same(campaign_root(folder), folder, stamp)
+            except (ValueError, subprocess.TimeoutExpired) as e:
+                dataset["check_error"] = str(e)
+        dataset["on_remote"] = folder in (status.get("datasets") or {})
+        dataset["running_run"] = next((r["run"] for r in status.get("runs", [])
+                                       if r.get("dataset") == folder and r.get("status") == "running"), None)
+        out["dataset"] = dataset
+        out["plan"] = link.plan(CONFIG["training"]["default_steps"], status) if status.get("ok") else None
+        return out
+
+    def send_dataset(self):
+        link = self._link()
+        with self.lock:
+            if self.busy():
+                raise ValueError(self.busy_message())
+            folder, counts, _ = self._dataset()
+            blocker = self._send_blocker(counts)
+            if blocker:
+                raise ValueError(blocker)
+        status = link.status(max_age=0)
+        if not status.get("ok"):
+            raise ValueError(status["error"])
+        running = [r["run"] for r in status["runs"] if r.get("dataset") == folder and r.get("status") == "running"]
+        if running:
+            raise ValueError(f"A training on this dataset is running ({running[0]}): sending would change its data.")
+        with self.lock:
+            if self.busy():
+                raise ValueError(self.busy_message())
+            link.forget_dataset(folder)
+            self.jobs["send"] = link.send(campaign_root(folder), folder)
+
+    def stop_send(self):
+        job = self.jobs.get("send")
+        if job:
+            job.stop()
+
+    def plan_training(self, steps):
+        link = self._link()
+        return link.plan(self._check_steps(steps), link.status())
+
+    @staticmethod
+    def _check_steps(steps):
+        try:
+            steps = int(steps)
+        except (TypeError, ValueError):
+            raise ValueError("Steps must be a whole number.") from None
+        if not MIN_STEPS <= steps <= MAX_STEPS:
+            raise ValueError(f"Steps must be between {MIN_STEPS:,} and {MAX_STEPS:,}.")
+        return steps
+
+    def start_training(self, steps):
+        link = self._link()
+        steps = self._check_steps(steps)
+        if self.sending():
+            raise ValueError("Wait until the dataset has been sent.")
+        folder, counts, stamp = self._dataset()
+        blocker = self._send_blocker(counts)
+        if blocker:
+            raise ValueError(blocker)
+        status = link.status(max_age=0)
+        if not status.get("ok"):
+            raise ValueError(status["error"])
+        link.forget_dataset(folder)
+        if not link.dataset_same(campaign_root(folder), folder, stamp):
+            raise ValueError("The training PC does not have this exact dataset: send it first.")
+        if status["trainings"]:
+            raise ValueError("A training is already running on the training PC: wait until it has finished, or stop it.")
+        gpu = next((g for g in status["gpus"] if str(g["index"]) == str(CONFIG["training"]["gpu"])), None)
+        if gpu is None:
+            raise ValueError(f"The training PC has no GPU {CONFIG['training']['gpu']} (check \"gpu\" in studio_config.json).")
+        if gpu["used_mb"] > GPU_BUSY_MB:
+            raise ValueError(f"GPU {gpu['index']} of the training PC is in use ({gpu['used_mb'] / 1000:.1f} GB taken): "
+                             "close the program that uses it first.")
+        plan = link.plan(steps, status)
+        if plan["disk_needed_gb"] > status["free_gb"] - DISK_MARGIN_GB:
+            raise ValueError(f"Not enough disk space on the training PC: this run needs up to {plan['disk_needed_gb']:.0f} GB, "
+                             f"{status['free_gb']:.0f} GB are free. Delete old runs there, or train fewer steps.")
+        run = link.start(folder, steps)
+        print(f"[INFO] Training started on {link.host}: {run}", flush=True)
+        return run
+
+    def stop_training(self, run):
+        return self._link().stop(run)
 
 
 STUDIO = None
@@ -833,6 +977,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._picture(LIVE_DIR, parts[1].removesuffix(".jpg"))
             if len(parts) == 2 and parts[0] == "camera_test":
                 return self._picture(TEST_DIR, parts[1].removesuffix(".jpg"))
+            if path == "api/train":  # the training PC over SSH: takes a moment, no app lock
+                return self._json(STUDIO.train_overview())
+            if len(parts) == 4 and parts[:3] == ["api", "train", "run"]:
+                return self._json(STUDIO._link().run_detail(parts[3]))
             if path == "api/live":  # how old each live picture is: a stopped camera shows as stopped
                 ages = {}
                 for name in CAMERAS:
@@ -874,6 +1022,18 @@ class Handler(BaseHTTPRequestHandler):
             if path == "api/record/cmd":  # Space / N / X: quick, no need to wait for the app lock
                 STUDIO.record_command(str(body.get("cmd")))
                 return self._json({"ok": True})
+            if path == "api/train/send":
+                STUDIO.send_dataset()
+                return self._json({"ok": True})
+            if path == "api/train/send/stop":
+                STUDIO.stop_send()
+                return self._json({"ok": True})
+            if path == "api/train/plan":
+                return self._json(STUDIO.plan_training(body.get("steps")))
+            if path == "api/train/start":
+                return self._json({"ok": True, "run": STUDIO.start_training(body.get("steps"))})
+            if path == "api/train/stop":
+                return self._json({"ok": True, "message": STUDIO.stop_training(body.get("run"))})
             if path == "api/cameras/test":  # takes a few seconds
                 with STUDIO.lock:
                     return self._json(STUDIO.test_cameras())

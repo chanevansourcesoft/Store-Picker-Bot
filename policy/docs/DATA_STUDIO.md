@@ -2,7 +2,8 @@
 
 **Store Picker Bot** is a desktop app for recording demonstrations on the SO-100 arms. One person
 can use it from start to end: choose what to record, check the arms and cameras, record round by
-round with a live camera view, and review every episode. It uses `record.py` behind the scenes,
+round with a live camera view, review every episode, then send the dataset to the training PC and
+train GR00T there. It uses `record.py` behind the scenes,
 so the dataset, its plan and its episode log are exactly the same as when you record in a terminal
 ([DATA_COLLECTION.md](DATA_COLLECTION.md)). Both ways can be used on the same dataset.
 
@@ -26,8 +27,10 @@ The app runs on a PC without Docker (not in the Jetson container).
 5. Optional: take a photo of the arm in its rest pose and save it as `policy/studio/web/rest_pose.jpg`.
    The Record page then shows it.
 
-Settings (default rounds and episodes, the long-episode warning, minimum free disk space) are in
-`policy/studio/studio_config.json`.
+6. For the **Train** step: connect this PC to the training PC once (see "Training PC" below).
+
+Settings (default rounds and episodes, the long-episode warning, minimum free disk space, the training
+PC) are in `policy/studio/studio_config.json`.
 
 ## For the operator
 
@@ -67,7 +70,56 @@ steps; a step unlocks when the one before it is done.
    press **Remove flagged episodes** on the Review page. The dataset is then renumbered, and the old
    copy is kept next to it as `<dataset>_old` (the admin deletes it after checking).
 
+6. **Train:** opens once the campaign has episodes.
+   - **Send dataset** copies the dataset to the training PC. Every episode must be reviewed and the
+     flagged ones removed first. The app sends over 4 connections at once, which is about 4 times faster
+     when the network limits each connection (500 MB took about 2 minutes instead of 8); it shows the
+     progress. Sending again later only copies what changed, and removes files the dataset no longer has.
+   - Choose the number of **training steps** (default 50,000) and press **Start training**. The page
+     shows how long it takes and how much disk space it needs at most. It refuses to start when the
+     dataset there is not the same as here, a training is already running there, the GPU is in use,
+     or the disk is too full.
+   - **Training runs** lists every run on the training PC: its step, loss, time left, checkpoints and
+     size. Click a run to see its loss curve. **Stop training** stops it; its checkpoints stay.
+
+   The training runs on the training PC: it goes on when the app or this computer is closed. Open the
+   Train step again at any time to follow it.
+
 You can stop at any time and continue another day: everything is saved in the dataset folder.
+
+## Training PC (admin, once)
+
+The Train step works over SSH from this PC to the training PC.
+
+1. On the training PC: the project is cloned and set up for training ([TRAINING.md](TRAINING.md), step 1),
+   and `sudo apt install openssh-server` if SSH is not installed.
+2. On this PC, allow it to log in there without a password (it asks for the training PC's password
+   once, and asks to trust the computer: answer `yes`):
+   ```bash
+   ssh-copy-id <user>@<address of the training PC>
+   ssh <user>@<address of the training PC> echo ok     # must print ok without asking anything
+   ```
+   On the training PC, `whoami` shows the user and `hostname -I` the address.
+3. In `policy/studio/studio_config.json`, block `"training"`:
+
+   | Setting | Meaning |
+   |---|---|
+   | `host` | `<user>@<address>` of the training PC |
+   | `repo` | where the project is on the training PC (full path) |
+   | `conda_env` | conda env used for training there (empty: `policy/.venv`, see TRAINING.md) |
+   | `gpu`, `batch_size`, `memory_mode` | training settings, as for `train_groot.sh` ([TRAINING.md](TRAINING.md), step 4) |
+   | `default_steps` | steps shown by default |
+   | `save_freq` | a checkpoint every this many steps |
+   | `keep_last` | the newest checkpoints kept complete (model and resume state) |
+   | `keep_model_every` | older checkpoints at a multiple of this many steps keep only their model; the others are deleted (0: delete all older ones) |
+   | `sec_per_step` | used for the time estimate until the training PC has a run to measure |
+   | `send_streams` | connections used at once to send a dataset (default 4) |
+
+4. Keep both PCs on the same version of the project (`git pull` on both): the Train step uses scripts
+   in `policy/training/` on the training PC, and says so if they are missing.
+
+The app never deletes training runs on the training PC. Delete old runs there by hand when the disk
+gets full (`policy/training/outputs/<run>/`).
 
 ## Where things are
 
@@ -77,9 +129,10 @@ You can stop at any time and continue another day: everything is saved in the da
 | Plan, and per episode its product, round, review decision and flag reason | `meta/plan.json`, `meta/episode_log.json` in the dataset |
 | Last campaign | `~/.config/store_picker_studio/state.json` |
 | App log (for the admin) | `~/.cache/store_picker_studio.log` |
+| Training runs | on the training PC: `policy/training/outputs/<run>/`, log in `policy/training/logs/<run>.log` |
 
 The app runs only on this computer (`127.0.0.1:8780`). It stops by itself a few minutes after its
-window is closed, but never while a round runs.
+window is closed, but never while a round runs or a dataset is being sent.
 
 ## Good to know
 

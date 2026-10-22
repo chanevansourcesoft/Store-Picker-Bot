@@ -1,6 +1,6 @@
 // Store Picker Bot front-end. Talks to studio.py; the episode player comes from /static/player.js.
 const $ = (id) => document.getElementById(id);
-const STEPS = [["campaign", "Campaign"], ["check", "Check"], ["record", "Record"], ["review", "Review"]];
+const STEPS = [["campaign", "Campaign"], ["check", "Check"], ["record", "Record"], ["review", "Review"], ["train", "Train"]];
 const REASONS = ["Dropped the product", "Wrong product", "Product not in the basket", "Did not end in the rest pose",
   "Hit the shelf or the basket", "Long pause or hesitation", "Person or hand in the camera view", "Other"];
 const CAMS = { scene_cam: "Scene camera", gripper_cam: "Gripper camera" };
@@ -18,6 +18,9 @@ let checksOk = false;
 let prevRecording = false;
 let prevFinishing = false;
 let restAction = null;     // what the rest-pose dialog confirms
+let T = null;              // last /api/train answer (the training PC)
+let selectedRun = null;
+let prevSending = false;
 
 const player = new EpisodePlayer({
   videos: $("videos"), slider: $("slider"), frameLabel: $("frameLabel"), playBtn: $("playBtn"),
@@ -56,6 +59,7 @@ function stepInfo(id) {
     case "check": return { open: true, done: S.arm_test_passed };
     case "record": return { open: true, done: !S.next };
     case "review": return { open: !c.draft && c.episodes > 0, done: !c.draft && c.episodes > 0 && !c.to_review, badge: c.to_review };
+    case "train": return { open: S.training_configured && !c.draft && c.episodes > 0, done: trainDone() };
     default: return { open: false, done: false };
   }
 }
@@ -103,6 +107,7 @@ function enter(id) {
   if (id === "check") enterCheck();
   if (id === "record") renderRecord();
   if (id === "review") loadEpisodes(true);
+  if (id === "train") enterTrain();
 }
 
 // ---------- refresh loop ----------
@@ -119,13 +124,16 @@ async function refresh() {
     toast(S.finish.status === "finished" ? "Flagged episodes removed." : "Removing the flagged episodes failed: see the message.", 6000);
     if (page === "review") loadEpisodes(true);
   }
+  if (prevSending && !sending()) sendEnded();
   prevRecording = recording();
   prevFinishing = finishing();
+  prevSending = sending();
   renderTop();
   renderSteps();
   if (page === "record") renderRecord();
   if (page === "check") renderRoundInfo();
   if (page === "review") renderPlanComplete();
+  if (page === "train") renderSend();
 }
 
 function roundEnded() {
@@ -584,6 +592,189 @@ function renderPlanComplete() {
 $("removeFlaggedBtn").onclick = async () => {
   if (!confirm(`Remove the ${camp().flagged} flagged episode(s) from the dataset? The episodes are renumbered.`)) return;
   try { await api("/api/remove_flagged", {}); S = await api("/api/studio"); prevFinishing = true; renderPlanComplete(); } catch (e) { toast(e.message, 6000); }
+};
+
+// ---------- 5. train ----------
+const sending = () => !!(S && S.send && S.send.status === "running");
+const hm = (s) => { s = Math.round(s / 60); return s >= 60 ? `${Math.floor(s / 60)} h ${String(s % 60).padStart(2, "0")} min` : `${s} min`; };
+const gb = (x) => (x == null ? "?" : `${Math.round(x)} GB`);
+const runsOfCampaign = () => (T && T.status.ok && camp() ? T.status.runs.filter((r) => r.dataset === camp().folder) : []);
+function trainDone() { return runsOfCampaign().some((r) => r.status === "finished"); }
+
+let trainTimer = null, runTimer = null, trainLoading = false, planTimer = null;
+function enterTrain() {
+  clearInterval(trainTimer); clearInterval(runTimer);
+  loadTrain();
+  trainTimer = setInterval(() => { if (page === "train") loadTrain(); else clearInterval(trainTimer); }, 6000);
+  runTimer = setInterval(() => { if (page === "train") loadRun(); else clearInterval(runTimer); }, 10000);
+}
+async function loadTrain() {
+  if (trainLoading) return;
+  trainLoading = true;
+  try { T = await api("/api/train"); } catch (e) { T = null; $("trainPc").innerHTML = `<div class="note bad">${esc(e.message)}</div>`; }
+  trainLoading = false;
+  if (!T) return;
+  if (!$("trainSteps").value) { $("trainSteps").value = T.default_steps; $("trainSteps").min = T.min_steps; $("trainSteps").max = T.max_steps; }
+  renderTrain();
+  renderSteps();
+}
+function renderTrain() {
+  const st = T.status;
+  if (!st.ok) {
+    $("trainPc").innerHTML = `<div class="note bad">${esc(st.error)}</div><p class="muted small">${esc(st.host)}</p>`;
+  } else {
+    const gpus = st.gpus.map((g) => `GPU ${g.index}: ${esc(g.name)}, ${(g.used_mb / 1000).toFixed(1)} of ${(g.total_mb / 1000).toFixed(0)} GB used`).join("<br>");
+    const busy = st.trainings.length ? `<div class="note warn">A training is running there.</div>` : "";
+    $("trainPc").innerHTML = `${busy}<dl class="kv">${kv([["Computer", esc(st.host)], ["Project version", esc(st.commit)],
+      ["Free disk", gb(st.free_gb)], ["GPUs", gpus || "none found"]])}</dl>`;
+  }
+  renderSend();
+  renderPlan(T.plan);
+  renderRuns();
+}
+function renderSend() {
+  if (!T) return;
+  const d = T.dataset, job = S.send, now = sending();
+  let html = "";
+  if (d.error) html = `<div class="note warn">${esc(d.error)}</div>`;
+  else {
+    html = `<dl class="kv">${kv([["Dataset", `<code>${esc(d.folder)}</code>`], ["Episodes", `${d.episodes} (plan ${d.done} / ${d.total})`]])}</dl>`;
+    if (d.blocker) html += `<div class="note warn">${esc(d.blocker)}</div>`;
+    else if (d.done < d.total) html += `<div class="note warn">The plan is not complete yet: you can still send and train on what is recorded.</div>`;
+    if (d.check_error) html += `<div class="note bad">${esc(d.check_error)}</div>`;
+    else if (!now && d.same === true) html += `<div class="note ok">The training PC has this exact dataset.</div>`;
+    else if (!now && d.same === false) html += `<div class="note warn">${d.on_remote ? "The training PC has an older copy: send it again." : "Not on the training PC yet."}</div>`;
+    if (d.running_run) html += `<div class="note warn">A training on this dataset is running: it cannot be sent again now.</div>`;
+  }
+  $("trainDataset").innerHTML = html;
+  $("sendBarWrap").hidden = !(now || (job && job.status === "failed"));
+  if (job) $("sendBar").style.width = `${job.info.percent || 0}%`;
+  $("sendMsg").textContent = now ? `Sending… ${job.info.percent || 0}%${job.info.speed ? `, ${job.info.speed}` : ""}${job.info.eta ? `, ${job.info.eta} left` : ""}`
+    : job && job.folder === (camp() && camp().folder) && job.status === "failed" ? `Sending failed: ${job.log[job.log.length - 1] || "see the app log"}` : "";
+  $("sendStopBtn").hidden = !now;
+  $("sendBtn").hidden = now;
+  $("sendBtn").disabled = !!(d.error || d.blocker || d.running_run || !T.status.ok || d.same === true || recording());
+  $("sendBtn").textContent = d.on_remote && d.same === false ? "Send again" : "Send dataset";
+  const startable = T.status.ok && d.same === true && !now && !T.status.trainings.length;
+  $("trainStartBtn").disabled = !startable;
+  $("trainMsg").textContent = !T.status.ok ? "" : now ? "Wait until the dataset is sent."
+    : d.same !== true ? "Send the dataset first." : T.status.trainings.length ? "A training is running on the training PC." : "";
+}
+function sendEnded() {
+  const job = S.send;
+  toast(job.status === "finished" ? "Dataset sent." : job.status === "stopped" ? "Sending cancelled." : "Sending failed: see the Train page.", 6000);
+  if (page === "train") loadTrain();
+}
+function renderPlan(plan) {
+  if (!plan) { $("trainPlan").innerHTML = ""; return; }
+  const tight = plan.free_gb != null && plan.disk_needed_gb > plan.free_gb - 2;
+  $("trainPlan").innerHTML = kv([
+    ["Settings", `GPU ${esc(plan.gpu)}, batch ${plan.batch_size}, memory mode ${esc(plan.memory_mode)}`],
+    ["Time", `about ${hm(plan.hours * 3600)} (${plan.sec_per_step} s per step)`],
+    ["Checkpoints", `every ${plan.save_freq.toLocaleString()} steps; the newest ${plan.keep_last} are kept complete` +
+      (plan.keep_model_every ? `, older ones only at every ${plan.keep_model_every.toLocaleString()} steps (model only)` : ", older ones are deleted")],
+    ["Disk space", `<span class="${tight ? "state bad" : ""}">up to ${gb(plan.disk_needed_gb)} of ${gb(plan.free_gb)} free</span>`],
+  ]);
+}
+$("trainSteps").oninput = () => {
+  clearTimeout(planTimer);
+  planTimer = setTimeout(async () => {
+    try { renderPlan(await api("/api/train/plan", { steps: $("trainSteps").value })); $("trainMsg").textContent = ""; }
+    catch (e) { $("trainMsg").textContent = e.message; }
+  }, 400);
+};
+$("sendBtn").onclick = async () => {
+  $("sendBtn").disabled = true;
+  try { await api("/api/train/send", {}); S = await api("/api/studio"); prevSending = sending(); renderSend(); }
+  catch (e) { toast(e.message, 6000); $("sendBtn").disabled = false; }
+};
+$("sendStopBtn").onclick = () => api("/api/train/send/stop", {}).catch((e) => toast(e.message));
+$("trainStartBtn").onclick = async () => {
+  const steps = Number($("trainSteps").value);
+  if (!confirm(`Start training on ${camp().folder} for ${steps.toLocaleString()} steps on the training PC?`)) return;
+  $("trainStartBtn").disabled = true; $("trainMsg").textContent = "Starting…";
+  try {
+    const r = await api("/api/train/start", { steps });
+    selectedRun = r.run; toast("Training started.", 5000); $("trainMsg").textContent = "";
+    await loadTrain(); loadRun();
+  } catch (e) { $("trainMsg").textContent = e.message; $("trainStartBtn").disabled = false; }
+};
+
+const RUN_STATES = { running: ["Training", "warn"], finished: ["Finished", "ok"], failed: ["Failed", "bad"], stopped: ["Stopped", "warn"], unknown: ["Started by hand", ""] };
+function runLine(r) {
+  if (r.status === "unknown") return `${r.checkpoints.length} checkpoint(s), ${gb(r.size_gb)}`;
+  const parts = [`step ${(r.step || 0).toLocaleString()} / ${(r.steps || 0).toLocaleString()}`];
+  if (r.loss != null) parts.push(`loss ${r.loss.toFixed(3)}`);
+  if (r.status === "running" && r.eta_s != null) parts.push(`${hm(r.eta_s)} left`);
+  parts.push(gb(r.size_gb));
+  return parts.join(" · ");
+}
+function renderRuns() {
+  const st = T.status;
+  if (!st.ok) { $("runList").innerHTML = ""; $("runDetail").hidden = true; return; }
+  if (!st.runs.length) { $("runList").innerHTML = `<p class="muted" style="padding: 10px 12px">No training runs on the training PC yet.</p>`; return; }
+  if (!selectedRun || !st.runs.some((r) => r.run === selectedRun)) {
+    const mine = runsOfCampaign();
+    selectedRun = (mine[0] || st.runs[0]).run;
+  }
+  $("runList").innerHTML = st.runs.map((r) => {
+    const [label, cls] = RUN_STATES[r.status] || [r.status, ""];
+    return `<div class="item ${r.run === selectedRun ? "active" : ""}" data-run="${esc(r.run)}"><span class="name">${esc(r.run)}</span>` +
+      `<span class="state ${cls}" style="font-size: 14px">${label}</span><span class="sub">${esc(runLine(r))}</span></div>`;
+  }).join("");
+  $("runList").querySelectorAll("[data-run]").forEach((el) => (el.onclick = () => { selectedRun = el.dataset.run; renderRuns(); loadRun(); }));
+  if ($("runDetail").hidden || $("runDetail").dataset.run !== selectedRun) loadRun();
+}
+async function loadRun() {
+  if (!selectedRun || !T || !T.status.ok) return;
+  const name = selectedRun;
+  let r;
+  try { r = await api(`/api/train/run/${encodeURIComponent(name)}`); } catch (e) { return; }
+  if (name !== selectedRun) return;
+  const [label, cls] = RUN_STATES[r.status] || [r.status, ""];
+  $("runDetail").hidden = false; $("runDetail").dataset.run = name;
+  $("runState").textContent = label; $("runState").className = "state " + cls;
+  $("runSub").textContent = r.run;
+  $("runBar").parentElement.hidden = r.status === "unknown";
+  $("runBar").style.width = r.steps ? `${Math.min(100, (100 * (r.step || 0)) / r.steps)}%` : "0";
+  const ck = r.checkpoints.length
+    ? `<span class="chips">${r.checkpoints.map((c) => `<span class="chip ${c.resume ? "full" : ""}" title="${c.resume ? "model + resume state" : "model only"}">${c.step.toLocaleString()}</span>`).join("")}</span>`
+    : "none yet";
+  const rows = [["Dataset", `<code>${esc(r.dataset)}</code>`]];
+  if (r.status !== "unknown") {
+    rows.push(["Step", `${(r.step || 0).toLocaleString()} / ${(r.steps || 0).toLocaleString()}`]);
+    if (r.loss != null) rows.push(["Loss", r.loss.toFixed(4)]);
+    if (r.sec_per_step) rows.push(["Speed", `${r.sec_per_step} s per step`]);
+    if (r.status === "running" && r.eta_s != null) rows.push(["Time left", `about ${hm(r.eta_s)}`]);
+    if (r.started) rows.push(["Started", new Date(r.started * 1000).toLocaleString()]);
+    rows.push(["Settings", `GPU ${esc(r.gpu)}, batch ${r.batch_size}`]);
+  }
+  rows.push(["Checkpoints", ck], ["Size", gb(r.size_gb)]);
+  $("runKv").innerHTML = kv(rows);
+  $("runChart").innerHTML = lossChart(r.losses || []);
+  $("runChart").hidden = !(r.losses && r.losses.length > 1);
+  $("runLog").hidden = r.status !== "failed";
+  $("runLog").textContent = (r.log || []).join("\n");
+  $("runStopBtn").hidden = r.status !== "running";
+}
+function lossChart(points) {
+  if (points.length < 2) return "";
+  const W = 600, H = 180, L = 44, B = 20, top = 8;
+  const xs = points.map((p) => p[0]), ys = points.map((p) => p[1]).filter((y) => isFinite(y));
+  const x0 = xs[0], x1 = xs[xs.length - 1] || 1, y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const X = (x) => L + ((x - x0) / (x1 - x0 || 1)) * (W - L - 6);
+  const Y = (y) => top + (1 - (y - y0) / (y1 - y0 || 1)) * (H - top - B);
+  const d = points.filter((p) => isFinite(p[1])).map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Loss over training steps">` +
+    `<line class="ax" x1="${L}" y1="${H - B}" x2="${W}" y2="${H - B}"/><line class="ax" x1="${L}" y1="${top}" x2="${L}" y2="${H - B}"/>` +
+    `<text x="${L - 4}" y="${top + 10}" text-anchor="end">${y1.toFixed(2)}</text><text x="${L - 4}" y="${H - B}" text-anchor="end">${y0.toFixed(2)}</text>` +
+    `<text x="${L}" y="${H - 5}">step ${x0.toLocaleString()}</text><text x="${W - 4}" y="${H - 5}" text-anchor="end">${x1.toLocaleString()}</text>` +
+    `<text x="${W - 4}" y="${top + 12}" text-anchor="end">loss</text><path class="ln" d="${d}"/></svg>`;
+}
+$("runStopBtn").onclick = async () => {
+  if (!confirm(`Stop the training ${selectedRun}? Its checkpoints stay. It can be continued from the newest one in a terminal (resume_groot.sh).`)) return;
+  try { const r = await api("/api/train/stop", { run: selectedRun }); toast(r.message || "Stopped.", 5000); await loadTrain(); loadRun(); }
+  catch (e) { toast(e.message, 6000); }
 };
 
 // ---------- keys ----------

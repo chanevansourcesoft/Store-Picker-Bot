@@ -52,7 +52,7 @@ label input, label select { margin-top: 4px; color: var(--ink); font-size: 15px;
 .who { font-size: 14px; display: flex; gap: 14px; align-items: center; }
 .who #who { opacity: .85; }
 button.link { background: none; border: 0; color: var(--top-ink); text-decoration: underline; padding: 0; font-size: 14px; opacity: .85; }
-.steps { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--panel); border-bottom: 1px solid var(--line); }
+.steps { display: grid; grid-template-columns: repeat(5, 1fr); background: var(--panel); border-bottom: 1px solid var(--line); }
 .step { padding: 10px 14px; border: 0; border-right: 1px solid var(--line); background: none; text-align: left; display: flex; gap: 10px; align-items: center; min-width: 0; }
 .step:last-child { border-right: 0; }
 .step .n { width: 24px; height: 24px; flex: none; display: grid; place-items: center; font-size: 13px; font-weight: 700; border: 1px solid var(--line); }
@@ -206,4 +206,22 @@ main { padding: 20px; max-width: 1600px; margin: 0 auto; }
   #page-record .grid.two.wide-left > * { max-height: none; overflow-y: visible; }
   .steps { grid-template-columns: repeat(2, 1fr); }
   .videos, .plots { grid-template-columns: 1fr; }
+}
+
+/* train */
+.grid.two.train { grid-template-columns: 2fr 3fr; align-items: start; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { font-size: 12px; border: 1px solid var(--line); padding: 1px 6px; font-weight: 400; }
+.chip.full { border-color: var(--accent); color: var(--accent); }
+.chart { margin-top: 14px; border: 1px solid var(--line); background: var(--bg); }
+.chart svg { display: block; width: 100%; height: 180px; }
+.chart .ax { stroke: var(--line); stroke-width: 1; }
+.chart .ln { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+.chart text { fill: var(--muted); font-size: 11px; }
+.note { padding: 8px 10px; margin: 8px 0; font-size: 14px; }
+.note.warn { background: var(--warn-soft); color: var(--warn); }
+.note.bad { background: var(--danger-soft); color: var(--danger); }
+.note.ok { background: var(--accent-soft); color: var(--accent); }
+@media (max-width: 900px) {
+  .grid.two.train { grid-template-columns: 1fr; }
 }

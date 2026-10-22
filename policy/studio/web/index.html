@@ -196,6 +196,50 @@
       </div>
     </div>
   </section>
+
+  <!-- 5. Train -->
+  <section class="page" id="page-train">
+    <div class="grid two train">
+      <div class="side">
+        <div class="card">
+          <h2>Training PC</h2>
+          <div id="trainPc" class="muted">Connecting…</div>
+        </div>
+        <div class="card">
+          <h2>1. Send the dataset</h2>
+          <div id="trainDataset"></div>
+          <div class="bar" id="sendBarWrap" hidden><span id="sendBar"></span></div>
+          <div class="row">
+            <button class="primary" id="sendBtn" disabled>Send dataset</button>
+            <button id="sendStopBtn" hidden>Cancel</button>
+            <span class="muted small" id="sendMsg"></span>
+          </div>
+        </div>
+        <div class="card">
+          <h2>2. Start training</h2>
+          <label>Training steps <input id="trainSteps" type="number" step="1000"></label>
+          <dl class="kv" id="trainPlan"></dl>
+          <div class="row" style="margin-top: 14px">
+            <button class="primary" id="trainStartBtn" disabled>Start training</button>
+            <span class="muted small" id="trainMsg"></span>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Training runs</h2>
+        <p class="muted small">Training runs on the training PC and goes on when this app or this computer is closed.</p>
+        <div class="list" id="runList"></div>
+        <div id="runDetail" hidden>
+          <div class="status-line"><span class="state" id="runState"></span><span class="muted" id="runSub"></span></div>
+          <div class="bar"><span id="runBar"></span></div>
+          <dl class="kv" id="runKv"></dl>
+          <div class="chart" id="runChart"></div>
+          <pre class="log" id="runLog" hidden></pre>
+          <div class="row" style="margin-top: 14px"><button class="danger" id="runStopBtn" hidden>Stop training</button></div>
+        </div>
+      </div>
+    </div>
+  </section>
 </main>
 
 <div class="modal-back" id="restModal" hidden>

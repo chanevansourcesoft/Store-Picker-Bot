@@ -6,5 +6,19 @@
   "default_offset_cm": 3.0,
   "default_turn_deg": 3.0,
   "long_episode_s": 60,
-  "min_free_disk_gb": 20
+  "min_free_disk_gb": 20,
+  "training": {
+    "host": "user@192.168.0.138",
+    "repo": "/home/user/Documents/chan_evan/Store-Picker-Bot",
+    "conda_env": "lerobot_env",
+    "gpu": "1",
+    "batch_size": 64,
+    "memory_mode": "low",
+    "default_steps": 50000,
+    "save_freq": 5000,
+    "keep_last": 2,
+    "keep_model_every": 10000,
+    "sec_per_step": 1.0,
+    "send_streams": 4
+  }
 }

@@ -3,6 +3,7 @@ data_collection/dataset/
 
 # Training runs
 training/outputs/
+training/logs/
 
 # Trained models copied here for inference
 inference/models/

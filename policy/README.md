@@ -12,7 +12,7 @@ Kept out of the ROS 2 build by `COLCON_IGNORE`.
 |---|---|
 | `calibration/` | Arm calibration files (made by `lerobot-calibrate`, kept in Git) and `calibrate_wrist_roll.py` |
 | `data_collection/` | `record.py` for recording demonstrations; recorded datasets in `data_collection/dataset/` |
-| `studio/` | Store Picker Bot app: record and review demonstrations without a terminal (PC) |
+| `studio/` | Store Picker Bot app: record and review demonstrations without a terminal, then train on the training PC (PC) |
 | `training/` | GR00T training scripts for the training PC (2× RTX 5090) |
 | `inference/` | Runs a trained model on the arm: on a PC for testing, or on the Jetson |
 | `instructions.json` | GR00T instruction per item id, used when recording and when picking |
@@ -36,7 +36,7 @@ Kept out of the ROS 2 build by `COLCON_IGNORE`.
 3. [TELEOP_TEST.md](docs/TELEOP_TEST.md): checking that the follower mirrors the leader
 4. [CAMERA_SETUP.md](docs/CAMERA_SETUP.md): mounting, device paths, formats, exposure
 5. [DATA_COLLECTION.md](docs/DATA_COLLECTION.md): recording demonstrations and moving them to the training machine
-   - [DATA_STUDIO.md](docs/DATA_STUDIO.md): the same with the Store Picker Bot app, without a terminal (PC)
+   - [DATA_STUDIO.md](docs/DATA_STUDIO.md): the same with the Store Picker Bot app, without a terminal (PC); it can also send the dataset and start training
 6. [TRAINING.md](docs/TRAINING.md): training GR00T on the training PC
 7. [INFERENCE.md](docs/INFERENCE.md): running a trained model on the arm
 

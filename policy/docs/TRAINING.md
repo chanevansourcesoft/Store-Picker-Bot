@@ -109,6 +109,32 @@ Settings are changed with environment variables in front of the command:
 
 Extra arguments are passed to `lerobot-train`.
 
+### In the background (also used by the Store Picker Bot app)
+
+`train_groot.sh` stops when its terminal closes. To keep training after closing the terminal or an SSH
+connection, start it with `start_training.sh` instead. It takes the same settings, and also activates a
+conda env (`CONDA_ENV`) and keeps the run within the disk space:
+
+```bash
+GPU=1 STEPS=50000 CONDA_ENV=lerobot_env ./start_training.sh dataset_v1_21102026_183539
+```
+
+It prints the run name. Then:
+
+```bash
+tail -f logs/<run name>.log            # follow the training (Ctrl+C stops following, not the training)
+python3 training_status.py             # every run, with its step, loss and checkpoints (JSON)
+./stop_training.sh <run name>          # stop it; its checkpoints stay
+```
+
+While it trains, `prune_checkpoints.py` thins out older checkpoints every minute: the newest 2 stay
+complete (`KEEP_LAST`), older ones at a multiple of 10,000 steps keep only their model (`KEEP_MODEL_EVERY`),
+and the others are deleted. One complete checkpoint is about 11.5 GB (9.3 GB model + 2.1 GB resume state),
+so a 50,000-step run needs up to about 62 GB instead of 115 GB.
+
+The Store Picker Bot app's Train step ([DATA_STUDIO.md](DATA_STUDIO.md)) sends the dataset from the
+recording PC and runs these scripts over SSH.
+
 ### Two GPUs
 
 `NUM_GPUS=2 BATCH_SIZE=32 ./train_groot.sh <dataset>` trains on both GPUs (32 samples each, 64 per step).
