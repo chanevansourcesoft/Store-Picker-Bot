@@ -21,8 +21,7 @@ The app runs on a PC without Docker (not in the Jetson container).
    ```
 4. Add the app to the applications menu and the desktop:
    ```bash
-   cd path/to/Store-Picker-Bot/policy/studio
-   ./install_desktop_icon.sh
+   ~/Documents/Store-Picker-Bot/policy/studio/install_desktop_icon.sh   # change the path to where you cloned the repo
    ```
 5. Optional: take a photo of the arm in its rest pose and save it as `policy/studio/web/rest_pose.jpg`.
    The Record page then shows it.

@@ -2,6 +2,7 @@
 
 How to fine-tune GR00T N1.7 on the recorded datasets, on the local training PC (2× RTX 5090, 32 GB each).
 The scripts are in `training/`. They use the same GR00T settings as the SO-101 sim project.
+The examples use `~/Documents/Store-Picker-Bot` as the repo folder: change it to where you cloned the repo.
 
 ## 1. Set up the PC (once)
 
@@ -37,7 +38,7 @@ active conda env.
 ### Option B: a new environment with `setup.sh`
 
 ```bash
-cd policy/training
+cd ~/Documents/Store-Picker-Bot/policy/training
 ./setup.sh
 ```
 
@@ -58,15 +59,15 @@ uses now (see [LeRobot versions](#lerobot-versions)). Use option A until this is
 
 ## 2. Get the datasets
 
-Copy the dataset folders from the Jetson into `policy/data_collection/dataset/` on this PC, keeping the
-folder names ([DATA_COLLECTION.md](DATA_COLLECTION.md), step 8).
+Copy the dataset folders from the recording machine (the Jetson or a PC) into `policy/data_collection/dataset/` on
+this PC, keeping the folder names ([DATA_COLLECTION.md](DATA_COLLECTION.md), step 8).
 
 ## 3. Merge datasets (optional)
 
 GR00T trains on one dataset. To train on several (for example several recording plans), merge them first:
 
 ```bash
-cd training
+cd ~/Documents/Store-Picker-Bot/policy/training
 ./merge_datasets.sh all_products dataset_v1_12102026_153045 dataset_v2_14102026_100000
 ```
 
@@ -80,8 +81,8 @@ All inputs must have the same cameras and FPS, which is always true for datasets
 ## 4. Train
 
 ```bash
-conda activate lerobot_env
-cd policy/training
+conda activate lerobot_env      # option A only; skip it with option B (policy/.venv)
+cd ~/Documents/Store-Picker-Bot/policy/training
 GPU=1 STEPS=10000 ./train_groot.sh dataset_v1_21102026_183539
 ```
 
@@ -153,9 +154,11 @@ the Jetson and `setup.sh` use the released **0.6.1**.
   uses `--policy.dtype`, so it needs 0.6.2.
 - **Models:** the GR00T code is the same in both versions, so the trained model behaves the same. But a model saved
   by 0.6.2 has a `"dtype"` line in its `pretrained_model/config.json`, and 0.6.1 refuses to load it.
-  How to prepare a model for the Jetson is not tested yet.
+  `inference/run_policy.py` translates it, so 0.6.1 can run these models ([INFERENCE.md](INFERENCE.md)).
 
 ## Notes
 
 - Do not use the `lora_*` options of the GR00T policy: LeRobot's GR00T code does not use them.
-- Running the trained model on the Jetson is not set up yet.
+- Running the trained model on the arm: [INFERENCE.md](INFERENCE.md).
+
+Next: [INFERENCE.md](INFERENCE.md).

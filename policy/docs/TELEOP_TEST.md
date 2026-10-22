@@ -5,12 +5,13 @@ Complete [ARM_SETUP.md](ARM_SETUP.md) first (both arms calibrated). All commands
 
 ## Start a terminal
 
-Every command in this guide is shown twice. Use the one for your setup.
+Every command in this guide is shown twice. Use the one for your setup. The examples use `~/Documents/Store-Picker-Bot`
+as the repo folder: change it to where you cloned the repo.
 
 **With Docker (Jetson):** go to the `policy/` folder; each command starts with `docker compose run --rm policy`.
 
 ```bash
-cd path/to/Store-Picker-Bot/policy
+cd ~/Documents/Store-Picker-Bot/policy
 ```
 
 **Without Docker (PC):** in every new terminal, activate the Python environment, then load `env.sh`
@@ -19,7 +20,7 @@ Docker" in [README.md](../README.md).
 
 ```bash
 conda activate lerobot_env      # only with a conda env; skip it with uv (policy/.venv)
-source path/to/Store-Picker-Bot/policy/env.sh
+source ~/Documents/Store-Picker-Bot/policy/env.sh
 ```
 
 ## 1. Before you start

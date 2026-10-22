@@ -2,7 +2,7 @@
 
 LeRobot project for the SO-100 arm and GR00T N1.7. Runs on the Jetson as its own process and is the only process that opens the arm and both cameras (`gripper_cam` and `scene_cam`).
 
-Current step: recording real teleoperated demonstrations.
+Current step: training GR00T on the recorded demonstrations and testing the models on the arm.
 
 Kept out of the ROS 2 build by `COLCON_IGNORE`.
 
@@ -14,6 +14,7 @@ Kept out of the ROS 2 build by `COLCON_IGNORE`.
 | `data_collection/` | `record.py` for recording demonstrations; recorded datasets in `data_collection/dataset/` |
 | `studio/` | Store Picker Bot app: record and review demonstrations without a terminal (PC) |
 | `training/` | GR00T training scripts for the training PC (2× RTX 5090) |
+| `inference/` | Runs a trained model on the arm: on a PC for testing, or on the Jetson |
 | `instructions.json` | GR00T instruction per item id, used when recording and when picking |
 | `docs/` | Step-by-step guides |
 | `env.sh` | Environment for running without Docker on a PC (`source policy/env.sh`) |
@@ -37,6 +38,7 @@ Kept out of the ROS 2 build by `COLCON_IGNORE`.
 5. [DATA_COLLECTION.md](docs/DATA_COLLECTION.md): recording demonstrations and moving them to the training machine
    - [DATA_STUDIO.md](docs/DATA_STUDIO.md): the same with the Store Picker Bot app, without a terminal (PC)
 6. [TRAINING.md](docs/TRAINING.md): training GR00T on the training PC
+7. [INFERENCE.md](docs/INFERENCE.md): running a trained model on the arm
 
 ## Getting started (Jetson)
 
@@ -112,11 +114,13 @@ instead: see [TRAINING.md](docs/TRAINING.md).
 4. Create the repo root `.env` (`cp .env.example .env`) and fill it in as described in "Hugging Face
    access" above. The arm ports and cameras are added later ([ARM_SETUP.md](docs/ARM_SETUP.md), step 1, and
    [CAMERA_SETUP.md](docs/CAMERA_SETUP.md), step 2).
-5. In every new terminal, load the environment (with conda, run `conda activate lerobot_env` first):
+5. In every new terminal, load the environment (with conda, run `conda activate lerobot_env` first). Use the folder
+   where you cloned the repo, for example:
    ```bash
-   source policy/env.sh
+   source ~/Documents/Store-Picker-Bot/policy/env.sh
    ```
-   It prints the environment it uses and its LeRobot version (`0.6.1` with uv). A GPU is not needed for the arms or recording.
+   It prints the environment it uses and its LeRobot version (`0.6.1` with uv). A GPU is not needed for the arms or
+   recording, only for running a trained model ([INFERENCE.md](docs/INFERENCE.md)).
    After every change to `.env`, run `source policy/env.sh` again: a terminal only sees `.env` as it was
    when `env.sh` was last loaded.
 

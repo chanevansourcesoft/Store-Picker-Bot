@@ -14,12 +14,13 @@ On a PC, anyone can also record and review with the **Store Picker Bot** app ins
 
 ## Start a terminal
 
-Every command in this guide is shown twice. Use the one for your setup.
+Every command in this guide is shown twice. Use the one for your setup. The examples use `~/Documents/Store-Picker-Bot`
+as the repo folder: change it to where you cloned the repo.
 
 **With Docker (Jetson):** go to the `policy/` folder; each command starts with `docker compose run --rm policy`.
 
 ```bash
-cd path/to/Store-Picker-Bot/policy
+cd ~/Documents/Store-Picker-Bot/policy
 ```
 
 **Without Docker (PC):** in every new terminal, activate the Python environment, then load `env.sh`
@@ -28,12 +29,12 @@ Docker" in [README.md](../README.md).
 
 ```bash
 conda activate lerobot_env      # only with a conda env; skip it with uv (policy/.venv)
-source path/to/Store-Picker-Bot/policy/env.sh
+source ~/Documents/Store-Picker-Bot/policy/env.sh
 ```
 
 ## 1. Conventions
 
-Keep these fixed for the whole project. Training and the pick service depend on them.
+Keep these fixed for the whole project. Training and running the model depend on them.
 
 | Item | Value |
 |---|---|
@@ -48,8 +49,8 @@ The instruction is the sentence GR00T is trained on. It is fixed per product in 
 "mentos": {"shelf": "shelf_A", "instruction": "pick up the Mentos candy roll and place it in the basket"}
 ```
 
-The item ids are the same as in the store's `inventory.json`. The pick service reads the same file when
-it runs the trained model, so the text it sends to GR00T always matches the one it was trained with.
+The item ids are the same as in the store's `inventory.json`. Running a trained model ([INFERENCE.md](INFERENCE.md))
+reads the same file, so the text sent to GR00T always matches the one it was trained with.
 
 - **To add a product,** add one line before recording it.
 - **Never change the text of a product that already has recordings:** models trained on them would no
@@ -104,7 +105,7 @@ It asks for the plan. Press Enter to accept a default in brackets:
 
 ```
 Products (from instructions.json):
-  1) chips_packet   shelf_A    "pick up the chips packet and place it in the basket"
+  1) chips_packet   shelf_B    "pick up the chips packet and place it in the basket"
   2) mentos         shelf_A    "pick up the Mentos candy roll and place it in the basket"
   ...
 Products to record (numbers or ids, comma-separated, or all) [all]:
@@ -130,8 +131,8 @@ from slightly different base positions. A **round** is one base position. At eac
 through the rounds in order, and in each round records every product of that shelf:
 
 ```
-shelf_A:  round 1 (centre)  -> chips_packet x 10, mentos x 10
-          round 2 (left)    -> chips_packet x 10, mentos x 10
+shelf_A:  round 1 (centre)  -> mentos x 10, frooti x 10
+          round 2 (left)    -> mentos x 10, frooti x 10
           ...
 shelf_B:  round 1 (centre)  -> ...
 ```
@@ -207,7 +208,8 @@ Besides the LeRobot dataset itself:
 
 ### Other options
 
-`python3 data_collection/record.py --help` lists them all. Useful ones:
+`python data_collection/record.py --help` (with Docker: `docker compose run --rm policy python3 data_collection/record.py --help`)
+lists them all. Useful ones:
 
 | Option | Use |
 |---|---|
