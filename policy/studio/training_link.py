@@ -275,7 +275,8 @@ class TrainingLink:
         connection, so streams do not share one), or the final pass that deletes extra files."""
         target = self.remote_path("policy", "data_collection", "dataset", folder) + "/"
         ssh = ["ssh", *self.ssh_options(shared=not files_from)]
-        cmd = ["rsync", "-a", "--partial", "--mkpath", "-e", shlex.join(ssh)]
+        # --omit-dir-times: folder dates do not matter, so a copy that differs only in them counts as the same.
+        cmd = ["rsync", "-a", "--omit-dir-times", "--partial", "--mkpath", "-e", shlex.join(ssh)]
         if dry_run:
             cmd += ["--delete", "--dry-run", "--itemize-changes"]
         elif files_from:
