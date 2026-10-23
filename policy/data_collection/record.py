@@ -5,7 +5,8 @@ A plan is: which products, how many rounds, and how many episodes per product pe
 A round is one base position in front of the shelf. The robot stops a little differently
 every time it drives to a shelf, so each round puts the base at a different small offset
 (the script says which), and every product on that shelf is recorded there. Order:
-shelf -> round -> product, so the base moves once per round.
+shelf -> round -> product, so the base moves once per round. Between episodes the operator
+changes the product setup (position, angle, neighbours: see VARIATIONS).
 
 LeRobot does the recording (same loop, units and dataset format as `lerobot-record`).
 Keys (read from the terminal), like the sim teleop of the SO-101 project:
@@ -83,6 +84,7 @@ from lerobot.utils.utils import init_logging
 HERE = Path(__file__).resolve().parent
 DATASET_DIR = HERE / "dataset"
 # Item id (as in webapp/app/inventory.json) -> shelf and GR00T instruction. Shared with the robot at run time.
+# A new setup starts from instructions.example.json.
 INSTRUCTIONS_FILE = HERE.parent / "instructions.json"
 # Fixed camera controls (v4l2-ctl names), applied at every start. See docs/CAMERA_SETUP.md.
 CAMERA_SETTINGS_FILE = HERE / "camera_settings.json"
@@ -97,8 +99,21 @@ SCENE_CAM = "scene_cam"
 
 # Base position of each round, seen from behind the robot facing the shelf.
 # Up to 5 rounds the turns are combined with closer/further; 6 or 7 rounds give them their own round.
+# 12 rounds: closer, further, left and right, each straight, turned right (clockwise) and turned left;
+# 15 rounds: the same with the centre first.
 POSITIONS_5 = ["centre", "left", "right", "closer, turned left", "further, turned right"]
 POSITIONS_7 = ["centre", "left", "right", "closer", "further", "turned left", "turned right"]
+POSITIONS_12 = [f"{place}{turn}" for place in ("closer", "further", "left", "right")
+                for turn in ("", ", turned right", ", turned left")]
+POSITIONS_15 = ["centre", "turned right", "turned left"] + POSITIONS_12
+ROUND_CHOICES = list(range(1, len(POSITIONS_7) + 1)) + [len(POSITIONS_12), len(POSITIONS_15)]
+
+# What the operator changes between episodes, freely, using every option about as often.
+VARIATIONS = [
+    "Position: the product left, in the middle or right of its place (about 4 cm apart)",
+    "Angle: straight, or turned up to about 20 deg either way",
+    "Neighbours: the usual order, swapped with the product next to it, or the other products taken away",
+]
 
 STUDIO = False  # set by --studio: run by the Store Picker Bot app
 
@@ -112,7 +127,9 @@ def emit(event, **fields):
 def round_positions(rounds):
     if rounds <= len(POSITIONS_5):
         return POSITIONS_5[:rounds]
-    return POSITIONS_7[:rounds]
+    if rounds <= len(POSITIONS_7):
+        return POSITIONS_7[:rounds]
+    return {len(POSITIONS_12): POSITIONS_12, len(POSITIONS_15): POSITIONS_15}[rounds]
 
 
 def describe_position(position, offset_cm, turn_deg):
@@ -120,7 +137,8 @@ def describe_position(position, offset_cm, turn_deg):
         return "at the normal stop point"
     words = {"left": f"{offset_cm:g} cm left", "right": f"{offset_cm:g} cm right",
              "closer": f"{offset_cm:g} cm closer to the shelf", "further": f"{offset_cm:g} cm further from the shelf",
-             "turned left": f"turned {turn_deg:g} deg left", "turned right": f"turned {turn_deg:g} deg right"}
+             "turned left": f"turned {turn_deg:g} deg left (anticlockwise)",
+             "turned right": f"turned {turn_deg:g} deg right (clockwise)"}
     return ", ".join(words[part] for part in position.split(", ")) + " of the normal stop point"
 
 
@@ -135,7 +153,7 @@ def parse_args():
     target.add_argument("--resume", help="Existing dataset folder in dataset/ to continue")
     plan = parser.add_argument_group("plan of a new dataset (asked in the terminal when not given)")
     plan.add_argument("--products", help="Comma-separated item ids from instructions.json, or 'all'")
-    plan.add_argument("--rounds", type=int, help=f"Base positions per shelf (1-{len(POSITIONS_7)})")
+    plan.add_argument("--rounds", type=int, help=f"Base positions per shelf (1-{len(POSITIONS_7)}, {len(POSITIONS_12)} or {len(POSITIONS_15)})")
     plan.add_argument("--per_round", type=int, help="Episodes per product per round")
     plan.add_argument("--offset_cm", type=float, default=3.0, help="Base offset of the left/right/closer/further rounds")
     plan.add_argument("--turn_deg", type=float, default=3.0, help="Base turn of the turned rounds")
@@ -191,9 +209,17 @@ def ask(question, default):
     return answer or str(default)
 
 
+def load_instructions():
+    """{item: {"shelf", "instruction"}} from instructions.json."""
+    if not INSTRUCTIONS_FILE.exists():
+        sys.exit(f"No {INSTRUCTIONS_FILE}. Copy instructions.example.json to instructions.json "
+                 "and list your products in it (docs/DATA_COLLECTION.md, step 1).")
+    return json.loads(INSTRUCTIONS_FILE.read_text())
+
+
 def make_plan(args):
     """Products, rounds and episodes per round for a new dataset, from the options or asked."""
-    catalog = json.loads(INSTRUCTIONS_FILE.read_text())
+    catalog = load_instructions()
     ids = list(catalog)
     if args.products is None:
         print("Products (from instructions.json):")
@@ -212,11 +238,12 @@ def make_plan(args):
             if item not in products:
                 products.append(item)
     if args.rounds is None:
-        args.rounds = int(ask(f"Rounds (base positions per shelf, 1-{len(POSITIONS_7)})", 5))
-    if not 1 <= args.rounds <= len(POSITIONS_7):
-        sys.exit(f"Rounds must be 1 to {len(POSITIONS_7)}.")
+        args.rounds = int(ask(f"Rounds (base positions per shelf, 1-{len(POSITIONS_7)}, "
+                              f"{len(POSITIONS_12)} or {len(POSITIONS_15)})", len(POSITIONS_12)))
+    if args.rounds not in ROUND_CHOICES:
+        sys.exit(f"Rounds must be 1 to {len(POSITIONS_7)}, {len(POSITIONS_12)} or {len(POSITIONS_15)}.")
     if args.per_round is None:
-        args.per_round = int(ask("Episodes per product per round", 10))
+        args.per_round = int(ask("Episodes per product per round", 15))
     if args.per_round < 1:
         sys.exit("Episodes per round must be at least 1.")
 
@@ -239,7 +266,7 @@ def make_plan(args):
 
 def check_plan_instructions(plan):
     """Refuse to continue when instructions.json changed a planned product's text since the plan was made."""
-    catalog = json.loads(INSTRUCTIONS_FILE.read_text())
+    catalog = load_instructions()
     changed = [item for item, entry in plan["products"].items()
                if catalog.get(item, {}).get("instruction") != entry["instruction"]]
     if changed:
@@ -616,6 +643,8 @@ def announce(plan, slot, previous):
         position = plan["positions"][round_ - 1]
         say(f"--- Round {round_}/{plan['rounds']} at {shelf}: put the base "
             f"{describe_position(position, plan['offset_cm'], plan['turn_deg'])} ({position}) ---")
+        say("Between episodes, change the product setup as you like, mixing these:\n"
+            + "\n".join(f"  - {v}" for v in VARIATIONS))
     if slot != previous:
         say(f"Product: {item}  \"{plan['products'][item]['instruction']}\"  "
             f"({plan['per_round']} episodes this round)")

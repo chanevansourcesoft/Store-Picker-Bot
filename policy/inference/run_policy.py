@@ -139,7 +139,7 @@ def load_config(path, device):
 def instruction(args):
     if args.task:
         return args.task
-    items = json.loads(record.INSTRUCTIONS_FILE.read_text())
+    items = record.load_instructions()
     if args.product not in items:
         sys.exit(f"Unknown product '{args.product}'. In instructions.json: {', '.join(items)}")
     return items[args.product]["instruction"]

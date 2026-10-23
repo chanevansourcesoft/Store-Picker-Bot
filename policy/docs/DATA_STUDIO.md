@@ -49,6 +49,8 @@ steps; a step unlocks when the one before it is done.
 
    Then press **Continue to recording**.
 3. **Record:** the right side says where to put the base (a round) and which product to pick.
+   Below the product is what to change between episodes (position, angle, neighbours): see
+   "Change the product setup between episodes" in [DATA_COLLECTION.md](DATA_COLLECTION.md).
    - Put the base there, using the floor marks, and the leader arm in its rest pose. Press
      **Start round**. The follower arm moves to the leader arm's pose when the round starts.
    - For each episode: press **Space** (Start) just before you move, pick the product shown, put

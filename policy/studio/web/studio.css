@@ -145,6 +145,8 @@ main { padding: 20px; max-width: 1600px; margin: 0 auto; }
 .now-block .big { font-size: 20px; font-weight: 700; margin: 2px 0; }
 .now-block.changed { border: 2px solid var(--warn); background: var(--warn-soft); }
 .now-block.product .big { font-size: 24px; }
+.now-block .lbl.vary { margin-top: 10px; }
+.now-block ul.vary { margin: 4px 0 0; padding-left: 18px; }
 .guide ol { margin: 0 0 12px; padding-left: 22px; }
 .guide li { margin-bottom: 8px; }
 .rest-pose { margin: 0 0 14px; }

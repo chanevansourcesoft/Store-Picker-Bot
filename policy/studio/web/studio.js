@@ -176,7 +176,7 @@ function enterCampaign() {
   if (!$("newProducts").children.length) {
     $("newProducts").innerHTML = S.catalog.map((p) => `<label><input type="checkbox" value="${esc(p.item)}" checked>` +
       `<span>${esc(pretty(p.item))}</span><span class="shelf">${esc(p.shelf)}</span><span class="ins">"${esc(p.instruction)}"</span></label>`).join("");
-    $("newRounds").innerHTML = Array.from({ length: S.max_rounds }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join("");
+    $("newRounds").innerHTML = S.round_choices.map((r) => `<option value="${r}">${r}</option>`).join("");
     $("newRounds").value = S.config.default_rounds;
     $("newPerRound").value = S.config.default_per_round;
     $("newOffset").value = S.config.default_offset_cm;
@@ -402,7 +402,9 @@ function renderRecord() {
   $("nowProduct").hidden = roundOver || !(slot || n);
   if (slot) {
     $("nowProduct").innerHTML = `<div class="lbl">Pick this product</div><div class="big">${esc(pretty(slot.item))}</div>` +
-      `<div class="muted">"${esc(slot.instruction)}"</div><div class="small">Episode ${slot.count} of ${slot.per_round} for this product in this round</div>`;
+      `<div class="muted">"${esc(slot.instruction)}"</div><div class="small">Episode ${slot.count} of ${slot.per_round} for this product in this round</div>` +
+      `<div class="lbl vary">Before each episode, change the setup (mix freely)</div>` +
+      `<ul class="small vary">${S.variations.map((v) => `<li>${esc(v)}</li>`).join("")}</ul>`;
   } else if (n) {
     $("nowProduct").innerHTML = `<div class="lbl">Products in this round</div>` +
       n.items.map((i) => `<div>${esc(pretty(i.item))}: <b>${i.done} / ${i.need}</b></div>`).join("");

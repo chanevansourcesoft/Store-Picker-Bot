@@ -15,7 +15,8 @@ Kept out of the ROS 2 build by `COLCON_IGNORE`.
 | `studio/` | Store Picker Bot app: record and review demonstrations without a terminal, then train on the training PC (PC) |
 | `training/` | GR00T training scripts for the training PC (2× RTX 5090) |
 | `inference/` | Runs a trained model on the arm: on a PC for testing, or on the Jetson |
-| `instructions.json` | GR00T instruction per item id, used when recording and when picking |
+| `instructions.json` | GR00T instruction per item id, used when recording and when picking (not in Git: each setup has its own) |
+| `instructions.example.json` | Example products in the same format: copy it to start a new `instructions.json` |
 | `docs/` | Step-by-step guides |
 | `env.sh` | Environment for running without Docker on a PC (`source policy/env.sh`) |
 
@@ -64,6 +65,17 @@ A free Hugging Face account is enough.
    HF_TOKEN=<your token>
    HF_USER=<your Hugging Face username>
    ```
+
+### Products
+
+The products of this setup are in `policy/instructions.json`. It is not in Git, so create it on every machine
+that records or picks, from the example, and keep only your products
+([DATA_COLLECTION.md](docs/DATA_COLLECTION.md), step 1):
+
+```bash
+cd ~/Documents/Store-Picker-Bot/policy
+cp instructions.example.json instructions.json
+```
 
 ### Build and check the container
 
@@ -114,6 +126,7 @@ instead: see [TRAINING.md](docs/TRAINING.md).
 4. Create the repo root `.env` (`cp .env.example .env`) and fill it in as described in "Hugging Face
    access" above. The arm ports and cameras are added later ([ARM_SETUP.md](docs/ARM_SETUP.md), step 1, and
    [CAMERA_SETUP.md](docs/CAMERA_SETUP.md), step 2).
+   Also create `policy/instructions.json` as in "Products" above.
 5. In every new terminal, load the environment (with conda, run `conda activate lerobot_env` first). Use the folder
    where you cloned the repo, for example:
    ```bash

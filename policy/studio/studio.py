@@ -159,13 +159,13 @@ def next_round(plan, log):
 
 def make_plan(products, rounds, per_round, offset_cm, turn_deg):
     """The same plan record.py makes for a new dataset, from the app's form."""
-    catalog = json.loads(record.INSTRUCTIONS_FILE.read_text())
+    catalog = record.load_instructions()
     products = [p for p in catalog if p in set(products or [])]  # catalog order
     if not products:
         raise ValueError("Choose at least one product.")
     rounds, per_round = int(rounds), int(per_round)
-    if not 1 <= rounds <= len(record.POSITIONS_7):
-        raise ValueError(f"Rounds must be 1 to {len(record.POSITIONS_7)}.")
+    if rounds not in record.ROUND_CHOICES:
+        raise ValueError(f"Rounds must be one of {', '.join(map(str, record.ROUND_CHOICES))}.")
     if not 1 <= per_round <= 100:
         raise ValueError("Episodes per product per round must be 1 to 100.")
     offset_cm, turn_deg = float(offset_cm), float(turn_deg)
@@ -566,7 +566,7 @@ class Studio:
                         "rounds": plan["rounds"], "per_round": plan["per_round"], "offset_cm": plan["offset_cm"],
                         "turn_deg": plan["turn_deg"], "done": done, "total": total, **review_counts(plan, log)}
             upcoming = next_round(plan, log)
-        catalog = json.loads(record.INSTRUCTIONS_FILE.read_text())
+        catalog = record.load_instructions()
         return {
             "campaign": campaign,
             "next": upcoming,
@@ -581,7 +581,8 @@ class Studio:
             "next_name": record.next_version_name(),
             "config": {k: CONFIG[k] for k in ("default_rounds", "default_per_round", "default_offset_cm",
                                               "default_turn_deg", "long_episode_s")},
-            "max_rounds": len(record.POSITIONS_7),
+            "round_choices": record.ROUND_CHOICES,
+            "variations": record.VARIATIONS,
         }
 
     # --- checks ---
@@ -1081,6 +1082,7 @@ def watchdog(server):
 
 def main():
     global STUDIO
+    record.load_instructions()  # stops here with a clear message when instructions.json is missing
     STUDIO = Studio()
     try:
         server = ThreadingHTTPServer(("127.0.0.1", CONFIG["port"]), Handler)

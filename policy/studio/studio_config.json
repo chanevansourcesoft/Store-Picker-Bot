@@ -1,8 +1,8 @@
 {
   "lerobot_env": "lerobot_env",
   "port": 8780,
-  "default_rounds": 5,
-  "default_per_round": 10,
+  "default_rounds": 12,
+  "default_per_round": 15,
   "default_offset_cm": 3.0,
   "default_turn_deg": 3.0,
   "long_episode_s": 60,

@@ -7,3 +7,6 @@ training/logs/
 
 # Trained models copied here for inference
 inference/models/
+
+# Products of this setup (start from instructions.example.json)
+instructions.json

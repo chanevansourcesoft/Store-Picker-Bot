@@ -52,7 +52,15 @@ The instruction is the sentence GR00T is trained on. It is fixed per product in 
 The item ids are the same as in the store's `inventory.json`. Running a trained model ([INFERENCE.md](INFERENCE.md))
 reads the same file, so the text sent to GR00T always matches the one it was trained with.
 
+`instructions.json` is not in Git: each setup has its own products. `instructions.example.json` shows the
+format with example products. On a new setup, or for a new set of products, copy it and keep only your products:
+
+```bash
+cp instructions.example.json instructions.json
+```
+
 - **To add a product,** add one line before recording it.
+- **The Jetson needs the same file** to pick: copy it there whenever it changes.
 - **Never change the text of a product that already has recordings:** models trained on them would no
   longer match. `record.py` refuses to continue a dataset whose texts changed.
 
@@ -109,15 +117,15 @@ Products (from instructions.json):
   2) mentos         shelf_A    "pick up the Mentos candy roll and place it in the basket"
   ...
 Products to record (numbers or ids, comma-separated, or all) [all]:
-Rounds (base positions per shelf, 1-7) [5]:
-Episodes per product per round [10]:
+Rounds (base positions per shelf, 1-7, 12 or 15) [12]:
+Episodes per product per round [15]:
 
-Plan: 4 product(s) x 5 round(s) x 10 episodes = 200 episodes
+Plan: 4 product(s) x 12 round(s) x 15 episodes = 720 episodes
 Start? [Y]:
 ```
 
 The same choices can be given as options, without questions:
-`--products chips_packet,mentos --rounds 5 --per_round 10`.
+`--products mentos,frooti --rounds 12 --per_round 15`.
 
 The dataset is saved in `data_collection/dataset/dataset_v<N>_<DDMMYYYY_HHMMSS>/`, for example
 `data_collection/dataset/dataset_v1_12102026_153045/`. The version N counts up by itself: the next new
@@ -131,10 +139,10 @@ from slightly different base positions. A **round** is one base position. At eac
 through the rounds in order, and in each round records every product of that shelf:
 
 ```
-shelf_A:  round 1 (centre)  -> mentos x 10, frooti x 10
-          round 2 (left)    -> mentos x 10, frooti x 10
+shelf_A:  round 1 (closer)                -> mentos x 15, frooti x 15
+          round 2 (closer, turned right)  -> mentos x 15, frooti x 15
           ...
-shelf_B:  round 1 (centre)  -> ...
+shelf_B:  round 1 (closer)                -> ...
 ```
 
 So the base moves only once per round. The script says where to put it, seen from behind the robot facing the shelf:
@@ -143,9 +151,27 @@ So the base moves only once per round. The script says where to put it, seen fro
 |---|---|
 | 1–5 | centre, 3 cm left, 3 cm right, 3 cm closer and turned 3° left, 3 cm further and turned 3° right |
 | 6–7 | centre, left, right, closer, further, turned left, turned right |
+| 12 | closer, further, left and right (3 cm), each one straight, turned 3° right (clockwise) and turned 3° left (anticlockwise) |
+| 15 | the same 12, plus the centre straight, turned right and turned left (first) |
+
+With 12 or 15 rounds, the base only turns between the 3 rounds of one place.
 
 Change the distances with `--offset_cm` and `--turn_deg` when starting a dataset. Set them to the robot's real stop error:
 drive it to a shelf about 10 times and measure how far apart the stops are.
+
+### Change the product setup between episodes
+
+Between episodes, change how the product stands, so the model sees many setups. The script (and the app)
+shows this list at every round. Mix these freely, and use every option about as often:
+
+- **Position:** the product left, in the middle or right of its place (about 4 cm apart).
+- **Angle:** straight, or turned up to about 20° either way.
+- **Neighbours:** the usual order, swapped with the product next to it, or the other products taken away.
+
+Keep the same lighting during the whole dataset. Record other lighting as a separate dataset with the same plan.
+
+**Example plan** for Mentos and Frooti on shelf_A: `--products mentos,frooti --rounds 12 --per_round 15`
+gives 12 × 2 × 15 = 360 episodes, about 7 hours of recording (spread over several sessions with `--resume`).
 
 ### What one episode is
 
@@ -155,7 +181,7 @@ rest pose, then press N. Every episode, for every product and shelf, starts and 
 ### Keys
 
 Press these in the terminal running the script. The last line of the terminal always shows the state,
-for example `WAITING  shelf_A round 2/5 | mentos 4/10 | plan 14/200`.
+for example `WAITING  shelf_A round 2/12 | mentos 4/15 | plan 19/360`.
 
 | Key | When | What it does |
 |---|---|---|
