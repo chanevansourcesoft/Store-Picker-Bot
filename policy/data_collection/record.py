@@ -112,7 +112,8 @@ ROUND_CHOICES = list(range(1, len(POSITIONS_7) + 1)) + [len(POSITIONS_12), len(P
 VARIATIONS = [
     "Position: the product left, in the middle or right of its place (about 4 cm apart)",
     "Angle: straight, or turned up to about 20 deg either way",
-    "Neighbours: the usual order, swapped with the product next to it, or the other products taken away",
+    "Neighbours: shuffle the order of all the products on the shelf, so the target is in a different slot "
+    "with different products next to it; sometimes take some away, or leave the target alone",
 ]
 
 STUDIO = False  # set by --studio: run by the Store Picker Bot app

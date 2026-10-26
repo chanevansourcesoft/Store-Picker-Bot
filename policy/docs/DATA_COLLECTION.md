@@ -166,7 +166,11 @@ shows this list at every round. Mix these freely, and use every option about as 
 
 - **Position:** the product left, in the middle or right of its place (about 4 cm apart).
 - **Angle:** straight, or turned up to about 20° either way.
-- **Neighbours:** the usual order, swapped with the product next to it, or the other products taken away.
+- **Neighbours:** shuffle the order of all the products on the shelf, so the target is in a different slot
+  with different products next to it. Sometimes take some away, or leave the target alone.
+
+Products that are not trained can stay on the shelf: they teach the model to pick the one named in the
+instruction. Shuffle them too.
 
 Keep the same lighting during the whole dataset. Record other lighting as a separate dataset with the same plan.
 
