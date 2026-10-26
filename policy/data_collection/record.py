@@ -2,11 +2,11 @@
 Record teleoperated demonstrations on the real SO-100 arms, following a recording plan.
 
 A plan is: which products, how many rounds, and how many episodes per product per round.
-A round is one base position in front of the shelf. The robot stops a little differently
-every time it drives to a shelf, so each round puts the base at a different small offset
-(the script says which), and every product on that shelf is recorded there. Order:
-shelf -> round -> product, so the base moves once per round. Between episodes the operator
-changes the product setup (position, angle, neighbours: see VARIATIONS).
+A round is one base position in front of the shelves (upper and lower shelf of one rack). The
+robot stops a little differently every time it drives there, so each round puts the base at a
+different small offset (the script says which), and every planned product, on any shelf, is
+recorded there. Order: round -> product, so the base moves once per round. Between episodes the
+operator changes the product setup (position, angle, neighbours: see VARIATIONS).
 
 LeRobot does the recording (same loop, units and dataset format as `lerobot-record`).
 Keys (read from the terminal), like the sim teleop of the SO-101 project:
@@ -30,7 +30,7 @@ A new dataset is called dataset_v<N>_<DDMMYYYY_HHMMSS> (N = next free version), 
 
 The Store Picker Bot app (policy/studio/) runs this script with --studio: commands come as
 lines on stdin (start, save, discard, bad, quit) instead of keys, events go to stdout as
-"[STUDIO] {json}" lines, one run records one round (shelf + base position) and then waits
+"[STUDIO] {json}" lines, one run records one round (one base position) and then waits
 for quit, and --preview_dir gets small camera snapshots for the app's live view.
 
 Usage (from policy/):
@@ -154,7 +154,7 @@ def parse_args():
     target.add_argument("--resume", help="Existing dataset folder in dataset/ to continue")
     plan = parser.add_argument_group("plan of a new dataset (asked in the terminal when not given)")
     plan.add_argument("--products", help="Comma-separated item ids from instructions.json, or 'all'")
-    plan.add_argument("--rounds", type=int, help=f"Base positions per shelf (1-{len(POSITIONS_7)}, {len(POSITIONS_12)} or {len(POSITIONS_15)})")
+    plan.add_argument("--rounds", type=int, help=f"Base positions (1-{len(POSITIONS_7)}, {len(POSITIONS_12)} or {len(POSITIONS_15)})")
     plan.add_argument("--per_round", type=int, help="Episodes per product per round")
     plan.add_argument("--offset_cm", type=float, default=3.0, help="Base offset of the left/right/closer/further rounds")
     plan.add_argument("--turn_deg", type=float, default=3.0, help="Base turn of the turned rounds")
@@ -239,7 +239,7 @@ def make_plan(args):
             if item not in products:
                 products.append(item)
     if args.rounds is None:
-        args.rounds = int(ask(f"Rounds (base positions per shelf, 1-{len(POSITIONS_7)}, "
+        args.rounds = int(ask(f"Rounds (base positions, 1-{len(POSITIONS_7)}, "
                               f"{len(POSITIONS_12)} or {len(POSITIONS_15)})", len(POSITIONS_12)))
     if args.rounds not in ROUND_CHOICES:
         sys.exit(f"Rounds must be 1 to {len(POSITIONS_7)}, {len(POSITIONS_12)} or {len(POSITIONS_15)}.")
@@ -281,6 +281,11 @@ def shelves(plan):
     for item, entry in plan["products"].items():
         order.setdefault(entry["shelf"], []).append(item)
     return list(order.items())
+
+
+def rack(plan):
+    """Where the robot stops: the shelves of the plan's products, all on one rack."""
+    return " + ".join(shelf for shelf, _ in shelves(plan))
 
 
 def write_json(path, data):
@@ -330,12 +335,12 @@ class EpisodeLog:
 
 
 def next_slot(plan, log):
-    """The (shelf, round, item) to record next, or None when the plan is complete."""
-    for shelf, items in shelves(plan):
-        for round_ in range(1, plan["rounds"] + 1):
-            for item in items:
-                if log.good_count(item, round_) < plan["per_round"]:
-                    return shelf, round_, item
+    """The (rack, round, item) to record next, or None when the plan is complete.
+    Each round (base position) records every product before the base moves."""
+    for round_ in range(1, plan["rounds"] + 1):
+        for item in plan["products"]:
+            if log.good_count(item, round_) < plan["per_round"]:
+                return rack(plan), round_, item
     return None
 
 
@@ -345,11 +350,10 @@ def plan_progress(plan, log):
     return done, len(plan["products"]) * plan["rounds"] * plan["per_round"]
 
 
-def round_progress(plan, log, shelf, round_):
-    """Good episodes and episodes needed in one round (one base position at one shelf)."""
-    items = dict(shelves(plan))[shelf]
-    done = sum(min(plan["per_round"], log.good_count(item, round_)) for item in items)
-    return done, len(items) * plan["per_round"]
+def round_progress(plan, log, round_):
+    """Good episodes and episodes needed in one round (one base position, every product)."""
+    done = sum(min(plan["per_round"], log.good_count(item, round_)) for item in plan["products"])
+    return done, len(plan["products"]) * plan["per_round"]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -635,19 +639,19 @@ def say(text):
 
 
 def announce(plan, slot, previous):
-    """Tell the operator what changes for the next episode: shelf, base position, product."""
-    shelf, round_, item = slot
-    prev_shelf, prev_round, prev_item = previous or (None, None, None)
-    if shelf != prev_shelf:
-        say(f"\n=== {shelf}: drive the robot to {shelf} ===")
-    if (shelf, round_) != (prev_shelf, prev_round):
+    """Tell the operator what changes for the next episode: base position, product."""
+    where, round_, item = slot
+    prev_where, prev_round, prev_item = previous or (None, None, None)
+    if where != prev_where:
+        say(f"\n=== Drive the robot to the rack ({where}) ===")
+    if round_ != prev_round:
         position = plan["positions"][round_ - 1]
-        say(f"--- Round {round_}/{plan['rounds']} at {shelf}: put the base "
+        say(f"--- Round {round_}/{plan['rounds']}: put the base "
             f"{describe_position(position, plan['offset_cm'], plan['turn_deg'])} ({position}) ---")
         say("Between episodes, change the product setup as you like, mixing these:\n"
             + "\n".join(f"  - {v}" for v in VARIATIONS))
     if slot != previous:
-        say(f"Product: {item}  \"{plan['products'][item]['instruction']}\"  "
+        say(f"Product: {item} on {plan['products'][item]['shelf']}  \"{plan['products'][item]['instruction']}\"  "
             f"({plan['per_round']} episodes this round)")
 
 
@@ -755,7 +759,7 @@ def main():
 
         keys = StudioControl(events) if STUDIO else KeyControl(events, args.warn_after_s)
         previous = None
-        studio_round = None  # app: the (shelf, round) of this run; the run ends once it is complete
+        studio_round = None  # app: the (rack, round) of this run; the run ends once it is complete
 
         with VideoEncodingManager(dataset):
             while True:
@@ -779,13 +783,13 @@ def main():
                 previous = slot
                 loop_kwargs["single_task"] = plan["products"][item]["instruction"]
                 done, total = plan_progress(plan, log)
-                where = (f"{shelf} round {round_}/{plan['rounds']} | {item} "
+                where = (f"round {round_}/{plan['rounds']} | {item} "
                          f"{log.good_count(item, round_) + 1}/{plan['per_round']} | plan {done}/{total}")
                 position = plan["positions"][round_ - 1]
-                round_done, round_size = round_progress(plan, log, shelf, round_)
+                round_done, round_size = round_progress(plan, log, round_)
                 emit("slot", shelf=shelf, round=round_, rounds=plan["rounds"], position=position,
                      where=describe_position(position, plan["offset_cm"], plan["turn_deg"]),
-                     item=item, instruction=plan["products"][item]["instruction"],
+                     item=item, item_shelf=plan["products"][item]["shelf"], instruction=plan["products"][item]["instruction"],
                      count=log.good_count(item, round_) + 1, per_round=plan["per_round"],
                      round_done=round_done, round_size=round_size, done=done, total=total)
 
@@ -813,7 +817,7 @@ def main():
                     say(f"Saving episode {index}...")
                     emit("saving", index=index)
                     dataset.save_episode()
-                    log.add(index, item, shelf, round_, plan["positions"][round_ - 1])
+                    log.add(index, item, plan["products"][item]["shelf"], round_, plan["positions"][round_ - 1])
                     saved += 1
                     say(f"Saved episode {index} ({item}, round {round_}).")
                     emit("saved", index=index, item=item, round=round_)

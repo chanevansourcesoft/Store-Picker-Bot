@@ -363,6 +363,7 @@ function renderRecord() {
   else if (j && j.status === "failed") [title, cls, sub] = ["Stopped with an error", "bad", info.error || "See the message below. Fix it, then start the round again."];
   else if (!S.next) [title, cls, sub] = ["The plan is complete", "ok", "Review the last episodes on the Review step."];
   else if (c.to_review) [title, cls, sub] = ["Review first", "warn", `${c.to_review} episode(s) of the last round are waiting on the Review step.`];
+  else if (S.next.done) [title, cls, sub] = ["Ready to resume the round", "ok", `${S.next.done} of ${S.next.size} episodes of this round are recorded. Keep the base where it says on the right, put the leader arm in its rest pose, then press Resume round.`];
   else [title, cls, sub] = ["Ready to start a round", "ok", "Put the base where it says on the right, the leader arm in its rest pose, then press Start round."];
   $("recState").textContent = title; $("recState").className = "state " + cls; $("recSub").textContent = sub;
 
@@ -379,6 +380,7 @@ function renderRecord() {
   $("startBtn").disabled = !(running && ph === "waiting" && !j.stopping);
   $("saveBtn").disabled = $("discardBtn").disabled = !(running && ph === "recording" && !j.stopping);
   $("startRoundBtn").hidden = running || !S.next || !!c.to_review;
+  $("startRoundBtn").textContent = S.next && S.next.done ? "Resume round" : "Start round";  // part of it is recorded
   $("finishRoundBtn").hidden = !(running && ph === "done" && !j.stopping);
   $("pauseRoundBtn").hidden = !running || ph === "done" || j.stopping;
   $("recLog").hidden = !(j && j.status === "failed");
@@ -389,25 +391,25 @@ function renderRecord() {
   const n = S.next;
   const base = slot || n;
   const roundOver = running && ph === "done";
-  $("nowBase").className = "now-block" + (!running && n ? " changed" : "");
+  $("nowBase").className = "now-block" + (!running && n && !n.done ? " changed" : "");
   if (roundOver) {
     $("nowBase").innerHTML = `<div class="lbl">Base</div><div class="big">Round complete</div>` +
       `<div class="muted small">${n ? `After the review, the next round is at ${esc(n.shelf)}: ${esc(n.where)}.` : "That was the last round."}</div>`;
   } else {
     $("nowBase").innerHTML = base
       ? `<div class="lbl">Base · ${esc(base.shelf)} · round ${base.round} of ${base.rounds}</div><div class="big">${esc(base.where)}</div>` +
-        `<div class="muted small">${!running ? "Drive or push the base there now, using the floor marks." : "Do not move the base during the round."}</div>`
+        `<div class="muted small">${running ? "Do not move the base during the round." : n && n.done ? "Part of this round is recorded: the base must still be here." : "Drive or push the base there now, using the floor marks."}</div>`
       : `<div class="lbl">Base</div><div class="big">All rounds are recorded</div>`;
   }
   $("nowProduct").hidden = roundOver || !(slot || n);
   if (slot) {
-    $("nowProduct").innerHTML = `<div class="lbl">Pick this product</div><div class="big">${esc(pretty(slot.item))}</div>` +
+    $("nowProduct").innerHTML = `<div class="lbl">Pick this product${slot.item_shelf ? ` · ${esc(slot.item_shelf)}` : ""}</div><div class="big">${esc(pretty(slot.item))}</div>` +
       `<div class="muted">"${esc(slot.instruction)}"</div><div class="small">Episode ${slot.count} of ${slot.per_round} for this product in this round</div>` +
       `<div class="lbl vary">Before each episode, change the setup (mix freely)</div>` +
       `<ul class="small vary">${S.variations.map((v) => `<li>${esc(v)}</li>`).join("")}</ul>`;
   } else if (n) {
     $("nowProduct").innerHTML = `<div class="lbl">Products in this round</div>` +
-      n.items.map((i) => `<div>${esc(pretty(i.item))}: <b>${i.done} / ${i.need}</b></div>`).join("");
+      n.items.map((i) => `<div>${esc(pretty(i.item))}${i.shelf ? ` <span class="muted small">(${esc(i.shelf)})</span>` : ""}: <b>${i.done} / ${i.need}</b></div>`).join("");
   }
   const rd = slot ? slot.round_done : n ? n.done : 0, rs = slot ? slot.round_size : n ? n.size : 0;
   $("roundBar").style.width = roundOver || !rs ? "100%" : `${Math.min(100, (100 * rd) / rs)}%`;
@@ -604,6 +606,7 @@ const runsOfCampaign = () => (T && T.status.ok && camp() ? T.status.runs.filter(
 function trainDone() { return runsOfCampaign().some((r) => r.status === "finished"); }
 
 let trainTimer = null, runTimer = null, trainLoading = false, planTimer = null;
+let stepsPlan = null;  // estimate for the steps typed in (T.plan is for the default steps)
 function enterTrain() {
   clearInterval(trainTimer); clearInterval(runTimer);
   loadTrain();
@@ -631,7 +634,8 @@ function renderTrain() {
       ["Free disk", gb(st.free_gb)], ["GPUs", gpus || "none found"]])}</dl>`;
   }
   renderSend();
-  renderPlan(T.plan);
+  const steps = Number($("trainSteps").value);
+  renderPlan(T.plan && T.plan.steps === steps ? T.plan : stepsPlan && stepsPlan.steps === steps ? stepsPlan : null);
   renderRuns();
 }
 function renderSend() {
@@ -681,8 +685,8 @@ function renderPlan(plan) {
 $("trainSteps").oninput = () => {
   clearTimeout(planTimer);
   planTimer = setTimeout(async () => {
-    try { renderPlan(await api("/api/train/plan", { steps: $("trainSteps").value })); $("trainMsg").textContent = ""; }
-    catch (e) { $("trainMsg").textContent = e.message; }
+    try { stepsPlan = await api("/api/train/plan", { steps: $("trainSteps").value }); renderPlan(stepsPlan); $("trainMsg").textContent = ""; }
+    catch (e) { stepsPlan = null; renderPlan(null); $("trainMsg").textContent = e.message; }
   }, 400);
 };
 $("sendBtn").onclick = async () => {

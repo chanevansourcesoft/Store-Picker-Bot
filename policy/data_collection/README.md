@@ -6,5 +6,5 @@ Recording teleoperated demonstrations on the real SO-100 arms. Guide: [DATA_COLL
 |---|---|
 | `record.py` | Records episodes with LeRobot following a plan of products and rounds, controlled with keys (Space, N, X, B, Q), or by the Store Picker Bot app ([studio/](../studio/)) |
 | `remove_bad_episodes.py` | Removes the episodes marked bad (key B) from a dataset |
-| `camera_settings.json` | Fixed exposure, white balance and focus, applied by `record.py` (start from `camera_settings.example.json`) |
+| `camera_settings.json` | Fixed exposure, white balance and focus, applied by `record.py` (start from `camera_settings.example.json`; not in Git) |
 | `dataset/` | Recorded datasets, one folder each: `<name>_<DDMMYYYY_HHMMSS>/` (not stored in Git) |

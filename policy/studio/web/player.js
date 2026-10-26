@@ -6,6 +6,7 @@
 
 class EpisodePlayer {
   static CAM_LABELS = { scene_cam: "Scene camera", gripper_cam: "Gripper camera" };
+  static SPEED_KEY = "store_picker.review_speed";
 
   // el: {videos, slider, frameLabel, playBtn, speed, plots} (DOM elements)
   constructor(el, { onError } = {}) {
@@ -18,7 +19,15 @@ class EpisodePlayer {
     this.lastCursor = -1;
     el.playBtn.onclick = () => this.togglePlay();
     el.slider.oninput = (e) => this.seek(Number(e.target.value));
-    el.speed.onchange = (e) => { for (const x of this.videos) x.v.playbackRate = Number(e.target.value); };
+    // The chosen speed is remembered in this browser, also after a page reload.
+    try {
+      const saved = localStorage.getItem(EpisodePlayer.SPEED_KEY);
+      if (saved && [...el.speed.options].some((o) => o.value === saved)) el.speed.value = saved;
+    } catch { /* no storage: keep the default speed */ }
+    el.speed.onchange = () => {
+      for (const x of this.videos) this.setRate(x.v);
+      try { localStorage.setItem(EpisodePlayer.SPEED_KEY, el.speed.value); } catch { /* not remembered */ }
+    };
     window.addEventListener("resize", () => this.drawPlots());
     const loop = () => { this.tick(); requestAnimationFrame(loop); };
     requestAnimationFrame(loop);
@@ -64,17 +73,20 @@ class EpisodePlayer {
       wrap.innerHTML = `<div class="wait">Loading video…</div><span class="cap">${EpisodePlayer.CAM_LABELS[cam] || cam}</span>`;
       const v = document.createElement("video");
       v.muted = true; v.playsInline = true; v.preload = "auto";
-      v.playbackRate = Number(this.el.speed.value);
       v.addEventListener("loadedmetadata", () => { v.currentTime = info.from + 0.5 / this.ep.fps; }, { once: true });
       v.addEventListener("seeked", () => wrap.querySelector(".wait")?.remove(), { once: true });
       v.addEventListener("error", () => { const w = wrap.querySelector(".wait"); if (w) w.textContent = "Could not load this video."; });
       v.src = info.url;
+      this.setRate(v);  // after src: loading a video resets its speed to the default one
       wrap.prepend(v);
       box.appendChild(wrap);
       return { v, from: info.from, to: info.to };
     });
     this.el.playBtn.textContent = "Play";
   }
+
+  // Both speeds: a newly loaded video starts at defaultPlaybackRate.
+  setRate(v) { v.defaultPlaybackRate = v.playbackRate = Number(this.el.speed.value); }
 
   frameOf(t) { return Math.max(0, Math.min(this.ep.frames - 1, Math.floor(t * this.ep.fps + 1e-3))); }
 
@@ -108,8 +120,11 @@ class EpisodePlayer {
       for (const x of this.videos) x.v.pause();
       this.el.playBtn.textContent = "Play";
     }
+    // Pull the other videos back in step. At high speed a tick moves several frames, so allow more drift,
+    // and never seek a video that is still seeking (it would stall at 4-5x).
+    const drift = Math.max(1.5, 3 * main.v.playbackRate) / this.ep.fps;
     for (const x of this.videos.slice(1)) {
-      if (Math.abs(x.v.currentTime - x.from - t) > 1.5 / this.ep.fps) x.v.currentTime = x.from + t;
+      if (!x.v.seeking && Math.abs(x.v.currentTime - x.from - t) > drift) x.v.currentTime = x.from + t;
     }
     if (document.activeElement !== this.el.slider) this.el.slider.value = f;
     this.el.frameLabel.textContent = `frame ${f} / ${this.ep.frames - 1} · ${(f / this.ep.fps).toFixed(2)} s`;

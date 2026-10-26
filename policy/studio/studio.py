@@ -131,28 +131,28 @@ def review_counts(plan, log):
     """Episodes still to review are those of finished rounds; the round in progress is reviewed
     once it is complete."""
     slot = record.next_slot(plan, log)
-    open_round = slot[:2] if slot else None
+    open_round = slot[1] if slot else None
     episodes = log.data["episodes"]
     unreviewed = [e for e in episodes if not e["bad"] and not e.get("approved")]
     return {"episodes": len(episodes), "approved": sum(bool(e.get("approved")) and not e["bad"] for e in episodes),
             "flagged": sum(e["bad"] for e in episodes),
-            "to_review": sum((e["shelf"], e["round"]) != open_round for e in unreviewed),
-            "in_open_round": sum((e["shelf"], e["round"]) == open_round for e in unreviewed)}
+            "to_review": sum(e["round"] != open_round for e in unreviewed),
+            "in_open_round": sum(e["round"] == open_round for e in unreviewed)}
 
 
 def next_round(plan, log):
-    """What the next run records: one round (base position) at one shelf, or None when complete."""
+    """What the next run records: one round (base position, every product), or None when complete."""
     slot = record.next_slot(plan, log)
     if slot is None:
         return None
     shelf, round_, _ = slot
     position = plan["positions"][round_ - 1]
-    done, size = record.round_progress(plan, log, shelf, round_)
-    items = dict(record.shelves(plan))[shelf]
+    done, size = record.round_progress(plan, log, round_)
+    items = list(plan["products"])
     return {"shelf": shelf, "round": round_, "rounds": plan["rounds"], "position": position,
             "where": record.describe_position(position, plan["offset_cm"], plan["turn_deg"]),
             "done": done, "size": size,
-            "items": [{"item": i, "instruction": plan["products"][i]["instruction"],
+            "items": [{"item": i, "shelf": plan["products"][i]["shelf"], "instruction": plan["products"][i]["instruction"],
                        "done": min(plan["per_round"], log.good_count(i, round_)), "need": plan["per_round"]}
                       for i in items]}
 

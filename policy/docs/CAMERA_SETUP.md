@@ -169,7 +169,12 @@ Camera settings applied to scene_cam: power_line_frequency=1, exposure_dynamic_f
 If a control name is wrong or missing on the camera, `record.py` stops before recording and says which
 one: remove or fix that line. It then measures how many new frames each camera really delivers, for
 example `scene_cam: 30 new frames per second`. If a camera is slower than 30, it warns and asks before
-recording: lower that camera's `exposure_time_absolute` and raise `gain` instead. Commit the file: it belongs to these cameras, like the arm calibration.
+recording: lower that camera's `exposure_time_absolute` and raise `gain` instead.
+
+The file is applied only when recording starts (`record.py`, or **Start round** in the app). After editing it
+during a round, pause the round and start it again. The file is not in Git: each setup has its own cameras
+and lighting. Copy it by hand to another machine with the same cameras (for example the Jetson).
+
 If the lighting changes for good (new lamps, different room), repeat 4.3 and 4.4.
 
 ## 5. Check the views

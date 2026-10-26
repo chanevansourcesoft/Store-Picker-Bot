@@ -134,15 +134,14 @@ the folder is then `<name>_<DDMMYYYY_HHMMSS>/`.
 
 ### Rounds
 
-The robot never stops at exactly the same spot in front of a shelf, so the demos must show the shelf
-from slightly different base positions. A **round** is one base position. At each shelf the script goes
-through the rounds in order, and in each round records every product of that shelf:
+The robot never stops at exactly the same spot in front of the shelves, so the demos must show them
+from slightly different base positions. A **round** is one base position. The upper and lower shelf are
+on one rack, so in each round the script records **every product of the plan**, on both shelves:
 
 ```
-upper_shelf:  round 1 (closer)                -> mentos x 15, frooti x 15
-              round 2 (closer, turned right)  -> mentos x 15, frooti x 15
-              ...
-lower_shelf:  round 1 (closer)                -> ...
+round 1 (closer)                -> ink_box x 20 (upper_shelf), biscuit x 20 (lower_shelf)
+round 2 (closer, turned right)  -> ink_box x 20, biscuit x 20
+...
 ```
 
 So the base moves only once per round. The script says where to put it, seen from behind the robot facing the shelf:
@@ -185,7 +184,7 @@ rest pose, then press N. Every episode, for every product and shelf, starts and 
 ### Keys
 
 Press these in the terminal running the script. The last line of the terminal always shows the state,
-for example `WAITING  upper_shelf round 2/12 | mentos 4/15 | plan 19/360`.
+for example `WAITING  round 2/12 | mentos 4/15 | plan 19/360`.
 
 | Key | When | What it does |
 |---|---|---|
@@ -202,8 +201,8 @@ The cycle is: **Waiting → Space → Recording → N or X → Waiting** …
 
 - While waiting, nothing is recorded, but the follower still copies the leader: put the product back
   and move the arm to its rest pose, then press Space.
-- When the shelf, the round or the product changes, the script prints what to do (drive to the shelf,
-  move the base, which product) before the next episode.
+- When the round or the product changes, the script prints what to do (move the base, which product
+  and on which shelf) before the next episode.
 - Episodes have no time limit. After 60 s the status line warns you to press N or X
   (change it with `--warn_after_s`).
 - Saving takes a while (the two videos are encoded on the CPU; longer episodes take longer).

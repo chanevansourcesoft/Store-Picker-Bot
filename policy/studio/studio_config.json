@@ -18,7 +18,7 @@
     "save_freq": 5000,
     "keep_last": 2,
     "keep_model_every": 10000,
-    "sec_per_step": 1.0,
+    "sec_per_step": 1.05,
     "send_streams": 4
   }
 }

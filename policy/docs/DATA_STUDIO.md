@@ -59,8 +59,9 @@ steps; a step unlocks when the one before it is done.
    - The live view shows both cameras; a red frame means it is recording.
    - When the round is complete, put the follower arm in its rest pose and press
      **The arm is at rest: finish the round**. Its motors switch off then.
-   - **Pause round** stops early (the episode in progress is dropped, saved ones are kept). Start the
-     round again later, even another day: it continues where it stopped.
+   - **Pause round** stops early (the episode in progress is dropped, saved ones are kept). The button
+     then says **Resume round**: press it later, even another day, and it continues where it stopped
+     (same base position, the episodes still missing).
 4. **Review:** watch every episode of the round (both cameras side by side) and decide:
    - **Approve** (`A`) if it is a clean demonstration;
    - **Flag as bad** (`F`) and pick the reason if not. A flagged episode is recorded again in the

@@ -10,3 +10,6 @@ inference/models/
 
 # Products of this setup (start from instructions.example.json)
 instructions.json
+
+# Camera settings of this setup (start from data_collection/camera_settings.example.json)
+data_collection/camera_settings.json
