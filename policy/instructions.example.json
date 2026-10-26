@@ -1,10 +1,10 @@
 {
   "product_a": {
-    "shelf": "shelf_A",
+    "shelf": "upper_shelf",
     "instruction": "pick up the product A box and place it in the basket"
   },
   "product_b": {
-    "shelf": "shelf_B",
+    "shelf": "lower_shelf",
     "instruction": "pick up the product B bottle and place it in the basket"
   }
 }

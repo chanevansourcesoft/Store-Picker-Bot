@@ -46,7 +46,7 @@ Keep these fixed for the whole project. Training and running the model depend on
 The instruction is the sentence GR00T is trained on. It is fixed per product in `instructions.json`:
 
 ```json
-"mentos": {"shelf": "shelf_A", "instruction": "pick up the Mentos candy roll and place it in the basket"}
+"mentos": {"shelf": "upper_shelf", "instruction": "pick up the Mentos candy roll and place it in the basket"}
 ```
 
 The item ids are the same as in the store's `inventory.json`. Running a trained model ([INFERENCE.md](INFERENCE.md))
@@ -113,8 +113,8 @@ It asks for the plan. Press Enter to accept a default in brackets:
 
 ```
 Products (from instructions.json):
-  1) chips_packet   shelf_B    "pick up the chips packet and place it in the basket"
-  2) mentos         shelf_A    "pick up the Mentos candy roll and place it in the basket"
+  1) chips_packet   lower_shelf  "pick up the chips packet and place it in the basket"
+  2) mentos         upper_shelf  "pick up the Mentos candy roll and place it in the basket"
   ...
 Products to record (numbers or ids, comma-separated, or all) [all]:
 Rounds (base positions per shelf, 1-7, 12 or 15) [12]:
@@ -139,10 +139,10 @@ from slightly different base positions. A **round** is one base position. At eac
 through the rounds in order, and in each round records every product of that shelf:
 
 ```
-shelf_A:  round 1 (closer)                -> mentos x 15, frooti x 15
-          round 2 (closer, turned right)  -> mentos x 15, frooti x 15
-          ...
-shelf_B:  round 1 (closer)                -> ...
+upper_shelf:  round 1 (closer)                -> mentos x 15, frooti x 15
+              round 2 (closer, turned right)  -> mentos x 15, frooti x 15
+              ...
+lower_shelf:  round 1 (closer)                -> ...
 ```
 
 So the base moves only once per round. The script says where to put it, seen from behind the robot facing the shelf:
@@ -170,7 +170,7 @@ shows this list at every round. Mix these freely, and use every option about as 
 
 Keep the same lighting during the whole dataset. Record other lighting as a separate dataset with the same plan.
 
-**Example plan** for Mentos and Frooti on shelf_A: `--products mentos,frooti --rounds 12 --per_round 15`
+**Example plan** for Mentos and Frooti on the upper shelf: `--products mentos,frooti --rounds 12 --per_round 15`
 gives 12 × 2 × 15 = 360 episodes, about 7 hours of recording (spread over several sessions with `--resume`).
 
 ### What one episode is
@@ -181,7 +181,7 @@ rest pose, then press N. Every episode, for every product and shelf, starts and 
 ### Keys
 
 Press these in the terminal running the script. The last line of the terminal always shows the state,
-for example `WAITING  shelf_A round 2/12 | mentos 4/15 | plan 19/360`.
+for example `WAITING  upper_shelf round 2/12 | mentos 4/15 | plan 19/360`.
 
 | Key | When | What it does |
 |---|---|---|
