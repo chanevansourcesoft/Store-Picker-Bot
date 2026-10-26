@@ -226,6 +226,10 @@ It continues the plan exactly where it stopped. The script refuses to resume if 
 differ from the ones the dataset was recorded with, or if a planned product's instruction changed.
 When every product has all its episodes, it says "Plan complete" and ends.
 
+To change how many rounds the dataset has, add `--rounds <number>` (up to 15) when resuming, for example
+`--resume dataset_v3_26102026_191752 --rounds 8`. Episodes per product per round cannot change. Rounds that
+already have episodes stay, with their base positions; new rounds get base positions not used yet.
+
 ### What is saved
 
 Besides the LeRobot dataset itself:

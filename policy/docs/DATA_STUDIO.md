@@ -42,6 +42,9 @@ steps; a step unlocks when the one before it is done.
    one: a name, the products, how many rounds (base positions) and how many episodes of each
    product per round. **Delete campaign** moves the selected campaign's dataset to the Trash of the
    computer; restore it from the Trash if that was a mistake.
+   - **Change rounds** (under the selected campaign) sets how many rounds it has, up to 15. Episodes per
+     product per round cannot change. Rounds that already have episodes stay, with their base positions;
+     new rounds get base positions not used yet. Not possible while a round is running.
 2. **Check:** every line must be green; a red line says what to do.
    - Press **Take test pictures**: each camera must show its own view, sharp.
    - Press **Start test** and move every joint of the leader arm a little, including the gripper,

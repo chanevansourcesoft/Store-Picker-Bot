@@ -107,6 +107,8 @@ POSITIONS_12 = [f"{place}{turn}" for place in ("closer", "further", "left", "rig
                 for turn in ("", ", turned right", ", turned left")]
 POSITIONS_15 = ["centre", "turned right", "turned left"] + POSITIONS_12
 ROUND_CHOICES = list(range(1, len(POSITIONS_7) + 1)) + [len(POSITIONS_12), len(POSITIONS_15)]
+# Every base position, in the order they are added when a dataset gets more rounds.
+ALL_POSITIONS = POSITIONS_7 + [p for p in POSITIONS_15 if p not in POSITIONS_7]
 
 # What the operator changes between episodes, freely, using every option about as often.
 VARIATIONS = [
@@ -187,8 +189,9 @@ def parse_args():
                      + " (pass them or set them in the repo root .env)")
     if args.name is not None and not re.fullmatch(r"[A-Za-z0-9_-]+", args.name):
         parser.error("--name may only contain letters, digits, '-' and '_'")
-    if args.resume and (args.products or args.rounds or args.per_round):
-        parser.error("--products, --rounds and --per_round are for a new dataset; --resume uses its saved plan")
+    if args.resume and (args.products or args.per_round):
+        parser.error("--products and --per_round are for a new dataset; --resume uses its saved plan "
+                     "(--rounds with --resume changes its number of rounds)")
     if args.studio and not args.resume and None in (args.products, args.rounds, args.per_round):
         parser.error("--studio needs --products, --rounds and --per_round for a new dataset (nothing is asked)")
     return args
@@ -342,6 +345,23 @@ def next_slot(plan, log):
             if log.good_count(item, round_) < plan["per_round"]:
                 return rack(plan), round_, item
     return None
+
+
+def started_rounds(log):
+    """The highest round with a recorded episode (0 when none)."""
+    return max((e["round"] for e in log.data["episodes"]), default=0)
+
+
+def change_rounds(plan, log, rounds):
+    """The plan with another number of rounds. Episodes per round stay. Rounds already started are
+    kept with their base positions; new rounds get base positions not used yet."""
+    low, high = max(1, started_rounds(log)), len(ALL_POSITIONS)
+    if not low <= rounds <= high:
+        raise ValueError(f"Rounds must be {low} to {high}: rounds 1-{low} already have episodes."
+                         if low > 1 else f"Rounds must be 1 to {high}.")
+    positions = plan["positions"][:rounds]
+    positions += [p for p in ALL_POSITIONS if p not in positions][:rounds - len(positions)]
+    return {**plan, "rounds": rounds, "positions": positions}
 
 
 def plan_progress(plan, log):
@@ -676,6 +696,13 @@ def main():
             sys.exit(f"{root} has no {PLAN_FILE}: it was not recorded with a plan.")
         plan = json.loads((root / "meta" / PLAN_FILE).read_text())
         check_plan_instructions(plan)
+        if args.rounds is not None and args.rounds != plan["rounds"]:
+            try:
+                plan = change_rounds(plan, EpisodeLog(root), args.rounds)
+            except ValueError as e:
+                sys.exit(str(e))
+            write_json(root / "meta" / PLAN_FILE, plan)
+            print(f"Plan changed to {plan['rounds']} rounds ({plan_progress(plan, EpisodeLog(root))[1]} episodes).")
     else:
         root = DATASET_DIR / f"{args.name or next_version_name()}_{datetime.now().strftime('%d%m%Y_%H%M%S')}"
         plan = make_plan(args)

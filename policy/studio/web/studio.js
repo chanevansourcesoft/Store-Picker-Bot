@@ -156,7 +156,8 @@ $("switchBtn").onclick = () => go("campaign");
 function enterCampaign() {
   const rows = [...S.campaigns];
   const c = camp();
-  if (c && c.draft) rows.unshift({ folder: "__draft__", draft: true, name: c.name, done: 0, total: c.total, products: c.products.map((p) => p.item), to_review: 0 });
+  if (c && c.draft) rows.unshift({ folder: "__draft__", draft: true, name: c.name, done: 0, total: c.total, products: c.products.map((p) => p.item), to_review: 0,
+    rounds: c.rounds, per_round: c.per_round, rounds_started: 0, max_rounds: Math.max(...S.round_choices) });
   const active = selectedCampaign || (c && (c.draft ? "__draft__" : c.folder));
   $("campaignList").innerHTML = rows.length ? rows.map((r) => {
     const name = r.draft ? `${r.name} (not started yet)` : r.folder;
@@ -170,6 +171,11 @@ function enterCampaign() {
   $("campaignOpen").hidden = !sel;
   if (sel) {
     $("campaignOpenTitle").textContent = sel.draft ? sel.name : sel.folder;
+    const e = $("editRounds");
+    if (e.dataset.f !== sel.folder) { e.value = sel.rounds; e.dataset.f = sel.folder; }
+    e.min = Math.max(1, sel.rounds_started); e.max = sel.max_rounds;
+    e.oninput = () => renderRoundsNote(sel);
+    renderRoundsNote(sel);
   }
   // new campaign form
   $("newName").placeholder = S.next_name;
@@ -186,6 +192,22 @@ function enterCampaign() {
   }
   renderNewTotal();
 }
+function renderRoundsNote(sel) {
+  const r = Number($("editRounds").value), n = sel.products.length, p = sel.per_round;
+  const started = sel.rounds_started ? `Rounds 1–${sel.rounds_started} have episodes and stay. ` : "";
+  $("roundsNote").textContent = `${started}Episodes per product per round stay at ${p}. ` +
+    (r && r !== sel.rounds ? `${sel.rounds} → ${r} rounds: ${n} product(s) × ${r} × ${p} = ${n * r * p} episodes.` : `Now ${sel.rounds} rounds, ${sel.total} episodes.`);
+  $("saveRoundsBtn").disabled = !r || r === sel.rounds;
+}
+$("saveRoundsBtn").onclick = async () => {
+  const folder = $("editRounds").dataset.f;
+  try {
+    await api("/api/campaign/rounds", { folder, rounds: Number($("editRounds").value) });
+    S = await api("/api/studio");
+    toast("Rounds changed.");
+    enterCampaign();
+  } catch (e) { toast(e.message, 6000); }
+};
 const chosenProducts = () => [...$("newProducts").querySelectorAll("input:checked")].map((i) => i.value);
 function renderNewTotal() {
   const n = chosenProducts().length, r = Number($("newRounds").value), p = Number($("newPerRound").value);

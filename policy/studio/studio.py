@@ -123,7 +123,8 @@ def list_campaigns():
         done, total = record.plan_progress(plan, log)
         counts = review_counts(plan, log)
         rows.append({"folder": path.name, "done": done, "total": total, "products": list(plan["products"]),
-                     "rounds": plan["rounds"], "per_round": plan["per_round"], "to_review": counts["to_review"]})
+                     "rounds": plan["rounds"], "per_round": plan["per_round"], "to_review": counts["to_review"],
+                     "rounds_started": record.started_rounds(log), "max_rounds": len(record.ALL_POSITIONS)})
     return rows
 
 
@@ -534,6 +535,26 @@ class Studio:
         if self.state.get("folder") == folder:
             self.state.pop("folder", None)
             self._campaign_changed()
+
+    def change_rounds(self, folder, rounds):
+        """Change how many rounds a campaign has (episodes per round stay)."""
+        if self.busy():
+            raise ValueError(self.busy_message())
+        try:
+            rounds = int(rounds)
+        except (TypeError, ValueError):
+            raise ValueError("Rounds must be a whole number.") from None
+        if folder == "__draft__" and self.state.get("draft"):
+            draft = self.state["draft"]
+            draft["plan"] = record.change_rounds(draft["plan"], NoEpisodes(), rounds)
+        else:
+            loaded = load_campaign(folder)
+            if not loaded:
+                raise ValueError(f"{folder} is not a dataset recorded with a plan.")
+            plan, log = loaded
+            record.write_json(campaign_root(folder) / "meta" / record.PLAN_FILE, record.change_rounds(plan, log, rounds))
+            print(f"[INFO] {folder}: {rounds} rounds.", flush=True)
+        self._save_state()
 
     def _campaign_changed(self):
         self._save_state()
@@ -1043,6 +1064,8 @@ class Handler(BaseHTTPRequestHandler):
                     STUDIO.open_campaign(body.get("folder"))
                 elif path == "api/campaign/delete":
                     STUDIO.delete_campaign(body.get("folder"))
+                elif path == "api/campaign/rounds":
+                    STUDIO.change_rounds(body.get("folder"), body.get("rounds"))
                 elif path == "api/campaign/new":
                     STUDIO.new_campaign(body)
                 elif path == "api/arms/start":

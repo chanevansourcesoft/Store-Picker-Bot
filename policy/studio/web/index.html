@@ -24,6 +24,11 @@
         <div class="list" id="campaignList"></div>
         <div id="campaignOpen" class="edit" hidden>
           <h3 id="campaignOpenTitle"></h3>
+          <div class="rounds-edit">
+            <label>Rounds (base positions) <input id="editRounds" type="number" step="1"></label>
+            <button id="saveRoundsBtn">Change rounds</button>
+          </div>
+          <p class="muted small" id="roundsNote"></p>
           <div class="row">
             <button class="primary" id="openCampaignBtn">Open campaign</button>
             <button class="danger" id="deleteCampaignBtn">Delete campaign</button>
