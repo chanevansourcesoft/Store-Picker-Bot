@@ -1,6 +1,6 @@
 // Store Picker Bot front-end. Talks to studio.py; the episode player comes from /static/player.js.
 const $ = (id) => document.getElementById(id);
-const STEPS = [["campaign", "Campaign"], ["check", "Check"], ["record", "Record"], ["review", "Review"], ["train", "Train"]];
+const STEPS = [["campaign", "Campaign"], ["check", "Check"], ["record", "Record"], ["review", "Review"], ["train", "Train"], ["run", "Run"]];
 const REASONS = ["Dropped the product", "Wrong product", "Product not in the basket", "Did not end in the rest pose",
   "Hit the shelf or the basket", "Long pause or hesitation", "Person or hand in the camera view", "Other"];
 const CAMS = { scene_cam: "Scene camera", gripper_cam: "Gripper camera" };
@@ -49,9 +49,12 @@ const recording = () => !!(job() && job().status === "running");
 const finishing = () => !!(S && S.finish && S.finish.status === "running");
 const phase = () => (recording() ? job().info.phase : null);
 const camp = () => S && S.campaign;
+const runJob = () => S && S.run;
+const modelRunning = () => !!(runJob() && runJob().status === "running");
 
 // ---------- steps ----------
 function stepInfo(id) {
+  if (id === "run") return { open: true, done: false };  // any model on this PC, whatever the campaign
   if (!confirmed || !camp()) return { open: id === "campaign", done: false };
   const c = camp();
   switch (id) {
@@ -108,6 +111,7 @@ function enter(id) {
   if (id === "record") renderRecord();
   if (id === "review") loadEpisodes(true);
   if (id === "train") enterTrain();
+  if (id === "run") renderRun();
 }
 
 // ---------- refresh loop ----------
@@ -115,6 +119,7 @@ async function refresh() {
   try { S = await api("/api/studio"); } catch (e) { toast("Store Picker Bot is not responding: " + e.message); return; }
   if (!page) {
     if (recording()) { confirmed = true; go("record"); return; }  // the window was reopened during a round
+    if (modelRunning()) { go("run"); return; }
     const wanted = location.hash.slice(1);
     go(STEPS.some(([id]) => id === wanted) && stepInfo(wanted).open ? wanted : autoPage());
     return;
@@ -133,6 +138,7 @@ async function refresh() {
   if (page === "record") renderRecord();
   if (page === "check") renderRoundInfo();
   if (page === "review") renderPlanComplete();
+  if (page === "run") renderRun();
   if (page === "train") renderSend();
 }
 
@@ -863,11 +869,112 @@ $("runStopBtn").onclick = async () => {
   catch (e) { toast(e.message, 6000); }
 };
 
+// ---------- 6. run a trained model ----------
+const RUN_PHASES = {
+  starting: ["Starting…", "warn", "Opening the model."],
+  loading: ["Loading the model…", "warn", "About a minute."],
+  connecting: ["Connecting to the arm…", "warn", ""],
+  ready: ["Getting ready…", "warn", "The first predictions are slow."],
+  waiting: ["Ready", "ok", "Put the arm in its rest pose and the product on the shelf, then press Start."],
+  running: ["Running", "rec", "Press Stop (Space) to stop the arm where it is."],
+  returning: ["Moving back to the start pose…", "warn", ""],
+  stopping: ["Switching the motors off…", "warn", ""],
+};
+const RUN_LIVE = [["scene_cam", "runLiveScene", "runLiveSceneWait"], ["gripper_cam", "runLiveGripper", "runLiveGripperWait"]];
+let runLiveOn = false;
+const runForm = () => ({ model: $("runModel").value, product: $("runProduct").value, speed: Number($("runSpeed").value),
+  smooth: Number($("runSmooth").value), blend_steps: Number($("runBlend").value), max_s: Number($("runMaxS").value),
+  dry_run: $("runDry").checked });
+function renderRun() {
+  if (!S) return;
+  const models = S.models || [];
+  const fill = (sel, values, label) => {
+    const key = values.join("|");
+    if (sel.dataset.key === key) return;
+    const keep = sel.value;
+    sel.innerHTML = values.map((v) => `<option value="${esc(v)}">${esc(label(v))}</option>`).join("");
+    if (values.includes(keep)) sel.value = keep;
+    sel.dataset.key = key;
+  };
+  fill($("runModel"), models, (m) => m);
+  fill($("runProduct"), S.catalog.map((p) => p.item), (i) => `${pretty(i)} (${S.catalog.find((p) => p.item === i).shelf})`);
+  const j = runJob(), on = modelRunning(), info = j ? j.info : {}, ph = on ? info.phase : null;
+  let [title, cls, sub] = on ? (RUN_PHASES[ph] || RUN_PHASES.starting) : ["Not running", "", "Choose a model and a product, then load the model."];
+  if (on && info.dry_run && ph === "running") sub = "Dry run: the arm does not move.";
+  if (!on && j && j.status === "failed") [title, cls, sub] = ["Stopped with an error", "bad", info.error || "See the message below."];
+  if (!models.length && !on) sub = "No model on this PC yet: copy one on the Train step (Copy to this PC).";
+  $("runRunState").textContent = title; $("runRunState").className = "state " + cls; $("runRunSub").textContent = sub;
+  const t = $("runTimer");
+  if (on && ph === "running") { const s = info.elapsed || 0; t.textContent = `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`; t.className = "timer rec"; }
+  else { t.textContent = ""; t.className = "timer"; }
+  $("runStartEpBtn").disabled = !(on && ph === "waiting" && !j.stopping);
+  $("runStopEpBtn").disabled = !(on && ph === "running");
+  $("runBackBtn").disabled = !(on && ph === "waiting" && !info.at_start && !j.stopping);
+  $("runLoadBtn").hidden = on;
+  $("runLoadBtn").disabled = !models.length || recording();
+  $("runQuitBtn").hidden = !on;
+  $("runQuitBtn").disabled = !!(j && j.stopping);
+  $("runModel").disabled = on;
+  $("runDry").disabled = on;
+  $("runApplyBtn").hidden = !on;
+  $("runApplyBtn").disabled = !(on && ph === "waiting");
+  $("runHelp").textContent = on ? `Loaded: ${info.model}${info.dry_run ? " (dry run)" : ""}. Product and settings can change between episodes.`
+    : recording() ? "A recording round is running: the arm is in use." : "";
+  $("runRunLog").hidden = !(j && j.status === "failed");
+  if (j && j.status === "failed") $("runRunLog").textContent = j.log.join("\n");
+  if (info.notice && info.notice.at !== renderRun.noticeAt) { renderRun.noticeAt = info.notice.at; toast(info.notice.message, 6000); }
+  const e = info.last_episode;
+  if (e) $("runLast").innerHTML = kv([
+    ["Product", esc(pretty(info.product))], ["Stopped by", esc(e.stopped_by)], ["Time", `${e.seconds} s`],
+    ["Model", `${e.chunks} predictions, ${e.model_ms} ms each; the arm waited ${e.waited} of ${e.steps} steps`],
+    ["Smoothness", e.smooth_median == null ? "–" : `median ${e.smooth_median}, 95% under ${e.smooth_95}, largest ${e.smooth_max} (lower is smoother)`],
+  ]);
+  // live view, while the model runs
+  const live = on && !["starting", "loading"].includes(ph);
+  if (live && !runLiveOn) {
+    for (const [cam, img, wait] of RUN_LIVE) { $(wait).textContent = "Waiting for the camera…"; $(img).src = `/live/${cam}.mjpg?t=${Date.now()}`; }
+    runLiveOn = true;
+  }
+  if (live) for (const [, img, wait] of RUN_LIVE) $(wait).hidden = $(img).naturalWidth > 0;
+  if (!live && runLiveOn) {
+    for (const [, img, wait] of RUN_LIVE) { $(img).removeAttribute("src"); $(wait).hidden = false; $(wait).textContent = "Live view starts with the model"; }
+    runLiveOn = false;
+  }
+}
+for (const [cam, img] of RUN_LIVE) {
+  $(img).onerror = () => setTimeout(() => { if (runLiveOn) $(img).src = `/live/${cam}.mjpg?t=${Date.now()}`; }, 1000);
+}
+async function runCommand(body) {
+  try { await api("/api/run/cmd", body); S = await api("/api/studio"); renderRun(); } catch (e) { toast(e.message); }
+}
+$("runLoadBtn").onclick = async () => {
+  $("runLoadBtn").disabled = true;
+  try { await api("/api/run/start", runForm()); S = await api("/api/studio"); renderRun(); } catch (e) { toast(e.message, 8000); }
+  renderRun();
+};
+$("runStartEpBtn").onclick = () => runCommand({ cmd: "start" });
+$("runStopEpBtn").onclick = () => runCommand({ cmd: "stop" });
+$("runBackBtn").onclick = () => runCommand({ cmd: "back" });
+$("runQuitBtn").onclick = () => runCommand({ cmd: "quit" });
+$("runApplyBtn").onclick = async () => {
+  const f = runForm();
+  await runCommand({ cmd: "change", product: f.product, speed: f.speed, smooth: f.smooth, blend_steps: f.blend_steps, max_s: f.max_s });
+  toast("Used from the next episode.");
+};
+
 // ---------- keys ----------
 document.addEventListener("keydown", (ev) => {
   const tag = document.activeElement.tagName;
   if (["INPUT", "SELECT", "TEXTAREA"].includes(tag) && document.activeElement.type !== "range") return;
   if (ev.ctrlKey || ev.metaKey || ev.altKey || !$("restModal").hidden) return;
+  if (page === "run") {
+    if (!modelRunning() || ev.repeat) return;
+    const ph = runJob().info.phase;
+    const cmd = ev.key === " " ? (ph === "running" ? "stop" : ph === "waiting" ? "start" : null)
+      : (ev.key === "r" || ev.key === "R") && ph === "waiting" ? "back" : null;
+    if (cmd) { ev.preventDefault(); runCommand({ cmd }); }
+    return;
+  }
   if (page === "record") {
     const cmd = { " ": "start", n: "save", N: "save", x: "discard", X: "discard" }[ev.key];
     if (!cmd) return;
@@ -891,7 +998,7 @@ document.addEventListener("keydown", (ev) => {
 // ---------- start ----------
 async function loop() {
   await refresh();
-  setTimeout(loop, page === "record" && recording() ? 300 : 1500);
+  setTimeout(loop, (page === "record" && recording()) || (page === "run" && modelRunning()) ? 300 : 1500);
 }
 loop();
 setInterval(() => { if (page === "review" && !recording()) loadEpisodes(); }, 5000);

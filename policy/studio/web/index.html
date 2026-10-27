@@ -256,6 +256,49 @@
       </div>
     </div>
   </section>
+  <!-- 6. Run a trained model on the arm -->
+  <section class="page" id="page-run">
+    <div class="grid two wide-left">
+      <div class="card">
+        <div class="status-line"><span class="state" id="runRunState"></span><span class="muted" id="runRunSub"></span></div>
+        <div class="timer" id="runTimer"></div>
+        <div class="live" id="runLive">
+          <div class="vbox"><img id="runLiveScene" alt=""><span class="cap">Scene camera</span><span class="wait" id="runLiveSceneWait">Live view starts with the model</span></div>
+          <div class="vbox"><img id="runLiveGripper" alt=""><span class="cap">Gripper camera</span><span class="wait" id="runLiveGripperWait">Live view starts with the model</span></div>
+        </div>
+        <div class="controls-big">
+          <button class="primary big" id="runStartEpBtn">Start <kbd>Space</kbd></button>
+          <button class="danger big" id="runStopEpBtn">Stop <kbd>Space</kbd></button>
+          <button class="big" id="runBackBtn">Back to start <kbd>R</kbd></button>
+        </div>
+        <div class="row">
+          <button class="primary big" id="runLoadBtn">Load the model</button>
+          <button id="runQuitBtn" hidden>Quit: arm back, motors off</button>
+        </div>
+        <pre class="log" id="runRunLog" hidden></pre>
+      </div>
+      <div class="side">
+        <div class="card">
+          <h2>Model and product</h2>
+          <label>Model <select id="runModel"></select></label>
+          <label>Product <select id="runProduct"></select></label>
+          <div class="grid two tight">
+            <label>Speed <input id="runSpeed" type="number" min="0.3" max="1.5" step="0.1" value="1"></label>
+            <label>Smoothing <input id="runSmooth" type="number" min="0" max="0.9" step="0.1" value="0.3"></label>
+            <label>Blend steps <input id="runBlend" type="number" min="0" max="16" step="1" value="8"></label>
+            <label>Time limit (s) <input id="runMaxS" type="number" min="5" max="300" step="5" value="40"></label>
+          </div>
+          <label class="tick"><input id="runDry" type="checkbox"> Dry run: the model runs, the arm does not move</label>
+          <p class="muted small" id="runHelp"></p>
+          <button id="runApplyBtn" hidden>Use these for the next episode</button>
+        </div>
+        <div class="card">
+          <h2>Last episode</h2>
+          <dl class="kv" id="runLast"><dd class="muted">No episode yet.</dd></dl>
+        </div>
+      </div>
+    </div>
+  </section>
 </main>
 
 <div class="modal-back" id="restModal" hidden>

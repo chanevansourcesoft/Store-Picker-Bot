@@ -52,7 +52,7 @@ label input, label select { margin-top: 4px; color: var(--ink); font-size: 15px;
 .who { font-size: 14px; display: flex; gap: 14px; align-items: center; }
 .who #who { opacity: .85; }
 button.link { background: none; border: 0; color: var(--top-ink); text-decoration: underline; padding: 0; font-size: 14px; opacity: .85; }
-.steps { display: grid; grid-template-columns: repeat(5, 1fr); background: var(--panel); border-bottom: 1px solid var(--line); }
+.steps { display: grid; grid-template-columns: repeat(6, 1fr); background: var(--panel); border-bottom: 1px solid var(--line); }
 .step { padding: 10px 14px; border: 0; border-right: 1px solid var(--line); background: none; text-align: left; display: flex; gap: 10px; align-items: center; min-width: 0; }
 .step:last-child { border-right: 0; }
 .step .n { width: 24px; height: 24px; flex: none; display: grid; place-items: center; font-size: 13px; font-weight: 700; border: 1px solid var(--line); }
@@ -112,6 +112,7 @@ main { padding: 20px; max-width: 1600px; margin: 0 auto; }
 
 /* checks + arm test + camera test */
 .checks { margin-bottom: 14px; }
+label.tick { display: flex; gap: 8px; align-items: center; margin: 10px 0 4px; }
 .check { display: grid; grid-template-columns: 22px 1fr auto; gap: 2px 8px; padding: 9px 0; border-bottom: 1px solid var(--line); }
 .check .ic { font-weight: 700; color: var(--locked); }
 .check.ok .ic { color: var(--ok); } .check.bad .ic { color: var(--danger); }

@@ -70,6 +70,10 @@ hf download nvidia/GR00T-N1.7-3B
 hf download nvidia/Cosmos-Reason2-2B
 ```
 
+On the recording PC, the Store Picker Bot app can also run the model: Run step ([DATA_STUDIO.md](DATA_STUDIO.md)),
+with buttons instead of keys and the same options. It uses `inference/run_policy_studio.py`, which runs the same code as
+`run_policy.py`.
+
 ## 2. Copy the model
 
 Training saves a checkpoint every 5,000 steps on the training PC, in

@@ -99,6 +99,20 @@ steps; a step unlocks when the one before it is done.
    The training runs on the training PC: it goes on when the app or this computer is closed. Open the
    Train step again at any time to follow it.
 
+7. **Run:** runs a trained model on the arm (open at any time, whatever the campaign). Copy a model to this PC
+   first (Train step, **Copy to this PC**).
+   - Choose the **model**, the **product**, and the settings: **speed** (1 = as trained; 0.8 plays the
+     movements slower), **smoothing** (0.3), **blend steps** (8) and the **time limit** per episode. They are
+     explained in [INFERENCE.md](INFERENCE.md). Tick **Dry run** the first time with a new model: the model
+     runs, the arm does not move.
+   - **Load the model** (about a minute). The live view shows both cameras.
+   - Put the arm in its rest pose and the product on the shelf, then **Start** (`Space`). **Stop** (`Space`)
+     stops the arm where it is; **Back to start** (`R`) moves it slowly back to where the episode started.
+   - Between episodes, change the product or the settings and press **Use these for the next episode**:
+     the model stays loaded. **Last episode** shows how long it took and how smooth it was.
+   - **Quit** moves the arm back to where the episode started, then switches its motors off.
+   While a model runs, recording is not possible (the arm is in use).
+
 You can stop at any time and continue another day: everything is saved in the dataset folder.
 
 ## Training PC (admin, once)

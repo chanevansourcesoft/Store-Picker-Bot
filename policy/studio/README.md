@@ -6,9 +6,9 @@ Desktop app to record and review demonstrations without a terminal, then send th
 |---|---|
 | `install_desktop_icon.sh` | Adds the app to the applications menu and the desktop (once, by the admin) |
 | `run_studio.sh` | Starts the app (what the icon runs) |
-| `studio.py` | The app's local server; runs `data_collection/record.py --studio` for each round |
+| `studio.py` | The app's local server; runs `data_collection/record.py --studio` for each round and `inference/run_policy_studio.py` on the Run step |
 | `dataset_view.py` | Episodes, videos, joint data and review decisions of a dataset |
-| `training_link.py` | Train step: sends the dataset to the training PC and starts, stops and follows training there over SSH |
+| `training_link.py` | Train step: sends the dataset to the training PC, starts, resumes, stops and follows training there over SSH, and copies trained models back |
 | `studio_config.json` | Settings: default plan, long-episode warning, minimum free disk space, training PC |
 | `web/` | The app's pages |
 

@@ -37,6 +37,7 @@ WEB_DIR = STUDIO_DIR / "web"
 DATA_COLLECTION_DIR = POLICY_DIR / "data_collection"
 RECORD_SCRIPT = DATA_COLLECTION_DIR / "record.py"
 REMOVE_SCRIPT = DATA_COLLECTION_DIR / "remove_bad_episodes.py"
+RUN_SCRIPT = POLICY_DIR / "inference" / "run_policy_studio.py"
 MODELS_DIR = POLICY_DIR / "inference" / "models"  # trained models copied here to run them (docs/INFERENCE.md)
 
 # record.py holds the plan logic (rounds, base positions, what comes next); the app uses the same.
@@ -82,6 +83,17 @@ def write_json(path, data):
 
 
 # ---------------------------------------------------------------------------
+# Settings of a model run the app may change (run_policy_studio.py checks the same limits).
+RUN_SETTINGS = {"speed": (float, 0.3, 1.5), "smooth": (float, 0.0, 0.9), "blend_steps": (int, 0, 16),
+                "max_s": (float, 5, 300)}
+
+
+def list_models():
+    """Models copied to this PC (inference/models/), newest first."""
+    rows = [p for p in MODELS_DIR.glob("*") if (p / "config.json").is_file() and (p / "model.safetensors").is_file()]
+    return [p.name for p in sorted(rows, key=lambda p: p.stat().st_mtime, reverse=True)]
+
+
 def trainings_on_gpu(status, gpu_index):
     """Trainings on the training PC that use this GPU (or may use any GPU). An older training_status.py
     lists them without their GPUs: then every training counts."""
@@ -403,7 +415,15 @@ class Job:
             info["round_done"] = True
             info["plan_complete"] = event["plan_complete"]
         elif kind == "error":
-            info["error"] = event["message"]
+            if event.get("fatal", True):
+                info["error"] = event["message"]
+            else:  # run_policy_studio.py: a command it could not do; it goes on
+                info["notice"] = {"message": event["message"], "at": time.time()}
+        elif kind == "episode":  # run_policy_studio.py: one model episode ended
+            info["last_episode"] = event
+            info["episodes"] = info.get("episodes", 0) + 1
+        elif kind in ("task", "settings"):  # run_policy_studio.py: changed between episodes
+            info.update(event)
         elif kind in ("connecting", "ready"):
             info["phase"] = kind
             info.update(event)
@@ -496,10 +516,16 @@ class Studio:
         job = self.jobs.get("send")
         return bool(job and job.running())
 
+    def running_model(self):
+        job = self.jobs.get("run")
+        return bool(job and job.running())
+
     def fetching(self):
         return bool(self.fetch_job and self.fetch_job.running())
 
     def busy_message(self):
+        if self.running_model():
+            return "Wait until the model run has ended (Run step: Quit)."
         if self.sending():
             return "Wait until the dataset has been sent to the training PC."
         if self.recording():
@@ -607,6 +633,8 @@ class Studio:
             "record": self.jobs["record"].public() if "record" in self.jobs else None,
             "finish": self.jobs["finish"].public() if "finish" in self.jobs else None,
             "send": self.jobs["send"].public() if "send" in self.jobs else None,
+            "run": self.jobs["run"].public() if "run" in self.jobs else None,
+            "models": list_models(),
             "training_configured": self.link is not None,
             "arm_test_passed": self.arm_test_passed,
             "camera_test": self.camera_result,
@@ -676,6 +704,8 @@ class Studio:
         self.arm_test.stop()
 
     def test_cameras(self):
+        if self.running_model():
+            raise ValueError("A model is running: the cameras are in use (see the Run step).")
         if self.recording():
             raise ValueError("A round is running: the cameras are in use (see the live view).")
         self.camera_result = camera_test(device_env())
@@ -741,6 +771,78 @@ class Studio:
         if job:
             job.stop()
 
+    # --- run a trained model on the arm (inference/run_policy_studio.py) ---
+    def start_run(self, body):
+        if self.busy():
+            raise ValueError(self.busy_message())
+        model = str(body.get("model") or "")
+        if model not in list_models():
+            raise ValueError("Choose a model: copy one to this PC on the Train step first.")
+        product = str(body.get("product") or "")
+        if product not in record.load_instructions():
+            raise ValueError("Choose a product.")
+        env = device_env()
+        missing = [v for v in ("FOLLOWER_PORT", "GRIPPER_CAM", "SCENE_CAM") if not env.get(v)]
+        if missing:
+            raise ValueError("Not set in .env: " + ", ".join(missing))
+        self.arm_test.stop()  # the run needs the follower's port
+        cmd = [sys.executable, "-u", str(RUN_SCRIPT), "--preview_dir", str(LIVE_DIR),
+               "--model", model, "--product", product, *self._run_settings(body)]
+        if body.get("dry_run"):
+            cmd.append("--dry_run")
+        for name in CAMERAS:
+            (LIVE_DIR / f"{name}.jpg").unlink(missing_ok=True)
+        env["PYTORCH_CUDA_ALLOC_CONF"] = env.get("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
+        def on_event(kind, event):
+            if kind == "error" and event.get("fatal", True):
+                self.jobs["run"].info["error"] = explain_record_error(event["message"], env)
+
+        self.jobs["run"] = Job("run", cmd, env, on_event)
+        self.jobs["run"].info.update(model=model, product=product, dry_run=bool(body.get("dry_run")))
+
+    @staticmethod
+    def _run_settings(body):
+        """--speed ... options from the app's form, checked like run_policy.py checks them."""
+        out = []
+        for name, (kind, low, high) in RUN_SETTINGS.items():
+            if body.get(name) is None:
+                continue
+            try:
+                value = kind(body[name])
+            except (TypeError, ValueError):
+                raise ValueError(f"{name} must be a number.") from None
+            if not low <= value <= high:
+                raise ValueError(f"{name} must be {low:g} to {high:g}.")
+            out += [f"--{name}", str(value)]
+        return out
+
+    def run_command(self, body):
+        job = self.jobs.get("run")
+        if not job or not job.running():
+            raise ValueError("No model is running.")
+        word = body.get("cmd")
+        phase = job.info.get("phase")
+        if word == "quit":
+            job.stop()
+        elif word == "start" and phase == "waiting":
+            job.send("start")
+        elif word == "stop" and phase == "running":
+            job.send("stop")
+        elif word == "back" and phase == "waiting":
+            job.send("back")
+        elif word == "change" and phase == "waiting":
+            product = str(body.get("product") or "")
+            if product and product != job.info.get("product"):
+                if product not in record.load_instructions():
+                    raise ValueError("Unknown product.")
+                job.send(f"product {product}")
+            settings = self._run_settings(body)
+            if settings:
+                job.send("set " + " ".join(f"{k.removeprefix('--')}={v}" for k, v in zip(settings[::2], settings[1::2])))
+        else:
+            raise ValueError("Not now: wait until the arm is waiting.")
+
     # --- review ---
     def decide(self, index, decision, reason):
         if self.view is None:
@@ -800,7 +902,7 @@ class Studio:
                "gpu_taken": bool(status.get("ok") and trainings_on_gpu(status, CONFIG["training"]["gpu"])),
                "min_steps": MIN_STEPS, "max_steps": MAX_STEPS,
                "fetch": self.fetch_job.public() if self.fetch_job else None,
-               "models": sorted(p.name for p in MODELS_DIR.glob("*") if (p / "config.json").is_file())}
+               "models": list_models()}
         try:
             folder, counts, stamp = self._dataset()
         except ValueError as e:
@@ -1148,6 +1250,10 @@ class Handler(BaseHTTPRequestHandler):
                     if STUDIO.arm_test.status()["passed"]:
                         STUDIO.arm_test_passed = True
                     STUDIO.start_round()
+                elif path == "api/run/start":
+                    STUDIO.start_run(body)
+                elif path == "api/run/cmd":
+                    STUDIO.run_command(body)
                 elif path == "api/record/stop":
                     STUDIO.stop_round()
                 elif path == "api/review":

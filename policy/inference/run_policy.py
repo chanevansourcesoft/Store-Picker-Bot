@@ -20,6 +20,9 @@ previous one; --speed below 1 plays the movements slower. Keys (read from the te
 An episode also stops after --max_s seconds. --dry_run runs the model but never moves the arm:
 use it first with every new model.
 
+The Store Picker Bot app runs the same model and arm code with buttons instead of keys:
+run_policy_studio.py (Run step).
+
 Usage (from any folder; --model is a folder name in policy/inference/models/, or a path):
     policy/inference/pc/run.sh --model <name> --product mentos --dry_run       # PC (conda env active)
     policy/inference/jetson/run.sh --model <name> --product mentos --dry_run   # Jetson (Docker)
@@ -62,7 +65,7 @@ TRAINING_OUTPUTS = HERE.parent / "training" / "outputs"
 RETURN_SPEED = 30.0  # joint units per second when moving back to the start pose
 
 
-def parse_args():
+def make_parser():
     parser = argparse.ArgumentParser(
         description="Run a trained GR00T model on the real SO-100 arm.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -97,6 +100,11 @@ def parse_args():
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--fourcc", default=None, help="Camera format, e.g. MJPG (same as when recording)")
+    return parser
+
+
+def parse_args(parser=None):
+    parser = parser or make_parser()
     args = parser.parse_args()
 
     if not 0 <= args.smooth <= 0.9:
@@ -206,7 +214,11 @@ class Runner:
         self.device = torch.device(policy.config.device)
         self.start_pose = None
         self.lead_steps = 0
+        self.model_ms = None
         self.worker = ThreadPoolExecutor(max_workers=1)  # predicts the next chunk in the background
+        # Hooks for run_policy_studio.py: events for the app, and the one-line status (the terminal's).
+        self.notify = lambda event, **fields: None
+        self.show = status
 
     def state(self, obs):
         return np.array([obs[joint] for joint in self.joints], dtype=np.float32)
@@ -240,6 +252,7 @@ class Runner:
         times = [self.predict_chunk(self.robot.get_observation())[1] for _ in range(3)]
         self.reset()
         self.set_lead(times[-1])
+        self.model_ms = round(times[-1] * 1000)
         print(f"Model ready: {times[-1] * 1000:.0f} ms per chunk.")
 
     def set_lead(self, seconds):
@@ -267,6 +280,7 @@ class Runner:
         targets are smoothed (--smooth); the gripper's are not, so it still closes at once.
         """
         self.reset()
+        self.notify("state", state="running")
         queue = deque()
         pending = None  # the chunk being predicted, and the step its observation was taken at
         period = 1 / self.args.fps
@@ -313,7 +327,7 @@ class Runner:
                 waited += 1  # the arm holds its last target
             step += 1
             model = f"model {infer_ms[-1]:4.0f} ms" if infer_ms else "model starting"
-            status(f"{'DRY RUN' if self.args.dry_run else 'RUNNING'} {elapsed:5.1f} s | {model} | "
+            self.show(f"{'DRY RUN' if self.args.dry_run else 'RUNNING'} {elapsed:5.1f} s | {model} | "
                    "Space = stop, Q = quit")
             precise_sleep(max(0.0, period - (time.monotonic() - tick)))
         if pending is not None:
@@ -323,6 +337,12 @@ class Runner:
         print(f"Stopped by {reason} after {time.monotonic() - start:.1f} s. Model: {len(infer_ms)} chunks, "
               f"{np.median(infer_ms or [0]):.0f} ms median, {max(infer_ms or [0]):.0f} ms slowest; "
               f"waited for it {waited} of {step} steps. Largest target away from the arm: {biggest:.1f} joint units.")
+        self.notify("episode", stopped_by=reason, seconds=round(time.monotonic() - start, 1), chunks=len(infer_ms),
+                    model_ms=round(float(np.median(infer_ms or [0]))), waited=waited, steps=step,
+                    biggest=round(biggest, 1),
+                    smooth_median=round(float(np.median(jumps)), 2) if jumps else None,
+                    smooth_95=round(float(np.percentile(jumps, 95)), 2) if jumps else None,
+                    smooth_max=round(max(jumps), 2) if jumps else None)
         if jumps:
             print(f"Smoothness (arm joints, change between two targets in a row): median {np.median(jumps):.2f}, "
                   f"95% under {np.percentile(jumps, 95):.2f}, largest {max(jumps):.2f} joint units.")
@@ -336,6 +356,7 @@ class Runner:
         distance = float(np.abs(self.start_pose - here).max())
         steps = max(1, int(distance / RETURN_SPEED * self.args.fps))
         print(f"Moving back to the start pose ({steps / self.args.fps:.1f} s)...")
+        self.notify("state", state="returning")
         for i in range(1, steps + 1):
             tick = time.monotonic()
             self.send(here + (self.start_pose - here) * i / steps)
@@ -343,16 +364,16 @@ class Runner:
         time.sleep(0.5)
 
 
-def main():
-    args = parse_args()
-    if not sys.stdin.isatty():
-        sys.exit("Run this in a terminal: the keys are read from it.")
+def load(args, notify=lambda event, **fields: None):
+    """The model, the follower arm (not connected yet) and its cameras, set up like the recordings.
+    Returns (runner, robot)."""
     task = instruction(args)
     model_path = find_model(args.model)
     if not torch.cuda.is_available():
         sys.exit("No CUDA GPU found: GR00T needs one.")
 
     print(f"Loading the model from {model_path} ...")
+    notify("state", state="loading")
     # Loaded on the CPU, then moved: loading on the GPU holds the weights twice for a moment (16 GB GPUs).
     config = load_config(model_path, "cpu")
     if not isinstance(config, GrootConfig):
@@ -384,6 +405,16 @@ def main():
         disable_torque_on_disconnect=False,
     ))
     runner = Runner(args, robot, policy, preprocessor, postprocessor, task)
+    runner.notify = notify
+    return runner, robot
+
+
+def main():
+    args = parse_args()
+    if not sys.stdin.isatty():
+        sys.exit("Run this in a terminal: the keys are read from it.")
+    runner, robot = load(args)
+    task = runner.task
 
     print(f"Instruction: {task}")
     if args.dry_run:
