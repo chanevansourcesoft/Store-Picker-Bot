@@ -102,7 +102,8 @@ steps; a step unlocks when the one before it is done.
 7. **Run:** runs a trained model on the arm (open at any time, whatever the campaign). Copy a model to this PC
    first (Train step, **Copy to this PC**).
    - Choose the **model**, the **product**, and the settings: **speed** (1 = as trained; 0.8 plays the
-     movements slower), **smoothing** (0.3), **blend steps** (8) and the **time limit** per episode. They are
+     movements slower), **smoothing** (0.3), **blend steps** (8), **commands per target** (3), **acceleration
+     limit** (0 = off) and the **time limit** per episode. They are
      explained in [INFERENCE.md](INFERENCE.md). Tick **Dry run** the first time with a new model: the model
      runs, the arm does not move.
    - **Load the model** (about a minute). The live view shows both cameras.

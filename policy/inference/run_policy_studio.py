@@ -9,7 +9,7 @@ Commands come as lines on stdin:
     back                       move the arm slowly back to where the episode started
     quit                       the arm first goes back to where the episode started, then its motors switch off
     product <id>               between episodes: another product (instruction), without reloading the model
-    set speed=0.8 smooth=0.3   between episodes: change speed, smooth, blend_steps or max_s
+    set speed=0.8 smooth=0.3   between episodes: change speed, smooth, blend_steps, substeps, accel or max_s
 
 Events go to stdout as "[STUDIO] {json}" lines (state, ready, episode, task, settings, error), and
 --preview_dir gets small camera snapshots for the app's live view. Started by studio.py; it takes
@@ -26,7 +26,8 @@ import run_policy
 from run_policy import record
 
 # Settings the app may change between episodes, with their limits (as studio.py checks them).
-SETTINGS = {"speed": (float, 0.3, 1.5), "smooth": (float, 0.0, 0.9), "blend_steps": (int, 0, 16), "max_s": (float, 5, 300)}
+SETTINGS = {"speed": (float, 0.3, 1.5), "smooth": (float, 0.0, 0.9), "blend_steps": (int, 0, 16),
+            "substeps": (int, 1, 5), "accel": (int, 0, 253), "max_s": (float, 5, 300)}
 
 
 def emit(event, **fields):
@@ -91,6 +92,8 @@ def change(runner, line):
             values[name] = value
         for name, value in values.items():
             setattr(runner.args, name, value)
+        if "accel" in values:
+            runner.set_accel(values["accel"])
         emit("settings", **{name: getattr(runner.args, name) for name in SETTINGS})
         return None
     return f"Unknown command '{line}'."
@@ -101,6 +104,7 @@ def run(args):
     runner.show = lambda text: None  # the app shows the state from the events
     emit("state", state="connecting")
     robot.connect()
+    runner.set_accel(args.accel)
     preview = None
     commands = Commands()
     at_start = True
@@ -129,6 +133,7 @@ def run(args):
                     emit("error", message=problem, fatal=False)
         if not at_start:
             runner.back_to_start()
+        runner.set_accel(0)  # as LeRobot set it on connect
         emit("state", state="stopping")
         robot.bus.disable_torque()
         print("Arm motors off.", flush=True)

@@ -166,6 +166,8 @@ below this, so a normal movement is not slowed, but a wrong prediction cannot ma
 | `--blend_steps` | 8 | a new chunk fades in over this many steps instead of replacing the old one at once (0 = switch at once) |
 | `--smooth` | 0.3 | smoothing of the arm joints' targets, 0 (off) to 0.9 (strong, but the arm lags); the gripper is not smoothed |
 | `--speed` | 1.0 | play the movements at this speed: below 1 is slower, for example `0.8` when the arm rushes |
+| `--substeps` | 3 | commands per target: the arm is moved part of the way between two targets (90 commands a second instead of 30), so it moves smoothly instead of in small jumps (1 = off) |
+| `--accel` | 0 (off) | acceleration limit of the arm servos, 1 (very gentle) to 253: they ramp their speed up and down instead of starting and stopping hard. Try 50–150; too low makes the arm lag behind the model. The gripper is not limited |
 | `--max_step` | 30 | safety limit per command, see above |
 | `--task` | | an instruction text instead of `--product` |
 | `--follower_port`, `--gripper_cam`, `--scene_cam` | from `.env` | same as for recording |
@@ -184,6 +186,12 @@ Two predictions in a row never agree exactly, so switching from one chunk to the
 every quarter of a second. Instead, the new chunk fades in over its first 8 steps (`--blend_steps`), and the arm joints'
 targets are lightly smoothed (`--smooth`). At the end of each episode the program prints how smooth it was: the change
 between two targets in a row (median, 95%, largest). Lower is smoother; compare settings with it.
+
+Between two targets the arm also gets two commands that move it part of the way (`--substeps 3`), so it does not
+move in 30 small jumps a second. `--accel` is a soft limit inside the servos: each one still goes to exactly its target,
+but ramps its speed up and down gently. Nothing is cut off (unlike `--max_step`), but the arm reacts a little later. The
+setting is lost when the servos lose power, LeRobot sets it back to the fastest when it connects (so recording is not
+affected), and the program sets it back when it ends.
 
 If the arm still rushes, the demonstrations were probably fast: the model copies their speed. `--speed 0.8` plays the
 movements slower; recording calmer demonstrations fixes it for good.

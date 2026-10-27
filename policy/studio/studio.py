@@ -85,7 +85,7 @@ def write_json(path, data):
 # ---------------------------------------------------------------------------
 # Settings of a model run the app may change (run_policy_studio.py checks the same limits).
 RUN_SETTINGS = {"speed": (float, 0.3, 1.5), "smooth": (float, 0.0, 0.9), "blend_steps": (int, 0, 16),
-                "max_s": (float, 5, 300)}
+                "substeps": (int, 1, 5), "accel": (int, 0, 253), "max_s": (float, 5, 300)}
 
 
 def list_models():

@@ -884,6 +884,7 @@ const RUN_LIVE = [["scene_cam", "runLiveScene", "runLiveSceneWait"], ["gripper_c
 let runLiveOn = false;
 const runForm = () => ({ model: $("runModel").value, product: $("runProduct").value, speed: Number($("runSpeed").value),
   smooth: Number($("runSmooth").value), blend_steps: Number($("runBlend").value), max_s: Number($("runMaxS").value),
+  substeps: Number($("runSubsteps").value), accel: Number($("runAccel").value),
   dry_run: $("runDry").checked });
 function renderRun() {
   if (!S) return;
@@ -958,7 +959,8 @@ $("runBackBtn").onclick = () => runCommand({ cmd: "back" });
 $("runQuitBtn").onclick = () => runCommand({ cmd: "quit" });
 $("runApplyBtn").onclick = async () => {
   const f = runForm();
-  await runCommand({ cmd: "change", product: f.product, speed: f.speed, smooth: f.smooth, blend_steps: f.blend_steps, max_s: f.max_s });
+  await runCommand({ cmd: "change", product: f.product, speed: f.speed, smooth: f.smooth, blend_steps: f.blend_steps, max_s: f.max_s,
+    substeps: f.substeps, accel: f.accel });
   toast("Used from the next episode.");
 };
 

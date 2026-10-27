@@ -11,7 +11,9 @@ from the two camera images, the arm position and the product's instruction. Whil
 chunk, the model already predicts the next one from a newer picture, so the arm does not stop
 between chunks. A new chunk fades in over its first steps (--blend_steps) and the arm joints'
 targets are lightly smoothed (--smooth), so the arm does not jerk when a chunk replaces the
-previous one; --speed below 1 plays the movements slower. Keys (read from the terminal):
+previous one; --speed below 1 plays the movements slower. Between two targets, --substeps more
+commands move the arm part of the way, so it moves smoothly instead of in 30 small jumps a second,
+and --accel makes the servos ramp their speed up and down gently. Keys (read from the terminal):
 
     Space  start an episode (the arm must be in its rest pose) / stop the arm where it is
     R      move the arm slowly back to where the episode started
@@ -87,6 +89,12 @@ def make_parser():
                         help="Smoothing of the arm joints' targets, 0 (off) to 0.9 (strong, but lags); the gripper is not smoothed")
     parser.add_argument("--speed", type=float, default=1.0,
                         help="Play the predicted movements at this speed: below 1 is slower (e.g. 0.8)")
+    parser.add_argument("--substeps", type=int, default=3,
+                        help="Commands per target: the arm is moved part of the way between two targets "
+                             "(3 = 90 commands a second at 30 fps; 1 = off)")
+    parser.add_argument("--accel", type=int, default=0,
+                        help="Acceleration limit of the arm servos, 1 (very gentle) to 253; 0 = off (LeRobot's 254, "
+                             "the fastest). The servos ramp their speed up and down; the gripper keeps its own")
     parser.add_argument("--max_step", type=float, default=30.0,
                         help="Largest move per command, in joint units from where the joint is "
                              "(recordings stay under 30; 0 = no limit)")
@@ -113,6 +121,10 @@ def parse_args(parser=None):
         parser.error("--speed must be 0.3 to 1.5")
     if args.blend_steps < 0:
         parser.error("--blend_steps must be 0 or more")
+    if not 1 <= args.substeps <= 5:
+        parser.error("--substeps must be 1 to 5")
+    if not 0 <= args.accel <= 253:
+        parser.error("--accel must be 0 (off) to 253")
     missing = [flag for flag in ("follower_port", "gripper_cam", "scene_cam") if not getattr(args, flag)]
     if missing:
         parser.error("missing " + ", ".join(f"--{m}" for m in missing)
@@ -259,6 +271,16 @@ class Runner:
         """How many steps before the chunk runs out the next one is asked for: the model's time, plus a margin."""
         self.lead_steps = math.ceil(seconds * self.args.fps) + 2
 
+    def set_accel(self, value):
+        """The arm servos' acceleration limit (0 = off: 254, as LeRobot sets it on connect); not the gripper's.
+        A setting in the servos' memory: it is lost when they lose power."""
+        if self.args.dry_run:
+            return
+        for joint in self.joints:
+            motor = joint.removesuffix(".pos")
+            if motor != "gripper":
+                self.robot.bus.write("Acceleration", motor, value or 254)
+
     def send(self, values):
         self.robot.send_action({joint: float(v) for joint, v in zip(self.joints, values, strict=True)})
 
@@ -290,7 +312,7 @@ class Runner:
         waited = 0  # steps without a target because the model was not ready
         biggest = 0.0
         jumps = []  # largest arm-joint change between two targets in a row, per step: how smooth it was
-        target = None
+        target = None  # the last target sent
         arm = np.arange(len(self.joints)) != self.joints.index("gripper.pos")
         obs = self.robot.get_observation()
         self.start_pose = self.state(obs)
@@ -319,10 +341,15 @@ class Runner:
                 if target is not None:
                     action[arm] = self.args.smooth * target[arm] + (1 - self.args.smooth) * action[arm]
                     jumps.append(float(np.abs(action[arm] - target[arm]).max()))
-                target = action
+                previous, target = target, action
                 biggest = max(biggest, float(np.abs(action - self.state(obs)).max()))
                 if not self.args.dry_run:
-                    self.send(action)
+                    # Part of the way first, then the target, spread over this step (--substeps).
+                    k = self.args.substeps if previous is not None else 1
+                    for i in range(1, k + 1):
+                        if i > 1:
+                            precise_sleep(max(0.0, tick + (i - 1) * period / k - time.monotonic()))
+                        self.send(action if i == k else previous + (action - previous) * i / k)
             else:
                 waited += 1  # the arm holds its last target
             step += 1
@@ -420,6 +447,7 @@ def main():
     if args.dry_run:
         print("DRY RUN: the model runs, the arm does not move.")
     robot.connect()
+    runner.set_accel(args.accel)
     keys = None
     at_start = True
     try:
@@ -450,6 +478,7 @@ def main():
         print()
         if not at_start:
             runner.back_to_start()
+        runner.set_accel(0)  # as LeRobot set it on connect
         robot.bus.disable_torque()
         print("Arm motors off.")
     finally:
