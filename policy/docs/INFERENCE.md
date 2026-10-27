@@ -159,6 +159,9 @@ below this, so a normal movement is not slowed, but a wrong prediction cannot ma
 | `--dry_run` | off | run the model, do not move the arm |
 | `--max_s` | 40 | stop an episode after this many seconds (recorded episodes take 17 to 28 s) |
 | `--execute_steps` | 16 (the whole chunk) | use only the first N targets of each chunk |
+| `--blend_steps` | 8 | a new chunk fades in over this many steps instead of replacing the old one at once (0 = switch at once) |
+| `--smooth` | 0.3 | smoothing of the arm joints' targets, 0 (off) to 0.9 (strong, but the arm lags); the gripper is not smoothed |
+| `--speed` | 1.0 | play the movements at this speed: below 1 is slower, for example `0.8` when the arm rushes |
 | `--max_step` | 30 | safety limit per command, see above |
 | `--task` | | an instruction text instead of `--product` |
 | `--follower_port`, `--gripper_cam`, `--scene_cam` | from `.env` | same as for recording |
@@ -172,6 +175,14 @@ The model looks at both cameras, the arm position and the instruction, and predi
 half a second). While the arm plays a chunk, the model already predicts the next one from a newer picture. When the new
 chunk arrives, its targets for the time that went by meanwhile are skipped, and the arm goes on with it. So the arm does not
 stop between chunks.
+
+Two predictions in a row never agree exactly, so switching from one chunk to the next would give the arm a small jump about
+every quarter of a second. Instead, the new chunk fades in over its first 8 steps (`--blend_steps`), and the arm joints'
+targets are lightly smoothed (`--smooth`). At the end of each episode the program prints how smooth it was: the change
+between two targets in a row (median, 95%, largest). Lower is smoother; compare settings with it.
+
+If the arm still rushes, the demonstrations were probably fast: the model copies their speed. `--speed 0.8` plays the
+movements slower; recording calmer demonstrations fixes it for good.
 
 ## LeRobot versions
 

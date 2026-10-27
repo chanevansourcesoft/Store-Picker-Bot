@@ -9,7 +9,9 @@ The leader arm is not used.
 Each episode: the model predicts 16 actions at a time (one chunk, about half a second at 30 fps)
 from the two camera images, the arm position and the product's instruction. While the arm plays a
 chunk, the model already predicts the next one from a newer picture, so the arm does not stop
-between chunks. Keys (read from the terminal):
+between chunks. A new chunk fades in over its first steps (--blend_steps) and the arm joints'
+targets are lightly smoothed (--smooth), so the arm does not jerk when a chunk replaces the
+previous one; --speed below 1 plays the movements slower. Keys (read from the terminal):
 
     Space  start an episode (the arm must be in its rest pose) / stop the arm where it is
     R      move the arm slowly back to where the episode started
@@ -76,6 +78,12 @@ def parse_args():
     parser.add_argument("--execute_steps", type=int, default=None,
                         help="Play only the first N actions of each chunk before the model looks again "
                              "(default: the whole chunk)")
+    parser.add_argument("--blend_steps", type=int, default=8,
+                        help="A new chunk fades in over this many steps, from the old chunk's actions (0 = switch at once)")
+    parser.add_argument("--smooth", type=float, default=0.3,
+                        help="Smoothing of the arm joints' targets, 0 (off) to 0.9 (strong, but lags); the gripper is not smoothed")
+    parser.add_argument("--speed", type=float, default=1.0,
+                        help="Play the predicted movements at this speed: below 1 is slower (e.g. 0.8)")
     parser.add_argument("--max_step", type=float, default=30.0,
                         help="Largest move per command, in joint units from where the joint is "
                              "(recordings stay under 30; 0 = no limit)")
@@ -91,11 +99,25 @@ def parse_args():
     parser.add_argument("--fourcc", default=None, help="Camera format, e.g. MJPG (same as when recording)")
     args = parser.parse_args()
 
+    if not 0 <= args.smooth <= 0.9:
+        parser.error("--smooth must be 0 to 0.9")
+    if not 0.3 <= args.speed <= 1.5:
+        parser.error("--speed must be 0.3 to 1.5")
+    if args.blend_steps < 0:
+        parser.error("--blend_steps must be 0 or more")
     missing = [flag for flag in ("follower_port", "gripper_cam", "scene_cam") if not getattr(args, flag)]
     if missing:
         parser.error("missing " + ", ".join(f"--{m}" for m in missing)
                      + " (pass them or set them in the repo root .env)")
     return args
+
+
+def stretch(chunk, speed):
+    """The chunk resampled to play at this speed (below 1: more steps, so slower), linearly between actions."""
+    n = max(2, round(len(chunk) / speed))
+    old_t = np.arange(len(chunk))
+    new_t = np.linspace(0, len(chunk) - 1, n)
+    return np.stack([np.interp(new_t, old_t, chunk[:, j]) for j in range(chunk.shape[1])], axis=1).astype(chunk.dtype)
 
 
 def find_model(name):
@@ -204,6 +226,8 @@ class Runner:
         chunk = chunk.float().cpu().numpy()
         if self.args.execute_steps:
             chunk = chunk[: self.args.execute_steps]
+        if self.args.speed != 1.0:
+            chunk = stretch(chunk, self.args.speed)
         return chunk, time.monotonic() - t
 
     def reset(self):
@@ -225,12 +249,22 @@ class Runner:
     def send(self, values):
         self.robot.send_action({joint: float(v) for joint, v in zip(self.joints, values, strict=True)})
 
+    def blend(self, old, new):
+        """The new chunk, fading in over its first --blend_steps steps from the old chunk's remaining actions."""
+        new = np.array(new)
+        n = min(self.args.blend_steps, len(old), len(new))
+        for i in range(n):
+            w = (i + 1) / (n + 1)
+            new[i] = w * new[i] + (1 - w) * old[i]
+        return deque(new)
+
     def episode(self, keys):
         """Run the model until Space, Q, Ctrl+C or the time limit. Returns the key that stopped it.
 
         The model predicts the next chunk in the background while the arm plays the current one, so
         the arm does not stop to wait. When the new chunk arrives, its actions for the steps that went
-        by meanwhile are skipped.
+        by meanwhile are skipped, and the rest fades in from the old chunk (blend). The arm joints'
+        targets are smoothed (--smooth); the gripper's are not, so it still closes at once.
         """
         self.reset()
         queue = deque()
@@ -241,6 +275,9 @@ class Runner:
         infer_ms = []
         waited = 0  # steps without a target because the model was not ready
         biggest = 0.0
+        jumps = []  # largest arm-joint change between two targets in a row, per step: how smooth it was
+        target = None
+        arm = np.arange(len(self.joints)) != self.joints.index("gripper.pos")
         obs = self.robot.get_observation()
         self.start_pose = self.state(obs)
         while True:
@@ -259,12 +296,16 @@ class Runner:
             if pending is not None and pending[0].done():
                 chunk, seconds = pending[0].result()
                 stale = step - pending[1]
-                queue = deque(chunk[min(stale, len(chunk) - 1):])
+                queue = self.blend(list(queue), chunk[min(stale, len(chunk) - 1):])
                 pending = None
                 infer_ms.append(seconds * 1000)
                 self.set_lead(np.median(infer_ms) / 1000)
             if queue:
                 action = queue.popleft()
+                if target is not None:
+                    action[arm] = self.args.smooth * target[arm] + (1 - self.args.smooth) * action[arm]
+                    jumps.append(float(np.abs(action[arm] - target[arm]).max()))
+                target = action
                 biggest = max(biggest, float(np.abs(action - self.state(obs)).max()))
                 if not self.args.dry_run:
                     self.send(action)
@@ -282,6 +323,9 @@ class Runner:
         print(f"Stopped by {reason} after {time.monotonic() - start:.1f} s. Model: {len(infer_ms)} chunks, "
               f"{np.median(infer_ms or [0]):.0f} ms median, {max(infer_ms or [0]):.0f} ms slowest; "
               f"waited for it {waited} of {step} steps. Largest target away from the arm: {biggest:.1f} joint units.")
+        if jumps:
+            print(f"Smoothness (arm joints, change between two targets in a row): median {np.median(jumps):.2f}, "
+                  f"95% under {np.percentile(jumps, 95):.2f}, largest {max(jumps):.2f} joint units.")
         return stopped_by
 
     def back_to_start(self):
