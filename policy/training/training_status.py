@@ -55,10 +55,47 @@ def gpus():
     return rows
 
 
+def gpu_of_processes():
+    """{pid: GPU index} of every process using a GPU (nvidia-smi)."""
+    try:
+        q = lambda what: subprocess.run(["nvidia-smi", f"--query-{what}", "--format=csv,noheader"],
+                                        capture_output=True, text=True, timeout=10).stdout.strip().splitlines()
+        index = dict(reversed([x.strip() for x in line.split(",")]) for line in q("gpu=index,uuid"))
+        return {int(pid): int(index[uuid.strip()]) for pid, uuid in
+                (line.split(",")[:2] for line in q("compute-apps=pid,gpu_uuid")) if uuid.strip() in index}
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return {}
+
+
+def visible_gpus(pid):
+    """GPU indices a process may use (its CUDA_VISIBLE_DEVICES), or None: all of them, or unknown."""
+    try:
+        env = dict(x.split("=", 1) for x in open(f"/proc/{pid}/environ").read().split("\0") if "=" in x)
+        return [int(g) for g in env["CUDA_VISIBLE_DEVICES"].split(",") if g.strip()]
+    except (OSError, KeyError, ValueError):
+        return None
+
+
+def parent(pid):
+    try:
+        return int(open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 def trainings():
-    """Process ids of every lerobot-train running on this PC (also ones started by hand)."""
+    """Every lerobot-train running on this PC (also ones started by hand), with its GPUs:
+    [{"pid", "gpus": [index, ...] or None (unknown: may use any GPU)}]."""
     out = subprocess.run(["pgrep", "-f", r"lerobot-train( |$)"], capture_output=True, text=True).stdout
-    return [int(p) for p in out.split()]
+    pids = {int(p) for p in out.split()}
+    on_gpu = gpu_of_processes()
+    rows = []
+    for pid in sorted(pids):
+        if parent(pid) in pids:
+            continue  # a data loader worker of a training already listed
+        gpus = [on_gpu[pid]] if pid in on_gpu else visible_gpus(pid)
+        rows.append({"pid": pid, "gpus": gpus})
+    return rows
 
 
 def datasets():
@@ -203,12 +240,13 @@ def main():
     if LOGS.is_dir():
         names |= {p.stem for p in LOGS.glob("*.json")}
     runs = sorted((run_status(n) for n in names), key=lambda r: r["started"] or 0, reverse=True)
-    running = trainings() + [r["run"] for r in runs if r["status"] == "running"]
+    running = trainings() + [{"run": r["run"], "gpus": [int(g) for g in str(r["gpu"]).split(",")]}
+                             for r in runs if r["status"] == "running"]
     print(json.dumps({
         "time": time.time(),
         "free_gb": round(shutil.disk_usage(TRAINING_DIR).free / 1e9, 1),
         "gpus": gpus(),
-        "trainings": running,  # lerobot-train processes and runs of start_training.sh still going
+        "trainings": running,  # lerobot-train processes and runs of start_training.sh still going, with their GPUs
         "datasets": datasets(),
         "runs": runs,
         "sizes": typical_sizes(),

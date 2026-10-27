@@ -82,6 +82,14 @@ def write_json(path, data):
 
 
 # ---------------------------------------------------------------------------
+def trainings_on_gpu(status, gpu_index):
+    """Trainings on the training PC that use this GPU (or may use any GPU). An older training_status.py
+    lists them without their GPUs: then every training counts."""
+    gpu = {int(g) for g in str(gpu_index).split(",")}
+    return [t for t in status.get("trainings", [])
+            if not isinstance(t, dict) or t.get("gpus") is None or gpu & set(t["gpus"])]
+
+
 # Campaigns: one dataset each (data_collection/dataset/<folder>) with meta/plan.json
 # ---------------------------------------------------------------------------
 def campaign_root(folder):
@@ -788,7 +796,8 @@ class Studio:
     def train_overview(self):
         link = self._link()
         status = link.status()
-        out = {"status": status, "default_steps": CONFIG["training"]["default_steps"],
+        out = {"status": status, "default_steps": CONFIG["training"]["default_steps"], "gpu": CONFIG["training"]["gpu"],
+               "gpu_taken": bool(status.get("ok") and trainings_on_gpu(status, CONFIG["training"]["gpu"])),
                "min_steps": MIN_STEPS, "max_steps": MAX_STEPS,
                "fetch": self.fetch_job.public() if self.fetch_job else None,
                "models": sorted(p.name for p in MODELS_DIR.glob("*") if (p / "config.json").is_file())}
@@ -877,8 +886,9 @@ class Studio:
     @staticmethod
     def _check_free(status, gpu_index):
         """No training running on the training PC and its GPU free, or ValueError."""
-        if status["trainings"]:
-            raise ValueError("A training is already running on the training PC: wait until it has finished, or stop it.")
+        if trainings_on_gpu(status, gpu_index):
+            raise ValueError(f"A training is already running on GPU {gpu_index} of the training PC: "
+                             "wait until it has finished, or stop it.")
         gpu = next((g for g in status["gpus"] if str(g["index"]) == str(gpu_index)), None)
         if gpu is None:
             raise ValueError(f"The training PC has no GPU {gpu_index} (check \"gpu\" in studio_config.json).")

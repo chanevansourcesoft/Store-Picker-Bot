@@ -652,7 +652,8 @@ function renderTrain() {
     $("trainPc").innerHTML = `<div class="note bad">${esc(st.error)}</div><p class="muted small">${esc(st.host)}</p>`;
   } else {
     const gpus = st.gpus.map((g) => `GPU ${g.index}: ${esc(g.name)}, ${(g.used_mb / 1000).toFixed(1)} of ${(g.total_mb / 1000).toFixed(0)} GB used`).join("<br>");
-    const busy = st.trainings.length ? `<div class="note warn">A training is running there.</div>` : "";
+    const busy = T.gpu_taken ? `<div class="note warn">A training is running there on GPU ${esc(T.gpu)}.</div>`
+      : st.trainings.length ? `<div class="note">Another training is running there, on another GPU: it does not block GPU ${esc(T.gpu)}.</div>` : "";
     $("trainPc").innerHTML = `${busy}<dl class="kv">${kv([["Computer", esc(st.host)], ["Project version", esc(st.commit)],
       ["Free disk", gb(st.free_gb)], ["GPUs", gpus || "none found"]])}</dl>`;
   }
@@ -689,10 +690,10 @@ function renderSend() {
   $("sendBtn").hidden = now;
   $("sendBtn").disabled = !!(d.error || d.blocker || d.running_run || !T.status.ok || d.same === true || recording());
   $("sendBtn").textContent = d.on_remote && d.same === false ? "Send again" : "Send dataset";
-  const startable = T.status.ok && d.same === true && !now && !T.status.trainings.length;
+  const startable = T.status.ok && d.same === true && !now && !T.gpu_taken;
   $("trainStartBtn").disabled = !startable;
   $("trainMsg").textContent = !T.status.ok ? "" : now ? "Wait until the dataset is sent."
-    : d.same !== true ? "Send the dataset first." : T.status.trainings.length ? "A training is running on the training PC." : "";
+    : d.same !== true ? "Send the dataset first." : T.gpu_taken ? `A training is running on GPU ${T.gpu} of the training PC.` : "";
 }
 function sendEnded() {
   const job = S.send;
