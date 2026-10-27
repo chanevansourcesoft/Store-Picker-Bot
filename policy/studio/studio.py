@@ -37,6 +37,7 @@ WEB_DIR = STUDIO_DIR / "web"
 DATA_COLLECTION_DIR = POLICY_DIR / "data_collection"
 RECORD_SCRIPT = DATA_COLLECTION_DIR / "record.py"
 REMOVE_SCRIPT = DATA_COLLECTION_DIR / "remove_bad_episodes.py"
+MODELS_DIR = POLICY_DIR / "inference" / "models"  # trained models copied here to run them (docs/INFERENCE.md)
 
 # record.py holds the plan logic (rounds, base positions, what comes next); the app uses the same.
 # Importing it also points HF_LEROBOT_CALIBRATION at policy/calibration/.
@@ -452,6 +453,7 @@ class Studio:
         except (FileNotFoundError, ValueError):
             self.state = {}
         self.jobs = {}
+        self.fetch_job = None  # copying a trained model from the training PC (does not block recording)
         self.arm_test = ArmTest()
         self.arm_test_passed = False  # since the campaign was opened in this app session
         self.camera_result = None
@@ -485,6 +487,9 @@ class Studio:
     def sending(self):
         job = self.jobs.get("send")
         return bool(job and job.running())
+
+    def fetching(self):
+        return bool(self.fetch_job and self.fetch_job.running())
 
     def busy_message(self):
         if self.sending():
@@ -784,7 +789,9 @@ class Studio:
         link = self._link()
         status = link.status()
         out = {"status": status, "default_steps": CONFIG["training"]["default_steps"],
-               "min_steps": MIN_STEPS, "max_steps": MAX_STEPS}
+               "min_steps": MIN_STEPS, "max_steps": MAX_STEPS,
+               "fetch": self.fetch_job.public() if self.fetch_job else None,
+               "models": sorted(p.name for p in MODELS_DIR.glob("*") if (p / "config.json").is_file())}
         try:
             folder, counts, stamp = self._dataset()
         except ValueError as e:
@@ -858,24 +865,72 @@ class Studio:
         link.forget_dataset(folder)
         if not link.dataset_same(campaign_root(folder), folder, stamp):
             raise ValueError("The training PC does not have this exact dataset: send it first.")
-        if status["trainings"]:
-            raise ValueError("A training is already running on the training PC: wait until it has finished, or stop it.")
-        gpu = next((g for g in status["gpus"] if str(g["index"]) == str(CONFIG["training"]["gpu"])), None)
-        if gpu is None:
-            raise ValueError(f"The training PC has no GPU {CONFIG['training']['gpu']} (check \"gpu\" in studio_config.json).")
-        if gpu["used_mb"] > GPU_BUSY_MB:
-            raise ValueError(f"GPU {gpu['index']} of the training PC is in use ({gpu['used_mb'] / 1000:.1f} GB taken): "
-                             "close the program that uses it first.")
+        self._check_free(status, CONFIG["training"]["gpu"])
         plan = link.plan(steps, status)
         if plan["disk_needed_gb"] > status["free_gb"] - DISK_MARGIN_GB:
             raise ValueError(f"Not enough disk space on the training PC: this run needs up to {plan['disk_needed_gb']:.0f} GB, "
                              f"{status['free_gb']:.0f} GB are free. Delete old runs there, or train fewer steps.")
         run = link.start(folder, steps)
-        print(f"[INFO] Training started on {link.host}: {run}", flush=True)
+        print(f"[INFO] {time.strftime('%Y-%m-%d %H:%M:%S')} Training started on {link.host}: {run}", flush=True)
         return run
 
+    @staticmethod
+    def _check_free(status, gpu_index):
+        """No training running on the training PC and its GPU free, or ValueError."""
+        if status["trainings"]:
+            raise ValueError("A training is already running on the training PC: wait until it has finished, or stop it.")
+        gpu = next((g for g in status["gpus"] if str(g["index"]) == str(gpu_index)), None)
+        if gpu is None:
+            raise ValueError(f"The training PC has no GPU {gpu_index} (check \"gpu\" in studio_config.json).")
+        if gpu["used_mb"] > GPU_BUSY_MB:
+            raise ValueError(f"GPU {gpu['index']} of the training PC is in use ({gpu['used_mb'] / 1000:.1f} GB taken): "
+                             "close the program that uses it first.")
+
+    def resume_training(self, run):
+        """Continue a stopped or failed run of the training PC from its newest complete checkpoint."""
+        link = self._link()
+        status = link.status(max_age=0)
+        if not status.get("ok"):
+            raise ValueError(status["error"])
+        row = next((r for r in status["runs"] if r["run"] == run), None)
+        if not row or row.get("resume_from") is None:
+            raise ValueError(f"{run} cannot be resumed: only a stopped or failed run started by the app, "
+                             "with a complete checkpoint before its last step.")
+        self._check_free(status, row.get("gpu") or CONFIG["training"]["gpu"])
+        need = link.plan(max(MIN_STEPS, row["steps"] - row["resume_from"]), status)["disk_needed_gb"]
+        if need > status["free_gb"] - DISK_MARGIN_GB:
+            raise ValueError(f"Not enough disk space on the training PC: the rest of this run needs up to {need:.0f} GB, "
+                             f"{status['free_gb']:.0f} GB are free. Delete old runs there first.")
+        link.resume(run)
+        print(f"[INFO] {time.strftime('%Y-%m-%d %H:%M:%S')} Training resumed on {link.host}: {run} from step {row['resume_from']}", flush=True)
+        return f"Resumed from step {row['resume_from']:,}."
+
     def stop_training(self, run):
+        print(f"[INFO] {time.strftime('%Y-%m-%d %H:%M:%S')} Stop training pressed: {run}", flush=True)
         return self._link().stop(run)
+
+    def fetch_model(self, run, step):
+        """Copy the model of one checkpoint into inference/models/<run>_<step>/."""
+        link = self._link()
+        if self.fetching():
+            raise ValueError("A model is already being copied: wait until it has finished.")
+        step = int(step)
+        status = link.status(max_age=0)
+        if not status.get("ok"):
+            raise ValueError(status["error"])
+        row = next((r for r in status["runs"] if r["run"] == run), None)
+        if not row or not any(c["step"] == step and c["model"] for c in row["checkpoints"]):
+            raise ValueError(f"{run} has no model at step {step:,} on the training PC.")
+        target = MODELS_DIR / f"{run}_{step:06d}"
+        if (target / "config.json").is_file():
+            raise ValueError(f"This model is already on this PC: inference/models/{target.name}")
+        MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        self.fetch_job = link.fetch(run, step, target)
+        return target.name
+
+    def stop_fetch(self):
+        if self.fetch_job:
+            self.fetch_job.stop()
 
 
 STUDIO = None
@@ -986,7 +1041,7 @@ class Handler(BaseHTTPRequestHandler):
             if parts[0] == "static" and len(parts) == 2:
                 return self._static(parts[1])
             if path == "api/ping":
-                return self._json({"ok": True, "code": CODE_STAMP, "busy": STUDIO.busy()})
+                return self._json({"ok": True, "code": CODE_STAMP, "busy": STUDIO.busy() or STUDIO.fetching()})
             if path == "api/studio":
                 return self._json(STUDIO.snapshot())
             if path == "api/checks":
@@ -1033,8 +1088,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
             if path == "api/restart":  # run_studio.sh, after the app was updated
-                if STUDIO.busy():
-                    return self._error(HTTPStatus.CONFLICT, "A round is running.")
+                if STUDIO.busy() or STUDIO.fetching():
+                    return self._error(HTTPStatus.CONFLICT, "A round is running or a model is being copied.")
                 self._json({"ok": True})
                 threading.Thread(target=self.server.shutdown, daemon=True).start()
                 return
@@ -1054,6 +1109,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(STUDIO.plan_training(body.get("steps")))
             if path == "api/train/start":
                 return self._json({"ok": True, "run": STUDIO.start_training(body.get("steps"))})
+            if path == "api/train/resume":
+                return self._json({"ok": True, "message": STUDIO.resume_training(body.get("run"))})
+            if path == "api/train/fetch":
+                return self._json({"ok": True, "name": STUDIO.fetch_model(body.get("run"), body.get("step"))})
+            if path == "api/train/fetch/stop":
+                STUDIO.stop_fetch()
+                return self._json({"ok": True})
             if path == "api/train/stop":
                 return self._json({"ok": True, "message": STUDIO.stop_training(body.get("run"))})
             if path == "api/cameras/test":  # takes a few seconds
@@ -1097,7 +1159,7 @@ def watchdog(server):
     while True:
         time.sleep(15)
         idle = time.time() - STUDIO.last_heartbeat
-        if idle > IDLE_EXIT_S and not STUDIO.busy() and not STUDIO.arm_test.running:
+        if idle > IDLE_EXIT_S and not STUDIO.busy() and not STUDIO.fetching() and not STUDIO.arm_test.running:
             print("[INFO] No window open for a while: stopping Store Picker Bot.", flush=True)
             server.shutdown()
             return

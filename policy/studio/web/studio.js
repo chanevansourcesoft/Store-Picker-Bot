@@ -628,7 +628,8 @@ const runsOfCampaign = () => (T && T.status.ok && camp() ? T.status.runs.filter(
 function trainDone() { return runsOfCampaign().some((r) => r.status === "finished"); }
 
 let trainTimer = null, runTimer = null, trainLoading = false, planTimer = null;
-let stepsPlan = null;  // estimate for the steps typed in (T.plan is for the default steps)
+let stepsPlan = null;
+let prevFetching = false;  // estimate for the steps typed in (T.plan is for the default steps)
 function enterTrain() {
   clearInterval(trainTimer); clearInterval(runTimer);
   loadTrain();
@@ -659,6 +660,11 @@ function renderTrain() {
   const steps = Number($("trainSteps").value);
   renderPlan(T.plan && T.plan.steps === steps ? T.plan : stepsPlan && stepsPlan.steps === steps ? stepsPlan : null);
   renderRuns();
+  const fetching = !!(T.fetch && T.fetch.status === "running");
+  if (prevFetching && !fetching && T.fetch) toast(T.fetch.status === "finished" ? `Model copied: inference/models/${T.fetch.info.name}` :
+    T.fetch.status === "stopped" ? "Copying stopped." : "Copying the model failed: see the Train page.", 8000);
+  prevFetching = fetching;
+  renderFetchJob();
 }
 function renderSend() {
   if (!T) return;
@@ -775,6 +781,7 @@ async function loadRun() {
     if (r.sec_per_step) rows.push(["Speed", `${r.sec_per_step} s per step`]);
     if (r.status === "running" && r.eta_s != null) rows.push(["Time left", `about ${hm(r.eta_s)}`]);
     if (r.started) rows.push(["Started", new Date(r.started * 1000).toLocaleString()]);
+    if (r.stopped_by) rows.push(["Stopped", esc(r.stopped_by)]);
     rows.push(["Settings", `GPU ${esc(r.gpu)}, batch ${r.batch_size}`]);
   }
   rows.push(["Checkpoints", ck], ["Size", gb(r.size_gb)]);
@@ -784,7 +791,49 @@ async function loadRun() {
   $("runLog").hidden = r.status !== "failed";
   $("runLog").textContent = (r.log || []).join("\n");
   $("runStopBtn").hidden = r.status !== "running";
+  $("runResumeBtn").hidden = r.resume_from == null;
+  $("runResumeBtn").textContent = r.resume_from != null ? `Resume from step ${r.resume_from.toLocaleString()}` : "Resume training";
+  $("runResumeBtn").dataset.from = r.resume_from ?? "";
+  renderFetch(r);
 }
+// Copy a checkpoint's model to this PC (inference/models/<run>_<step>)
+const modelName = (run, step) => `${run}_${String(step).padStart(6, "0")}`;
+function renderFetch(r) {
+  const withModel = (r ? r.checkpoints : []).filter((c) => c.model).map((c) => c.step);
+  $("fetchBox").hidden = !withModel.length;
+  if (!withModel.length) return;
+  const sel = $("fetchStep"), keep = sel.dataset.run === r.run ? sel.value : "";
+  sel.innerHTML = withModel.map((s) => `<option value="${s}">${s.toLocaleString()}${T.models.includes(modelName(r.run, s)) ? " (on this PC)" : ""}</option>`).join("");
+  sel.value = withModel.includes(Number(keep)) ? keep : withModel[withModel.length - 1];
+  sel.dataset.run = r.run;
+  renderFetchJob();
+}
+function renderFetchJob() {
+  if (!T || $("fetchBox").hidden) return;
+  const run = $("runDetail").dataset.run, step = Number($("fetchStep").value);
+  const job = T.fetch, now = job && job.status === "running";
+  const here = T.models.includes(modelName(run, step));
+  $("fetchBtn").hidden = now;
+  $("fetchBtn").disabled = here;
+  $("fetchStopBtn").hidden = !now;
+  $("fetchBarWrap").hidden = !now;
+  if (now) $("fetchBar").style.width = `${job.info.percent || 0}%`;
+  let msg = here ? `On this PC: inference/models/${modelName(run, step)} (run it with --model ${modelName(run, step)})` : "";
+  if (now) msg = `Copying ${job.info.name}… ${job.info.phase === "checking" ? "checking it" : `${job.info.percent || 0}%`}` +
+    `${job.info.speed ? `, ${job.info.speed}` : ""}${job.info.eta ? `, ${job.info.eta} left` : ""}`;
+  else if (job && job.status === "failed" && job.run === run) msg = `Copying failed: ${job.log[job.log.length - 1] || "see the app log"}`;
+  $("fetchMsg").textContent = msg;
+}
+$("fetchStep").onchange = renderFetchJob;
+$("fetchBtn").onclick = async () => {
+  const run = $("runDetail").dataset.run, step = Number($("fetchStep").value);
+  $("fetchBtn").disabled = true;
+  try { const r = await api("/api/train/fetch", { run, step }); toast(`Copying the model to inference/models/${r.name}.`, 5000); await loadTrain(); }
+  catch (e) { toast(e.message, 8000); $("fetchBtn").disabled = false; }
+};
+$("fetchStopBtn").onclick = async () => {
+  try { await api("/api/train/fetch/stop", {}); await loadTrain(); } catch (e) { toast(e.message); }
+};
 function lossChart(points) {
   if (points.length < 2) return "";
   const W = 600, H = 180, L = 44, B = 20, top = 8;
@@ -799,8 +848,16 @@ function lossChart(points) {
     `<text x="${L}" y="${H - 5}">step ${x0.toLocaleString()}</text><text x="${W - 4}" y="${H - 5}" text-anchor="end">${x1.toLocaleString()}</text>` +
     `<text x="${W - 4}" y="${top + 12}" text-anchor="end">loss</text><path class="ln" d="${d}"/></svg>`;
 }
+$("runResumeBtn").onclick = async () => {
+  const run = selectedRun, from = Number($("runResumeBtn").dataset.from);
+  if (!confirm(`Continue ${run} from step ${from.toLocaleString()}? The steps after it are trained again; the settings and the learning-rate schedule stay the same.`)) return;
+  $("runResumeBtn").disabled = true;
+  try { const r = await api("/api/train/resume", { run }); toast(r.message || "Resumed.", 5000); await loadTrain(); loadRun(); }
+  catch (e) { toast(e.message, 8000); }
+  $("runResumeBtn").disabled = false;
+};
 $("runStopBtn").onclick = async () => {
-  if (!confirm(`Stop the training ${selectedRun}? Its checkpoints stay. It can be continued from the newest one in a terminal (resume_groot.sh).`)) return;
+  if (!confirm(`Stop the training ${selectedRun}? Its checkpoints stay. Resume continues it later from the newest complete one.`)) return;
   try { const r = await api("/api/train/stop", { run: selectedRun }); toast(r.message || "Stopped.", 5000); await loadTrain(); loadRun(); }
   catch (e) { toast(e.message, 6000); }
 };

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stop a training run started with start_training.sh. Its checkpoints stay; continue it later
-# from the newest one with resume_groot.sh.
+# from the newest complete one with: ./start_training.sh --resume <run name>
 #
 # Usage: ./stop_training.sh <run name>
 set -euo pipefail
@@ -21,7 +21,17 @@ if ! kill -0 "$PID" 2>/dev/null; then
   echo "$RUN is not running."
   exit 0
 fi
-touch "$SCRIPT_DIR/logs/$RUN.stopped"
+# Who stopped it, from where: in the .stopped file (shown by the app) and in the run's log.
+# STOP_SOURCE is set by the Store Picker Bot app; SSH_CLIENT by SSH; the callers are the parent processes.
+callers="" p=$PPID
+for _ in 1 2 3; do
+  [[ "$p" =~ ^[0-9]+$ && "$p" -gt 1 ]] || break
+  callers+="${callers:+ < }$(ps -o args= -p "$p" | cut -c1-80)"
+  p="$(ps -o ppid= -p "$p" | tr -d ' ')"
+done
+by="$(date '+%F %T %Z') by $(id -un), ${STOP_SOURCE:-not the app}, ${SSH_CLIENT:+from ${SSH_CLIENT%% *} over SSH, }terminal $(tty -s && tty || echo none), called by: ${callers:-?}"
+echo "$by" > "$SCRIPT_DIR/logs/$RUN.stopped"
+echo "[stop] $by" >> "$SCRIPT_DIR/logs/$RUN.log"
 # The whole process group: the training, its data loader workers and the checkpoint thinning.
 kill -TERM -- "-$PID"
 for _ in $(seq 30); do

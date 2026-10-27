@@ -26,6 +26,8 @@ DATASETS = TRAINING_DIR.parent / "data_collection" / "dataset"
 # A LeRobot training line: "INFO 2026-10-22 12:00:00 ot_train.py:641 step:10 smpl:640 ... loss:0.123 ...".
 # LeRobot 0.6.2 also draws a progress bar ("Training: 1%| ... 10/1000 [...]") on the same line, before it.
 STEP_LINE = re.compile(r"INFO (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) .* step:\S+ .*?\bloss:([0-9.eE+-]+|nan)")
+# Written by start_training.sh --resume: the steps after it count again from this checkpoint.
+RESUME_LINE = re.compile(r"^\[resume\] step (\d+)")
 
 
 def folder_size(path):
@@ -89,11 +91,19 @@ def parse_log(path, log_freq):
         text = path.read_text(errors="replace")
     except OSError:
         return 0, [], None, []
+    step = 0
     for line in re.split(r"[\r\n]", text):
         m = STEP_LINE.search(line)
+        r = RESUME_LINE.match(line)
         if m:
-            points.append(((len(points) + 1) * log_freq, float(m.group(2))))
+            step += log_freq
+            points.append((step, float(m.group(2))))
             times.append(time.mktime(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")))
+        elif r:  # the steps after the resumed checkpoint are trained again
+            step = int(r.group(1))
+            keep = sum(1 for s, _ in points if s <= step)
+            points, times = points[:keep], []  # no pace across the pause
+            lines.append(line)
         elif line.strip() and not line.startswith("Training:"):  # progress bar redraws
             lines.append(line)
     pace = None
@@ -103,6 +113,14 @@ def parse_log(path, log_freq):
             pace = (recent[-1] - recent[0]) / ((len(recent) - 1) * log_freq)
     step = points[-1][0] if points else 0
     return step, points, pace, lines[-20:]
+
+
+def resume_step(run_dir):
+    """Step of the newest complete checkpoint (checkpoints/last with its training state), or None."""
+    last = run_dir / "checkpoints" / "last"
+    if (last / "training_state").is_dir() and last.resolve().name.isdigit():
+        return int(last.resolve().name)
+    return None
 
 
 def checkpoints(run_dir):
@@ -134,6 +152,7 @@ def run_status(name, detail=False):
         row["status"] = "finished" if exit_path.read_text().strip() == "0" else "failed"
     elif (LOGS / f"{name}.stopped").exists():
         row["status"] = "stopped"
+        row["stopped_by"] = (LOGS / f"{name}.stopped").read_text(errors="replace").strip() or None  # stop_training.sh
     else:
         row["status"] = "stopped"  # killed some other way (or the PC restarted)
     step, points, pace, tail = parse_log(LOGS / f"{name}.log", meta.get("log_freq", 10))
@@ -144,6 +163,10 @@ def run_status(name, detail=False):
         row["eta_s"] = round(max(0, meta["steps"] - step) * pace)
     if row["status"] == "failed":
         row["error"] = tail[-12:]
+    if row["status"] in ("stopped", "failed"):
+        from_step = resume_step(run_dir)
+        if from_step is not None and from_step < (meta.get("steps") or 0):
+            row["resume_from"] = from_step  # the app offers Resume
     if detail:
         sampled = points[::max(1, len(points) // 300)]
         if points and sampled[-1] != points[-1]:

@@ -125,7 +125,11 @@ It prints the run name. Then:
 tail -f logs/<run name>.log            # follow the training (Ctrl+C stops following, not the training)
 python3 training_status.py             # every run, with its step, loss and checkpoints (JSON)
 ./stop_training.sh <run name>          # stop it; its checkpoints stay
+CONDA_ENV=lerobot_env ./start_training.sh --resume <run name>   # continue it from its newest complete checkpoint
 ```
+
+`--resume` continues a stopped or failed run in the background, with the run's own steps, settings and
+learning-rate schedule. Its log goes on in the same file.
 
 While it trains, `prune_checkpoints.py` thins out older checkpoints every minute: the newest 2 stay
 complete (`KEEP_LAST`), older ones at a multiple of 10,000 steps keep only their model (`KEEP_MODEL_EVERY`),
@@ -168,7 +172,9 @@ If a mode stops with `CUDA out of memory`, lower `BATCH_SIZE`.
 ```
 
 It continues from `checkpoints/last` with the same step, optimizer and learning-rate schedule.
-Use the same `NUM_GPUS` as the original run (default 1).
+Use the same `NUM_GPUS` as the original run (default 1). It stops when the terminal closes. For a run started
+with `start_training.sh` (or the app), use `./start_training.sh --resume <run name>` instead: it runs in the
+background, like the original run ("In the background" above), and the app's **Resume** button does the same.
 
 ## LeRobot versions
 

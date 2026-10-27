@@ -87,6 +87,14 @@ steps; a step unlocks when the one before it is done.
      or the disk is too full.
    - **Training runs** lists every run on the training PC: its step, loss, time left, checkpoints and
      size. Click a run to see its loss curve. **Stop training** stops it; its checkpoints stay.
+     A stopped run shows when it was stopped and from where (this app, or a terminal on which computer).
+   - **Resume from step …** appears for a stopped or failed run: it continues the run from its newest
+     complete checkpoint, with the same steps, settings and learning-rate schedule (the steps after
+     that checkpoint are trained again). It needs the same checks as Start training.
+   - **Copy to this PC** copies the model of the chosen checkpoint (about 9 GB) into
+     `policy/inference/models/<run>_<step>/`, to run it on the arm ([INFERENCE.md](INFERENCE.md), from step 3:
+     `--model <run>_<step>`). It uses 8 connections at once (about 15–20 minutes) and checks that the copy is
+     exact. Recording can go on meanwhile. A stopped or failed copy can be started again.
 
    The training runs on the training PC: it goes on when the app or this computer is closed. Open the
    Train step again at any time to follow it.
@@ -120,6 +128,7 @@ The Train step works over SSH from this PC to the training PC.
    | `keep_model_every` | older checkpoints at a multiple of this many steps keep only their model; the others are deleted (0: delete all older ones) |
    | `sec_per_step` | used for the time estimate until the training PC has a run to measure |
    | `send_streams` | connections used at once to send a dataset (default 4) |
+   | `fetch_streams` | connections used at once to copy a model back (default 8) |
 
 4. Keep both PCs on the same version of the project (`git pull` on both): the Train step uses scripts
    in `policy/training/` on the training PC, and says so if they are missing.

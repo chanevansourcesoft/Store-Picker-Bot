@@ -98,6 +98,8 @@ main { padding: 20px; max-width: 1600px; margin: 0 auto; }
 .advanced summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-bottom: 8px; }
 
 /* progress */
+.fetch { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 6px; }
+.fetch label { margin: 0; }
 .bar { height: 8px; background: var(--bg); border: 1px solid var(--line); margin: 10px 0 14px; }
 .bar > span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
 .status-line { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }

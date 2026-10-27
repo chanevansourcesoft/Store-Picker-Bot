@@ -2,15 +2,20 @@
 training_link.py
 
 The Store Picker Bot app's link to the training PC, over SSH (key login, set up once by the admin):
-send a dataset with rsync, start and stop a GR00T training there (policy/training/start_training.sh,
-stop_training.sh), and read its status (policy/training/training_status.py).
+send a dataset with rsync, start, resume and stop a GR00T training there (policy/training/start_training.sh,
+stop_training.sh), read its status (policy/training/training_status.py), and copy a trained model back
+to this PC (policy/inference/models/).
 
 Settings: the "training" block of studio_config.json. Guide: policy/docs/DATA_STUDIO.md (Train).
 """
 
+import hashlib
 import json
+import os
 import re
 import shlex
+import shutil
+import socket
 import subprocess
 import threading
 import time
@@ -179,6 +184,172 @@ class SendJob:
                 "log": list(self.log)[-8:]}
 
 
+class FetchJob:
+    """Copies the model of one checkpoint (its pretrained_model/ folder) from the training PC into a folder
+    on this PC, for running it (policy/inference/models/).
+
+    The network limits each connection, so a big file (the 9 GB model.safetensors) is fetched as several
+    byte ranges at once, each over its own SSH connection, and checked against its SHA-256 on the training
+    PC. Everything goes into <target>.part/ first; it is renamed to <target> only when complete.
+    """
+
+    BIG = 256 * 1024 * 1024  # files above this size are fetched in parallel ranges
+    TRIES = 4  # per range, continuing where it stopped
+
+    def __init__(self, link, run, step, source, target, streams):
+        self.kind = "fetch"
+        self.run, self.step = run, step
+        self.target = Path(target)
+        self.status = "running"
+        self.stopping = False
+        self.log = deque(maxlen=50)
+        self.info = {"percent": 0, "speed": "", "eta": "", "started": time.time(), "phase": "fetching",
+                     "name": self.target.name}
+        self.procs = set()
+        self.lock = threading.Lock()
+        self.thread = threading.Thread(target=self._run, args=(link, source, streams), daemon=True)
+        self.thread.start()
+
+    def _run(self, link, source, streams):
+        part = self.target.with_name(self.target.name + ".part")
+        try:
+            listing = link.ssh(f"cd {shlex.quote(source)} && find . -type f -printf '%s %P\\n'", timeout=60)
+            files = [(int(size), name) for size, name in (line.split(" ", 1) for line in listing.splitlines() if line)]
+            big = [(s, n) for s, n in files if s > self.BIG]
+            total = sum(s for s, _ in files) or 1
+            free = shutil.disk_usage(self.target.parent).free
+            if free < total + 2e9:
+                raise ValueError(f"Not enough disk space here: the model needs {total / 1e9:.1f} GB, "
+                                 f"{free / 1e9:.1f} GB are free.")
+            part.mkdir(parents=True, exist_ok=True)
+            # The checksums are computed on the training PC while the files come.
+            names = " ".join(shlex.quote(n) for _, n in big)
+            sums = {}
+            checker = threading.Thread(target=lambda: sums.update(self._remote_sums(link, source, names)), daemon=True)
+            if big:
+                checker.start()
+            # Small files (config, processor settings): one rsync.
+            self._small(link, source, part, [n for s, n in files if s <= self.BIG])
+            done_small = sum(s for s, _ in files if s <= self.BIG)
+            self.progress = [done_small]
+            ranges = []
+            for size, name in big:
+                path = part / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with open(path, "ab") as f:
+                    f.truncate(size)
+                n = max(1, min(streams, size // (64 * 1024 * 1024)))
+                bounds = [size * i // n for i in range(n + 1)]
+                ranges += [(source + "/" + name, path, bounds[i], bounds[i + 1]) for i in range(n)]
+            self.progress += [0] * len(ranges)
+            threads = [threading.Thread(target=self._range, args=(link, i + 1, *r), daemon=True)
+                       for i, r in enumerate(ranges)]
+            for t in threads:
+                t.start()
+            self._watch(threads, total)
+            if self.stopping:
+                self.status = "stopped"
+                return
+            if self.status != "running":
+                return
+            self.info.update(phase="checking", percent=100, eta="", speed="")
+            checker.join() if big else None
+            for size, name in big:
+                local = self._sha256(part / name)
+                if sums.get(name) != local:
+                    raise ValueError(f"{name} arrived damaged (checksum differs): copy it again.")
+            if self.target.exists():
+                shutil.rmtree(self.target)
+            part.rename(self.target)
+            self.status = "finished"
+            print(f"[fetch] {self.run} step {self.step} -> {self.target}", flush=True)
+        except Exception as e:  # shown on the Train page
+            self.log.append(str(e))
+            print(f"[fetch] {e}", flush=True)
+            self.status = "stopped" if self.stopping else "failed"
+
+    def _remote_sums(self, link, source, names):
+        out = link.ssh(f"cd {shlex.quote(source)} && sha256sum {names}", timeout=1800)
+        return {line.split(None, 1)[1].strip().lstrip("*"): line.split()[0] for line in out.splitlines() if line.strip()}
+
+    def _small(self, link, source, part, names):
+        if not names:
+            return
+        listing = link.cache_dir / "fetch_small.txt"
+        listing.write_text("\n".join(names) + "\n")
+        ssh = shlex.join(["ssh", *link.ssh_options()])
+        result = subprocess.run(["rsync", "-a", f"--files-from={listing}", "-e", ssh, f"{link.host}:{source}/", f"{part}/"],
+                                capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=600)
+        if result.returncode:
+            raise ValueError(link.explain_ssh(result.stderr) if result.returncode == 255
+                             else (result.stderr.strip().splitlines() or ["rsync failed"])[-1])
+
+    def _range(self, link, i, remote, path, start, end):
+        """Bytes [start, end) of one file, over its own SSH connection; continues after a broken connection."""
+        pos = start
+        for attempt in range(self.TRIES):
+            if self.stopping or pos >= end:
+                break
+            cmd = ["ssh", *link.ssh_options(shared=False), link.host,
+                   f"tail -c +{pos + 1} {shlex.quote(remote)} | head -c {end - pos}"]
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
+                                    start_new_session=True)
+            with self.lock:
+                self.procs.add(proc)
+            with open(path, "r+b") as f:
+                f.seek(pos)
+                while chunk := proc.stdout.read(1024 * 1024):
+                    f.write(chunk[:end - pos])
+                    pos += min(len(chunk), end - pos)
+                    self.progress[i] = pos - start
+            proc.wait()
+            with self.lock:
+                self.procs.discard(proc)
+            if pos < end and not self.stopping:
+                self.log.append(f"connection {i} broke at {pos:,} bytes, trying again")
+                time.sleep(2)
+        if pos < end and not self.stopping:
+            self.status = "failed"
+            self.log.append("The copy stopped: the connection to the training PC kept breaking.")
+
+    def _watch(self, threads, total):
+        last, last_t = sum(self.progress), time.time()
+        while any(t.is_alive() for t in threads):
+            time.sleep(1)
+            got, now = sum(self.progress), time.time()
+            if now - last_t >= 3:
+                rate = (got - last) / (now - last_t)
+                last, last_t = got, now
+                self.info["speed"] = f"{rate / 1e6:.2f}MB/s"
+                self.info["eta"] = time.strftime("%H:%M:%S", time.gmtime((total - got) / rate)) if rate > 0 else ""
+            self.info.update(got_bytes=got, total_bytes=total, percent=min(99, int(100 * got / total)))
+
+    @staticmethod
+    def _sha256(path):
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            while chunk := f.read(8 * 1024 * 1024):
+                h.update(chunk)
+        return h.hexdigest()
+
+    def running(self):
+        return self.status == "running"
+
+    def stop(self):
+        with self.lock:
+            if self.status != "running":
+                return
+            self.stopping = True
+            for proc in self.procs:
+                if proc.poll() is None:
+                    os.killpg(proc.pid, 15)
+
+    def public(self):
+        return {"kind": self.kind, "run": self.run, "step": self.step, "target": str(self.target),
+                "status": self.status, "info": dict(self.info, elapsed=round(time.time() - self.info["started"])),
+                "log": list(self.log)[-8:]}
+
+
 class TrainingLink:
     def __init__(self, config, cache_dir):
         self.cfg = config
@@ -330,10 +501,28 @@ class TrainingLink:
         self.forget_status()
         return out.strip().splitlines()[-1]
 
+    def resume(self, run):
+        """Continue a stopped or failed run from its newest complete checkpoint (start_training.sh --resume)."""
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", run or ""):
+            raise ValueError("Not a run name.")
+        env = f"CONDA_ENV={shlex.quote(str(self.cfg.get('conda_env', '')))}"
+        training = shlex.quote(self.remote_path("policy", "training"))
+        out = self.ssh(f"cd {training} && {env} ./start_training.sh --resume {shlex.quote(run)}", timeout=60)
+        self.forget_status()
+        return out.strip().splitlines()[-1]
+
+    def fetch(self, run, step, target):
+        """Copy the model of checkpoint <step> of <run> into the folder target (a FetchJob)."""
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", run or ""):
+            raise ValueError("Not a run name.")
+        source = self.remote_path("policy", "training", "outputs", run, "checkpoints", f"{int(step):06d}", "pretrained_model")
+        return FetchJob(self, run, int(step), source, target, int(self.cfg.get("fetch_streams", 8)))
+
     def stop(self, run):
         if not re.fullmatch(r"[A-Za-z0-9_.-]+", run or ""):
             raise ValueError("Not a run name.")
         training = shlex.quote(self.remote_path("policy", "training"))
-        out = self.ssh(f"cd {training} && ./stop_training.sh {shlex.quote(run)}", timeout=60)
+        source = shlex.quote(f"Store Picker Bot app on {socket.gethostname()}")
+        out = self.ssh(f"cd {training} && STOP_SOURCE={source} ./stop_training.sh {shlex.quote(run)}", timeout=60)
         self.forget_status()
         return out.strip()

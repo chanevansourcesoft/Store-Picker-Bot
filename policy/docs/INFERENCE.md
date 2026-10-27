@@ -76,8 +76,11 @@ Training saves a checkpoint every 5,000 steps on the training PC, in
 `policy/training/outputs/<run>/checkpoints/<step>/` ([TRAINING.md](TRAINING.md), step 4). Only its `pretrained_model/`
 folder is needed (`training_state/` is only for resuming training).
 
-Copy it into `inference/models/`, in a folder with a name you choose, for example the run name and the step.
-Run this on the machine that runs the model, from `policy/`:
+On the recording PC, the Store Picker Bot app does this: Train step, click the run, choose the checkpoint and
+press **Copy to this PC** ([DATA_STUDIO.md](DATA_STUDIO.md)). It saves it as `inference/models/<run>_<step>/`.
+
+By hand: copy it into `inference/models/`, in a folder with a name you choose, for example the run name and the
+step. Run this on the machine that runs the model, from `policy/`:
 
 ```bash
 rsync -a --progress \

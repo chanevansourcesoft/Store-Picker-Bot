@@ -240,7 +240,18 @@
           <dl class="kv" id="runKv"></dl>
           <div class="chart" id="runChart"></div>
           <pre class="log" id="runLog" hidden></pre>
-          <div class="row" style="margin-top: 14px"><button class="danger" id="runStopBtn" hidden>Stop training</button></div>
+          <div class="row" style="margin-top: 14px"><button class="primary" id="runResumeBtn" hidden>Resume training</button><button class="danger" id="runStopBtn" hidden>Stop training</button></div>
+          <div id="fetchBox" class="fetch" hidden>
+            <h3>Copy the model to this PC</h3>
+            <p class="muted small">To run it on the arm (inference/models/, see docs/INFERENCE.md). About 9 GB.</p>
+            <div class="row">
+              <label>Checkpoint <select id="fetchStep"></select></label>
+              <button id="fetchBtn">Copy to this PC</button>
+              <button id="fetchStopBtn" hidden>Stop copying</button>
+            </div>
+            <div class="bar" id="fetchBarWrap" hidden><span id="fetchBar"></span></div>
+            <p class="small" id="fetchMsg"></p>
+          </div>
         </div>
       </div>
     </div>
