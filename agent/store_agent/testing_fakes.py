@@ -1,8 +1,9 @@
 """
 Fakes for tests: a robot with scripted failures and a model that follows a script.
 
-FakeRobot works like the mock robot (one pick = pick AND place in the basket), but
-failures happen on chosen attempts (not random), so a test gives the same result every time.
+FakeRobot works like the mock robot (one pick = pick AND place in the basket, same answer
+fields: pick_try, retryable, needs_operator), but failures happen on chosen attempts (not
+random), so a test gives the same result every time.
 
 ScriptedModel is a fake Nemotron client. It sends the given tool calls one by
 one, no matter what the results say (like a model that lost track), then "DONE".
@@ -13,23 +14,29 @@ from types import SimpleNamespace
 
 
 class FakeRobot:
-    def __init__(self, inventory, nav_fail=(), pick_fail=()):
-        """nav_fail / pick_fail: attempt numbers (1, 2, ...) that fail."""
+    def __init__(self, inventory, nav_fail=(), pick_fail=(), pick_hold=(), arm_ready=True):
+        """nav_fail / pick_fail: attempt numbers (1, 2, ...) that fail ("no grasp seen", retryable).
+        pick_hold: pick attempts that end with the gripper still holding something."""
         self.inventory = inventory
-        self.nav_fail, self.pick_fail = set(nav_fail), set(pick_fail)
+        self.nav_fail, self.pick_fail, self.pick_hold = set(nav_fail), set(pick_fail), set(pick_hold)
+        self.arm_is_ready = arm_ready
         self.nav_count = self.pick_count = 0
+        self.pick_item, self.pick_try = None, 0   # like the robot server: tries of the current unit
         self.station = "home"
         self.holding = None
         self.basket = []    # units placed in the basket, in order
         self.commands = []  # every command that reached the robot: (name, args)
         self.errors = []    # every error message the robot answered
 
-    def _fail(self, message):
+    def _fail(self, message, **fields):
         self.errors.append(message)
-        return {"success": False, "message": message}
+        return {"success": False, "message": message, **fields}
 
     def health(self):
-        return {"status": "ok"}
+        return {"status": "ok", "arm_ready": self.arm_is_ready}
+
+    def arm_ready(self):
+        return self.arm_is_ready
 
     def status(self):
         return {"busy": False, "holding": self.holding, "station": self.station, "last_error": None}
@@ -42,19 +49,29 @@ class FakeRobot:
         if self.nav_count in self.nav_fail:
             return self._fail("navigation failed, obstacle detected")
         self.station = station
+        self.pick_item, self.pick_try = None, 0
         return {"success": True, "message": f"arrived at {station}"}
 
     def pick(self, item, shelf):
         """One GR00T run: pick the item and place it in the basket."""
         self.commands.append(("pick", item))
         if self.holding:
-            return self._fail(f"already holding {self.holding}")
+            return self._fail(f"already holding {self.holding}", retryable=False)
         if self.station != shelf:
-            return self._fail(f"not at a shelf, currently at {self.station}")
+            return self._fail(f"not at a shelf, currently at {self.station}", retryable=False)
+        if self.pick_item != item:
+            self.pick_item, self.pick_try = item, 0
+        self.pick_try += 1
         self.pick_count += 1
+        if self.pick_count in self.pick_hold:
+            self.holding = item
+            return self._fail(f"no grasp seen: {item} was not picked; the gripper still holds something",
+                              item=item, pick_try=self.pick_try, outcome="holding", retryable=False,
+                              needs_operator=True)
         if self.pick_count in self.pick_fail:
-            return self._fail("grasp failed")
+            return self._fail("grasp failed", item=item, pick_try=self.pick_try, outcome="retry", retryable=True)
         self.basket.append(item)
+        self.pick_item, self.pick_try = None, 0
         return {"success": True, "message": f"placed {item} in basket", "item": item, "shelf": shelf,
                 "target": "basket", "barcode": None}
 

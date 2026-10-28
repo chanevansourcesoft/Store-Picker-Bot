@@ -5,6 +5,7 @@ Run:
     python -m store_agent.test_agent
 """
 
+import store_agent.testing_store  # noqa: F401  (first: the tests use the test store in agent/testdata)
 from unittest.mock import patch
 
 from store_agent.agent import (
@@ -248,6 +249,70 @@ def test_stop_halts_agent_before_next_command():
     print("PASS: test_stop_halts_agent_before_next_command")
 
 
+def test_failed_pick_is_retried_by_the_code():
+    """One pick_item call: the code retries a "no grasp seen" itself; the model sends one call."""
+    script = [nav("shelf_B"), pick("frooti"), nav("customer"), nav("home")]
+    bill, log, robot, model = run_with_fakes([{"item": "frooti", "qty": 1}], script, pick_fail=(1,))
+    assert robot.picks_sent("frooti") == 2 and robot.basket == ["frooti"], robot.commands
+    picks = [e for e in log if e["tool"] == "pick_item"]
+    assert len(picks) == 1 and picks[0]["result"]["tries"] == 2, picks
+    assert bill["status"] == "done", bill
+    print("PASS: test_failed_pick_is_retried_by_the_code")
+
+
+def test_not_picked_after_retries_is_reported_and_order_goes_on():
+    """PICK_RETRIES (2) retries, then the item is reported as not picked and the rest is packed."""
+    script = [nav("shelf_A"), pick("chips_packet"), pick("chips_packet"), pick("mentos"),
+              nav("customer"), nav("home")]
+    bill, log, robot, model = run_with_fakes([{"item": "chips_packet", "qty": 1}, {"item": "mentos", "qty": 1}],
+                                             script, pick_fail=(1, 2, 3))
+    assert robot.picks_sent("chips_packet") == 3, "1 try + 2 retries, and no 4th after not_picked"
+    assert robot.basket == ["mentos"], robot.basket
+    assert [arg for name, arg in robot.commands if name == "navigate"] == ["shelf_A", "customer", "home"]
+    assert bill["status"] == "done_with_problems" and bill["total"] == 10, bill
+    assert any("chips_packet: not picked" in p for p in bill["problems"]), bill["problems"]
+    refused = [e for e in log if e["result"].get("refused")]
+    assert len(refused) == 1 and "could not be picked" in refused[0]["result"]["message"], refused
+    with patch("store_agent.tools.PICK_RETRIES", 0):
+        _, _, robot, _ = run_with_fakes([{"item": "chips_packet", "qty": 1}], script[:2], pick_fail=(1,))
+    assert robot.picks_sent("chips_packet") == 1, "PICK_RETRIES=0: no retry"
+    print("PASS: test_not_picked_after_retries_is_reported_and_order_goes_on")
+
+
+def test_gripper_still_holding_stops_everything():
+    """The gripper still holds something: no retry, no more robot commands, a person is asked."""
+    script = [nav("shelf_A"), pick("chips_packet"), pick("mentos"), nav("customer"), nav("home")]
+    bill, log, robot, model = run_with_fakes([{"item": "chips_packet", "qty": 1}, {"item": "mentos", "qty": 1}],
+                                             script, pick_hold=(1,))
+    assert robot.commands == [("navigate", "shelf_A"), ("pick", "chips_packet")], robot.commands
+    assert bill["total"] == 0 and bill["status"] == "failed", bill
+    assert any("operator must check the arm" in p for p in bill["problems"]), bill["problems"]
+    print("PASS: test_gripper_still_holding_stops_everything")
+
+
+def test_only_product_ids_reach_the_robot():
+    """Empty ids, free text and unknown products are refused before the robot."""
+    script = [nav("shelf_A"), ("pick_item", {"item": ""}), ("pick_item", {}),
+              ("pick_item", {"item": "pick up the chips packet"}), ("pick_item", {"item": "pizza"}),
+              pick("chips_packet"), nav("customer"), nav("home")]
+    bill, log, robot, model = run_with_fakes([{"item": "chips_packet", "qty": 1}], script)
+    assert [c for c in robot.commands if c[0] == "pick"] == [("pick", "chips_packet")], robot.commands
+    refused = [e["result"]["message"] for e in log if e["result"].get("refused")]
+    assert len(refused) == 4 and all("product id" in m for m in refused), refused
+    assert bill["status"] == "done", bill
+    print("PASS: test_only_product_ids_reach_the_robot")
+
+
+def test_pick_at_wrong_station_is_refused():
+    script = [nav("shelf_B"), pick("chips_packet"), nav("shelf_A"), pick("chips_packet"),
+              nav("customer"), nav("home")]
+    bill, log, robot, model = run_with_fakes([{"item": "chips_packet", "qty": 1}], script)
+    assert robot.picks_sent("chips_packet") == 1 and robot.errors == [], (robot.commands, robot.errors)
+    assert any("Call navigate_to shelf_A first" in e["result"]["message"] for e in log if e["result"].get("refused"))
+    assert bill["status"] == "done", bill
+    print("PASS: test_pick_at_wrong_station_is_refused")
+
+
 def run_all_tests():
     """Run all tests."""
     print("Running agent tests...\n")
@@ -261,6 +326,11 @@ def run_all_tests():
     test_robot_holding_after_pick_is_reported_not_moved()
     test_model_picks_too_many_is_refused()
     test_stop_halts_agent_before_next_command()
+    test_failed_pick_is_retried_by_the_code()
+    test_not_picked_after_retries_is_reported_and_order_goes_on()
+    test_gripper_still_holding_stops_everything()
+    test_only_product_ids_reach_the_robot()
+    test_pick_at_wrong_station_is_refused()
 
     print("\nAll tests passed!")
 

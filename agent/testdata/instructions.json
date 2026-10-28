@@ -1,0 +1,18 @@
+{
+  "chips_packet": {
+    "shelf": "upper_shelf",
+    "instruction": "pick up the chips packet and place it in the basket"
+  },
+  "mentos": {
+    "shelf": "lower_shelf",
+    "instruction": "pick up the mentos roll and place it in the basket"
+  },
+  "frooti": {
+    "shelf": "upper_shelf",
+    "instruction": "pick up the Frooti mango drink box and place it in the basket"
+  },
+  "hide_and_seek": {
+    "shelf": "lower_shelf",
+    "instruction": "pick up the Hide and Seek biscuit pack and place it in the basket"
+  }
+}

@@ -137,6 +137,7 @@ def process_single_order(order_id: int, on_step: Optional[Callable] = None):
 def worker_loop():
     """Main worker loop. Processes queued orders one at a time."""
     global _worker_running
+    waiting_for_arm = False
 
     while _worker_running:
         try:
@@ -144,6 +145,13 @@ def worker_loop():
             order = None if _halted.is_set() else store.get_next_queued_order()
             if order and robot_client.status().get("stopped"):
                 order = None
+            # Wait while the robot reports its arm not ready (GR00T policy worker not loaded yet)
+            if order and not robot_client.arm_ready():
+                if not waiting_for_arm:
+                    print(f"[Worker] Order #{order['id']} waits: the robot's arm is not ready yet")
+                waiting_for_arm, order = True, None
+            elif order:
+                waiting_for_arm = False
 
             if order:
                 print(f"[Worker] Processing order #{order['id']}")

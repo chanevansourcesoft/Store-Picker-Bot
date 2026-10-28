@@ -218,6 +218,11 @@ class MissionManager:
         if config.MODE == "live" and not config.MANIPULATION_VERIFIED:
             return False, ("The GR00T pick (pick and place in basket) is not verified on the Jetson yet "
                            "(STOREPILOT_MANIPULATION_VERIFIED=0).")
+        if (tel.get("health") or {}).get("arm_ready") is False:
+            return False, ("The arm is not ready: the GR00T policy worker on the Jetson is not running "
+                           "or is still loading its model. Missions wait until it is ready.")
+        if status.get("needs_operator"):
+            return False, f"A person must check the arm first: {status['needs_operator']}. Then press Resume."
         return True, ""
 
     def confirm(self, mission_id, area_clear=False):

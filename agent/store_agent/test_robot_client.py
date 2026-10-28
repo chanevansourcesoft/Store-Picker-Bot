@@ -5,6 +5,7 @@ Run:
     python -m store_agent.test_robot_client
 """
 
+import store_agent.testing_store  # noqa: F401  (first: the tests use the test store in agent/testdata)
 from types import SimpleNamespace
 from unittest.mock import patch
 

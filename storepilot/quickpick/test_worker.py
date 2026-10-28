@@ -9,6 +9,7 @@ Run:
     python -m quickpick.test_worker
 """
 
+import store_agent.testing_store  # noqa: F401  (first: the tests use the test store in agent/testdata)
 from unittest.mock import patch
 
 from quickpick import store, worker
@@ -304,7 +305,13 @@ def test_stop_ends_running_order_and_holds_the_queue():
             time.sleep(1.5)
             assert store.get_order(queued)["status"] == "queued", "no new order while the robot is stopped"
 
+            # The arm is not ready (GR00T policy worker still loading): still no new order
             robot.status = lambda: {"stopped": False, "holding": None, "station": "shelf_A"}
+            robot.arm_is_ready = False
+            time.sleep(1.5)
+            assert store.get_order(queued)["status"] == "queued", "no new order while the arm is not ready"
+
+            robot.arm_is_ready = True
             for _ in range(50):
                 if store.get_order(queued)["status"] == "done":
                     break

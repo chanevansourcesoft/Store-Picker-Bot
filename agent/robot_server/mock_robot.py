@@ -22,7 +22,8 @@ from robot_server import instructions
 from store_agent.inventory import load_catalog as load_inventory  # shelves (no stock)
 
 # Chance that a step fails, so the agent can practice handling problems.
-PICK_FAIL_RATE = 0.10
+PICK_FAIL_RATE = 0.10    # "no grasp seen": a retry is allowed
+PICK_HOLD_RATE = 0.0     # "the gripper still holds something": a person must check the arm
 NAV_FAIL_RATE = 0.05
 FAKE_DELAY_SEC = 0.5
 NAV_DELAY_SEC = 1.0
@@ -52,9 +53,11 @@ state = {
     "obstacle": False,
     "last_error": None,
     "stopped": False,
-    # GR00T pick tries for the current unit (reset after it is placed in the basket)
+    # GR00T pick tries for the current unit (reset after it is placed in the basket,
+    # after driving to another station, and on /resume)
     "pick_item": None,
     "pick_try": 0,
+    "needs_operator": None,   # the gripper still holds something: no pick, no driving until /resume
 }
 
 
@@ -73,9 +76,9 @@ class PlaceRequest(BaseModel):
     item: Optional[str] = None
 
 
-def fail(message):
+def fail(message, **fields):
     state["last_error"] = message
-    return {"success": False, "message": message}
+    return {"success": False, "message": message, **fields}
 
 
 def succeeded(result):
@@ -119,7 +122,7 @@ def move_to_station(station):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "arm_ready": True}   # the simulated arm is always ready
 
 
 @app.get("/status")
@@ -135,6 +138,8 @@ def status():
         "obstacle": state["obstacle"],
         "last_error": state["last_error"],
         "stopped": state["stopped"],
+        "pick_try": state["pick_try"],
+        "needs_operator": state["needs_operator"],
     }
 
 
@@ -156,6 +161,8 @@ def navigate(req: NavigateRequest):
         return fail("robot is stopped, call /status to check")
     if state["busy"]:
         return fail("busy")
+    if state["needs_operator"]:
+        return fail(f"not driving: {state['needs_operator']}. A person must check the arm, then /resume")
     if req.station not in VALID_STATIONS:
         return fail(f"unknown station '{req.station}', must be one of: {', '.join(sorted(VALID_STATIONS))}")
     if state["station"] == req.station:
@@ -179,6 +186,7 @@ def navigate(req: NavigateRequest):
     state["obstacle"] = False
     state["nav_state"] = "arrived"
     state["station"] = req.station
+    state["pick_item"], state["pick_try"] = None, 0   # tries count per visit
     move_to_station(req.station)
 
     return succeeded({"success": True, "message": f"arrived at {req.station}"})
@@ -187,26 +195,31 @@ def navigate(req: NavigateRequest):
 @app.post("/pick")
 def pick(req: PickRequest):
     """Pick one unit and place it in the basket (one simulated GR00T run).
-    The GR00T instruction is looked up in policy/instructions.json, like on the Jetson."""
+    Same checks and answer fields as the Jetson: the item id must have a GR00T instruction in
+    policy/instructions.json, the catalog station must be req.shelf, and the robot must be there."""
     if state["stopped"]:
-        return fail("robot is stopped")
+        return fail("robot is stopped", retryable=False)
     if state["busy"]:
-        return fail("busy")
+        return fail("busy", retryable=False)
+    if state["needs_operator"]:
+        return fail(f"{state['needs_operator']}. A person must check the arm, then /resume",
+                    retryable=False, needs_operator=True)
     if state["holding"]:
-        return fail(f"already holding {state['holding']}")
+        return fail(f"already holding {state['holding']}", retryable=False)
 
-    inventory = load_inventory()
-    if req.item not in inventory:
-        return fail(f"unknown item {req.item}")
-    if inventory[req.item]["shelf"] != req.shelf:
-        return fail(f"{req.item} is not on {req.shelf}")
-    if not state["station"].startswith("shelf"):
-        return fail(f"not at a shelf, currently at {state['station']}")
-    if state["station"] != req.shelf:
-        return fail(f"not at {req.shelf}, currently at {state['station']}")
-    instruction, problem = instructions.lookup(req.item, req.shelf)
+    entry, problem = instructions.lookup(req.item)
     if problem:
-        return fail(problem)
+        return fail(problem, item=req.item, retryable=False)
+    station = load_inventory().get(req.item, {}).get("shelf")
+    if station is None:
+        return fail(f"unknown item {req.item}", item=req.item, retryable=False)
+    if station != req.shelf:
+        return fail(f"{req.item} is not on {req.shelf}", item=req.item, retryable=False)
+    if not state["station"].startswith("shelf"):
+        return fail(f"not at a shelf, currently at {state['station']}", item=req.item, retryable=False)
+    if state["station"] != req.shelf:
+        return fail(f"not at {req.shelf}, currently at {state['station']}", item=req.item, retryable=False)
+    instruction = entry["instruction"]
 
     attempt = count_pick_try(req.item)
 
@@ -215,13 +228,20 @@ def pick(req: PickRequest):
     drain_battery(0.2)
     state["busy"] = False
 
-    if random.random() < PICK_FAIL_RATE:
-        result = fail("grasp failed")
-        result.update(item=req.item, instruction=instruction)
+    if random.random() < PICK_HOLD_RATE:
+        message = f"no grasp seen: {req.item} was not picked; the gripper still holds something"
+        state["holding"], state["needs_operator"] = req.item, message
+        result = fail(message, item=req.item, instruction=instruction, pick_try=attempt, outcome="holding",
+                      retryable=False, needs_operator=True)
+    elif random.random() < PICK_FAIL_RATE:
+        result = fail("grasp failed", item=req.item, instruction=instruction, pick_try=attempt, outcome="retry",
+                      retryable=True, needs_operator=False)
     else:
         state["pick_item"] = None  # this unit is done, next pick is try 1 again
+        state["pick_try"] = 0
         result = succeeded({"success": True, "message": f"placed {req.item} in basket", "item": req.item,
-                            "shelf": req.shelf, "target": "basket", "instruction": instruction, "barcode": None})
+                            "shelf": req.shelf, "level": entry["level"], "target": "basket",
+                            "instruction": instruction, "barcode": None, "pick_try": attempt, "outcome": "placed"})
 
     log_groot(instruction, attempt, result)
     return result
@@ -264,9 +284,12 @@ def stop():
 
 @app.post("/resume")
 def resume():
-    """Resume after emergency stop."""
+    """Resume after emergency stop. Also clears "needs operator" (a person checked the arm)."""
     state["stopped"] = False
     state["last_error"] = None
+    state["needs_operator"] = None
+    state["holding"] = None
+    state["pick_item"], state["pick_try"] = None, 0
     return {"success": True, "message": "robot resumed"}
 
 

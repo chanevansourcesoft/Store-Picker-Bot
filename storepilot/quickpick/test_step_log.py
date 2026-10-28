@@ -5,6 +5,7 @@ Run:
     python -m quickpick.test_step_log
 """
 
+import store_agent.testing_store  # noqa: F401  (first: the tests use the test store in agent/testdata)
 from quickpick.step_log import is_recovered, step_target
 
 

@@ -6,6 +6,7 @@ Run:
     python -m store_agent.test_autopilot
 """
 
+import store_agent.testing_store  # noqa: F401  (first: the tests use the test store in agent/testdata)
 from unittest.mock import patch
 
 from store_agent.agent import run_agent

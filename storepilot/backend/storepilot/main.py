@@ -131,6 +131,13 @@ def alerts(tel, robot, ai):
         out.append(("warning", "Jetson server runs in STUB mode (no ROS 2): pose, speed and battery are not real."))
     if status.get("stopped"):
         out.append(("warning", "Robot is stopped. Missions cannot start until it is resumed."))
+    if tel["connected"] and health.get("arm_ready") is False:
+        arm_state = (health.get("arm") or {}).get("state")
+        out.append(("warning", "Arm not ready: the GR00T policy worker on the Jetson is not running or is still "
+                               "loading" + (f" (worker: {arm_state})" if arm_state else "") +
+                               ". Missions wait until it is ready."))
+    if status.get("needs_operator"):
+        out.append(("error", f"Check the arm: {status['needs_operator']}. Remove the item, then press Resume."))
     if status.get("obstacle"):
         out.append(("warning", "Obstacle reported by the robot."))
     battery = robot.get("battery")
@@ -277,6 +284,7 @@ def build_snapshot():
                 "latency_ms": getattr(s.adapter, "last_latency_ms", None),
                 "ros_available": health.get("ros_available"),
                 "ros_connected": health.get("ros_connected"),
+                "arm_ready": health.get("arm_ready"),
                 "detail": tel.get("last_error"),
             },
             "telemetry": {

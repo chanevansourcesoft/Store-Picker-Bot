@@ -7,6 +7,7 @@ Run:
     python -m store_agent.test_inventory
 """
 
+import store_agent.testing_store  # noqa: F401  (first: the tests use the test store in agent/testdata)
 import json
 import tempfile
 import threading
@@ -21,26 +22,57 @@ def use_temp_stock():
 
 
 def test_catalog_matches_policy():
-    """Exactly the items GR00T was trained on (policy/instructions.json), on the same shelves."""
+    """Exactly the items GR00T was trained on (the test store's instructions.json), at the same levels."""
     problems = inventory.check_catalog()
     assert problems == [], problems
     assert set(inventory.load_catalog()) == {"chips_packet", "mentos", "frooti", "hide_and_seek"}
     print("PASS: test_catalog_matches_policy")
 
 
+def test_real_catalog_matches_policy():
+    """The real store (store_agent/catalog.json): one rack (a Nav2 station) with the products on two
+    shelf levels, with the same ids as policy/instructions.json. Checked against the real
+    policy/instructions.json when it is there (it is git-ignored: on the robot only)."""
+    catalog = json.loads((inventory.HERE / "catalog.json").read_text())["products"]
+    assert {item: (info["shelf"], info["level"]) for item, info in catalog.items()} == {
+        "ink_box": ("shelf_A", "upper_shelf"),
+        "biscuit": ("shelf_A", "lower_shelf"),
+    }, catalog
+    policy_file = inventory.REPO_ROOT / "policy" / "instructions.json"
+    if policy_file.exists():
+        problems = inventory.check_catalog(catalog, policy_file)
+        assert problems == [], problems
+        print("PASS: test_real_catalog_matches_policy (checked against policy/instructions.json)")
+    else:
+        print("PASS: test_real_catalog_matches_policy (policy/instructions.json not here: ids and levels only)")
+
+
 def test_check_catalog_finds_mismatches():
-    policy = {"chips_packet": {"shelf": "shelf_A"}, "mentos": {"shelf": "shelf_A"}}
-    catalog = {"chips_packet": {"shelf": "shelf_B"}, "soup_can": {"shelf": "shelf_A"}}
+    policy = {"chips_packet": {"shelf": "upper_shelf"}, "mentos": {"shelf": "lower_shelf"}}
+    catalog = {"chips_packet": {"shelf": "shelf_A", "level": "lower_shelf"},
+               "soup_can": {"shelf": "shelf_A", "level": "upper_shelf"}}
     with tempfile.TemporaryDirectory() as folder:
         path = Path(folder) / "instructions.json"
         path.write_text(json.dumps(policy))
         problems = inventory.check_catalog(catalog, path)
+        # The policy "shelf" is a level: it is never compared with the station (shelf_A)
+        good = {"chips_packet": {"shelf": "shelf_A", "level": "upper_shelf"},
+                "mentos": {"shelf": "shelf_A", "level": "lower_shelf"}}
+        assert inventory.check_catalog(good, path) == []
+        no_station = {"chips_packet": {"level": "upper_shelf"}, "mentos": good["mentos"]}
+        assert inventory.check_catalog(no_station, path) == ["chips_packet: no station (rack) in the catalog"]
     assert problems == [
         "mentos has a GR00T instruction but is not in the catalog",
         "soup_can is in the catalog but has no GR00T instruction",
-        "chips_packet: catalog shelf shelf_B != policy shelf shelf_A",
+        "chips_packet: catalog level lower_shelf != policy shelf upper_shelf",
     ], problems
     print("PASS: test_check_catalog_finds_mismatches")
+
+
+def test_station_of_item():
+    assert inventory.station_of("frooti") == "shelf_B" and inventory.station_of("mentos") == "shelf_A"
+    assert inventory.station_of("pizza") is None
+    print("PASS: test_station_of_item")
 
 
 def test_display_names_come_from_catalog():
@@ -107,7 +139,9 @@ def test_reserve_is_all_or_nothing():
 def run_all_tests():
     print("Running inventory tests...\n")
     test_catalog_matches_policy()
+    test_real_catalog_matches_policy()
     test_check_catalog_finds_mismatches()
+    test_station_of_item()
     test_display_names_come_from_catalog()
     test_stock_starts_from_catalog_and_is_saved()
     test_catalog_file_is_never_written()
