@@ -27,7 +27,8 @@ DATASETS = TRAINING_DIR.parent / "data_collection" / "dataset"
 # LeRobot 0.6.2 also draws a progress bar ("Training: 1%| ... 10/1000 [...]") on the same line, before it.
 STEP_LINE = re.compile(r"INFO (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) .* step:\S+ .*?\bloss:([0-9.eE+-]+|nan)")
 # Written by start_training.sh --resume: the steps after it count again from this checkpoint.
-RESUME_LINE = re.compile(r"^\[resume\] step (\d+)")
+# It may follow a progress bar cut off by a crash on the same line, so it is searched, not matched.
+RESUME_LINE = re.compile(r"\[resume\] step (\d+)")
 
 
 def folder_size(path):
@@ -130,8 +131,8 @@ def parse_log(path, log_freq):
         return 0, [], None, []
     step = 0
     for line in re.split(r"[\r\n]", text):
-        m = STEP_LINE.search(line)
-        r = RESUME_LINE.match(line)
+        r = RESUME_LINE.search(line)
+        m = None if r else STEP_LINE.search(line)
         if m:
             step += log_freq
             points.append((step, float(m.group(2))))
@@ -140,7 +141,7 @@ def parse_log(path, log_freq):
             step = int(r.group(1))
             keep = sum(1 for s, _ in points if s <= step)
             points, times = points[:keep], []  # no pace across the pause
-            lines.append(line)
+            lines.append(r.group(0))
         elif line.strip() and not line.startswith("Training:"):  # progress bar redraws
             lines.append(line)
     pace = None

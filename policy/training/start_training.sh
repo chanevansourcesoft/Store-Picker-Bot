@@ -103,7 +103,8 @@ m.setdefault("resumed", []).append({"time": time.time(), "step": step})
 json.dump(m, open(path, "w"), indent=1)
 EOF
   rm -f "$LOG_DIR/$RUN_NAME.stopped" "$LOG_DIR/$RUN_NAME.exit"
-  echo "[resume] step $RESUME_STEP" >> "$LOG_DIR/$RUN_NAME.log"
+  # On a new line: a crash can leave the log in the middle of a progress bar.
+  printf '\n[resume] step %s\n' "$RESUME_STEP" >> "$LOG_DIR/$RUN_NAME.log"
   TRAIN=("$SCRIPT_DIR/resume_groot.sh" "$RUN_NAME")
 fi
 
