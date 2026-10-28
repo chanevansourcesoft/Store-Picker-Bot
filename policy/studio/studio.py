@@ -89,8 +89,10 @@ RUN_SETTINGS = {"speed": (float, 0.3, 1.5), "smooth": (float, 0.0, 0.9), "blend_
 
 
 def list_models():
-    """Models copied to this PC (inference/models/), newest first."""
-    rows = [p for p in MODELS_DIR.glob("*") if (p / "config.json").is_file() and (p / "model.safetensors").is_file()]
+    """Models copied to this PC (inference/models/), newest first. Not a copy still going on or cut off
+    (<name>.part: its files may be incomplete)."""
+    rows = [p for p in MODELS_DIR.glob("*") if not p.name.endswith(".part")
+            and (p / "config.json").is_file() and (p / "model.safetensors").is_file()]
     return [p.name for p in sorted(rows, key=lambda p: p.stat().st_mtime, reverse=True)]
 
 
@@ -1121,8 +1123,9 @@ class Handler(BaseHTTPRequestHandler):
         self._file(path, "image/jpeg", cache=False)
 
     def _live_stream(self, name):
-        """The live view as one MJPEG stream: every new snapshot record.py writes is pushed to the
-        window right away. Ends with the round (or when the window closes the connection)."""
+        """The live view as one MJPEG stream: every new snapshot record.py (or the model run) writes is
+        pushed to the window right away. Ends with the round or the run (or when the window closes the
+        connection)."""
         if name not in CAMERAS:
             return self._error(HTTPStatus.NOT_FOUND, "not found")
         path = LIVE_DIR / f"{name}.jpg"
@@ -1131,7 +1134,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         last = None
-        while STUDIO.recording():
+        while STUDIO.recording() or STUDIO.running_model():
             try:
                 stamp = path.stat().st_mtime_ns
                 if stamp != last:

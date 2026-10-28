@@ -2,9 +2,11 @@
 Calls the policy worker (pick_worker.py) from the robot server. Plain Python, no LeRobot or GR00T
 needed, so agent/robot_server/arm.py can use it as it is:
 
-    from pick_client import run_pick, stop_arm, arm_ready
+    from pick_client import pick, run_pick, stop_arm, arm_ready
 
-    run_pick(item, instruction=None)  -> (ok, message)   one pick; blocks until the arm is back at rest
+    pick(item)                        -> dict            one pick: the worker's whole answer, with "ok",
+                                                         "reason" (a fixed code, see pick_worker.py) and "message"
+    run_pick(item, instruction=None)  -> (ok, message)   the same pick; blocks until the arm is back at rest
     stop_arm()                        -> (ok, message)   stop the arm where it is (during a pick)
     arm_ready()                       -> bool            the worker is running, its model loaded
     status()                                             the worker's full status (dict), or None
@@ -31,12 +33,18 @@ def _call(method, path, body=None, timeout=5):
         return json.loads(response.read())
 
 
-def run_pick(item, instruction=None):
-    """Pick one unit of item and put it in the basket. (ok, message); the arm ends at rest unless stopped."""
+def pick(item):
+    """Pick one unit of item and put it in the basket; the arm ends at rest unless stopped. The worker's
+    answer: {"ok", "reason", "message", ...}. A worker that cannot be reached gives reason "not_ready"."""
     try:
-        result = _call("POST", "/pick", {"item": item}, timeout=PICK_TIMEOUT)
+        return _call("POST", "/pick", {"item": item}, timeout=PICK_TIMEOUT)
     except (urllib.error.URLError, OSError, ValueError) as e:
-        return False, f"policy worker not reachable at {URL}: {e}"
+        return {"ok": False, "reason": "not_ready", "message": f"policy worker not reachable at {URL}: {e}"}
+
+
+def run_pick(item, instruction=None):
+    """The same pick as (ok, message)."""
+    result = pick(item)
     return bool(result.get("ok")), result.get("message", "")
 
 

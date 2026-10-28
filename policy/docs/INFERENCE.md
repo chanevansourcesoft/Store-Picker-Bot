@@ -195,12 +195,27 @@ The worker answers on a small local web port (`--host`, `--port`, default `127.0
 | Request | What it does |
 |---|---|
 | `GET /status` | ready, busy, state (`loading`, `ready`, `picking`, `returning`, `stopped`, `error`), at rest, the last result |
-| `POST /pick` `{"item": "ink_box"}` | one pick; answers when the arm is back at rest: `{"ok", "message", "grasp_seen", "seconds", ...}` |
+| `POST /pick` `{"item": "ink_box"}` | one pick; answers when the arm is back at rest: `{"ok", "reason", "message", "grasp_seen", "seconds", ...}` |
 | `POST /stop` | stops a pick at once; the arm holds where it is (the next pick first goes back to rest) |
 | `POST /home` | moves the arm back to rest |
 
-The robot server uses `inference/pick_client.py`: `run_pick(item, instruction)` → `(ok, message)`, `stop_arm()` and
-`arm_ready()`. It needs no LeRobot or GR00T. Another address: set `PICK_WORKER_URL`.
+`reason` is a fixed code for programs; `message` is for people and may be worded differently later:
+
+| `reason` | Meaning |
+|---|---|
+| `placed` | ok: the item is in the basket, the arm at rest |
+| `no_grasp` | the episode ended at rest without a grasp: nothing picked |
+| `time_limit` | `--max_s` reached (after a grasp or not); the arm went back to rest |
+| `holding` | the gripper still holds something at rest: a person should look |
+| `stopped` | stopped during the pick: the arm holds where it is |
+| `unknown_item` | not in `instructions.json`: the arm did not move |
+| `busy` | another pick or move is running: the arm did not move for this one |
+| `not_ready` | the worker is still starting, or cannot be reached: the arm did not move |
+| `policy_error` | the model or the arm failed (see the message) |
+
+The robot server uses `inference/pick_client.py`: `pick(item)` → the whole answer (with `reason`),
+`run_pick(item, instruction)` → `(ok, message)`, `stop_arm()` and `arm_ready()`. It needs no LeRobot or GR00T. Another
+address: set `PICK_WORKER_URL`.
 
 Try it from a second terminal while the worker runs:
 

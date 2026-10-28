@@ -4,7 +4,7 @@ arm and cameras open, and runs one pick when asked. It answers on a small local 
 (default 127.0.0.1:8790); pick_client.py is the code the robot server uses to call it.
 
     GET  /status   {"ready", "busy", "state", "at_rest", "last", ...}
-    POST /pick     {"item": "ink_box"}: one episode, then the answer {"ok", "message", ...}
+    POST /pick     {"item": "ink_box"}: one episode, then the answer {"ok", "reason", "message", ...}
     POST /stop     stop the arm where it is (during a pick); it goes back to rest before the next pick
     POST /home     move the arm back to its rest pose
 
@@ -15,6 +15,17 @@ Then the arm moves exactly back to its rest pose, as R does in run_policy.py. Th
 whether it worked: ok only if the episode ended by itself and a grasp was seen (the jaw stayed
 steady part-way open while the model pressed it closed). The episode also ends at --max_s (not ok).
 The arm never moves without a /pick or /home.
+
+"reason" is a fixed code for programs (the message is for people and may be reworded):
+    placed        ok: the item is in the basket, the arm at rest
+    no_grasp      the episode ended at rest without a grasp: nothing picked
+    time_limit    --max_s reached (after a grasp or not); the arm went back to rest
+    holding       the gripper still holds something at rest: a person should look
+    stopped       /stop during the pick: the arm holds where it is
+    unknown_item  the item is not in instructions.json: the arm did not move
+    busy          another pick or move is running: the arm did not move for this one
+    not_ready     the worker is still starting: the arm did not move
+    policy_error  the model or the arm failed (see the message)
 
 Usage (same options as run_policy.py, without --product):
     policy/inference/pc/pick_worker.sh --model <name>                # PC (conda env active)
@@ -124,15 +135,16 @@ class Worker:
 
     def pick(self, item):
         if self.state in ("loading", "connecting"):
-            return {"ok": False, "message": "the policy worker is still starting"}
+            return {"ok": False, "reason": "not_ready", "message": "the policy worker is still starting"}
         try:
             items = record.load_instructions()
         except (OSError, ValueError) as e:
-            return {"ok": False, "message": f"cannot read instructions.json: {e}"}
+            return {"ok": False, "reason": "policy_error", "message": f"cannot read instructions.json: {e}"}
         if not isinstance(item, str) or item not in items:
-            return {"ok": False, "message": f"unknown item '{item}' (in instructions.json: {', '.join(items)})"}
+            return {"ok": False, "reason": "unknown_item",
+                    "message": f"unknown item '{item}' (in instructions.json: {', '.join(items)})"}
         if not self.lock.acquire(blocking=False):
-            return {"ok": False, "message": f"busy ({self.state})"}
+            return {"ok": False, "reason": "busy", "message": f"busy ({self.state})"}
         try:
             self.stop_flag.clear()
             if not self.at_rest:
@@ -146,19 +158,20 @@ class Worker:
             stopped_by = self.runner.episode(self)
             seconds = round(time.monotonic() - start, 1)
             if stopped_by == " ":
-                result = {"ok": False, "message": f"stopped: the arm holds where it is ({item})"}
+                result = {"ok": False, "reason": "stopped", "message": f"stopped: the arm holds where it is ({item})"}
                 self.state = "stopped"
             else:
                 self._home()
                 holding = self._holding()
                 if stopped_by == "back at rest" and check.grasped and not holding:
-                    result = {"ok": True, "message": f"placed {item} in basket"}
+                    result = {"ok": True, "reason": "placed", "message": f"placed {item} in basket"}
                 elif stopped_by == "back at rest":
-                    result = {"ok": False, "message": f"no grasp seen: {item} was not picked"}
+                    result = {"ok": False, "reason": "no_grasp", "message": f"no grasp seen: {item} was not picked"}
                 else:
-                    result = {"ok": False, "message": f"time limit ({self.args.max_s:g} s), "
+                    result = {"ok": False, "reason": "time_limit", "message": f"time limit ({self.args.max_s:g} s), "
                               + ("after a grasp" if check.grasped else "no grasp seen")}
-                if holding:
+                if holding:  # whatever else happened, a person should look
+                    result["reason"] = "holding"
                     result["message"] += "; the gripper still holds something"
             result.update(item=item, instruction=self.runner.task, seconds=seconds, grasp_seen=check.grasped,
                           ended_by=stopped_by.strip() or "stop")
@@ -166,7 +179,7 @@ class Worker:
         except Exception as e:  # the arm or the model failed: report it, keep serving
             self.error = f"{type(e).__name__}: {e}"
             self.state = "error"
-            result = {"ok": False, "message": f"policy error: {self.error}", "item": item}
+            result = {"ok": False, "reason": "policy_error", "message": f"policy error: {self.error}", "item": item}
             log(f"Pick {item}: ERROR {self.error}")
         finally:
             self.runner.watch = None
@@ -185,9 +198,9 @@ class Worker:
 
     def home(self):
         if self.state in ("loading", "connecting"):
-            return {"ok": False, "message": "the policy worker is still starting"}
+            return {"ok": False, "reason": "not_ready", "message": "the policy worker is still starting"}
         if not self.lock.acquire(blocking=False):
-            return {"ok": False, "message": f"busy ({self.state})"}
+            return {"ok": False, "reason": "busy", "message": f"busy ({self.state})"}
         try:
             self._home()
             return {"ok": True, "message": "at rest"}
