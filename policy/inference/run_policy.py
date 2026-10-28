@@ -67,7 +67,7 @@ TRAINING_OUTPUTS = HERE.parent / "training" / "outputs"
 RETURN_SPEED = 30.0  # joint units per second when moving back to the start pose
 
 
-def make_parser():
+def make_parser(product_required=True):
     parser = argparse.ArgumentParser(
         description="Run a trained GR00T model on the real SO-100 arm.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -75,7 +75,7 @@ def make_parser():
     parser.add_argument("--model", required=True,
                         help="Training run folder, checkpoint folder or pretrained_model folder; a bare name is "
                              "looked up in inference/models/ and training/outputs/")
-    what = parser.add_mutually_exclusive_group(required=True)
+    what = parser.add_mutually_exclusive_group(required=product_required)
     what.add_argument("--product", help="Item id from instructions.json (its instruction is sent to the model)")
     what.add_argument("--task", help="Instruction text, instead of --product")
     parser.add_argument("--dry_run", action="store_true", help="Run the model but never move the arm")
@@ -231,6 +231,9 @@ class Runner:
         # Hooks for run_policy_studio.py: events for the app, and the one-line status (the terminal's).
         self.notify = lambda event, **fields: None
         self.show = status
+        # Hook for pick_worker.py: called every step with (seconds, arm position, last target sent);
+        # returning a reason (text) ends the episode.
+        self.watch = None
 
     def state(self, obs):
         return np.array([obs[joint] for joint in self.joints], dtype=np.float32)
@@ -294,7 +297,8 @@ class Runner:
         return deque(new)
 
     def episode(self, keys):
-        """Run the model until Space, Q, Ctrl+C or the time limit. Returns the key that stopped it.
+        """Run the model until Space, Q, Ctrl+C, the time limit or the watch hook. Returns the key that stopped
+        it ("time" for the time limit, the hook's reason for the hook).
 
         The model predicts the next chunk in the background while the arm plays the current one, so
         the arm does not stop to wait. When the new chunk arrives, its actions for the steps that went
@@ -327,6 +331,10 @@ class Runner:
                 stopped_by = "time"
                 break
             obs = self.robot.get_observation()
+            if self.watch is not None:
+                stopped_by = self.watch(elapsed, self.state(obs), target)
+                if stopped_by:
+                    break
             if pending is None and len(queue) <= self.lead_steps:
                 pending = (self.worker.submit(self.predict_chunk, obs), step)
             if pending is not None and pending[0].done():
@@ -360,7 +368,7 @@ class Runner:
         if pending is not None:
             pending[0].result()  # let the model finish before it is used again
         print()
-        reason = {"time": f"time limit ({self.args.max_s:g} s)", " ": "Space", "q": "Q"}[stopped_by]
+        reason = {"time": f"time limit ({self.args.max_s:g} s)", " ": "Space", "q": "Q"}.get(stopped_by, stopped_by)
         print(f"Stopped by {reason} after {time.monotonic() - start:.1f} s. Model: {len(infer_ms)} chunks, "
               f"{np.median(infer_ms or [0]):.0f} ms median, {max(infer_ms or [0]):.0f} ms slowest; "
               f"waited for it {waited} of {step} steps. Largest target away from the arm: {biggest:.1f} joint units.")

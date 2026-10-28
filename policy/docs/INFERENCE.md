@@ -156,6 +156,62 @@ back, put the product back on the shelf, and press **Space** for the next try.
 **Safety limit:** each command may move a joint at most 30 units from where it is (`--max_step`). The recordings stay
 below this, so a normal movement is not slowed, but a wrong prediction cannot make the arm jump. Do not raise it.
 
+## 5. For the robot: the policy worker
+
+On the robot, the robot server (`agent/robot_server/`, Nemotron's side) asks for one pick at a time. The **policy worker**
+(`inference/pick_worker.py`) keeps the model loaded and the arm and cameras open all the time, so a pick starts at once (no
+loading per pick). The arm never moves unless a pick (or "home") is asked for.
+
+Start it once, with the model to use (same options as above, without `--product`):
+
+```bash
+# With Docker (Jetson)
+inference/jetson/pick_worker.sh --model <run>_060000
+
+# Without Docker (PC)
+inference/pc/pick_worker.sh --model <run>_060000
+```
+
+It loads the model, warms up and shows `Ready on http://127.0.0.1:8790`. Stop it with **Ctrl+C**: the arm goes back to
+rest, then its motors switch off.
+
+A pick, for example "ink_box":
+
+1. The instruction is looked up in `instructions.json` (the caller sends only the item id; an unknown id is refused and the
+   arm does not move).
+2. The arm starts in its rest pose (if a stop left it elsewhere, it first goes back to rest).
+3. The model picks the item and puts it in the basket. The episode **ends by itself** when the arm is back near its rest
+   pose, with the gripper closed and still for half a second, or after `--max_s` seconds.
+4. The arm moves exactly back to its rest pose (like **R**).
+5. The answer is **ok** only if the episode ended by itself, a **grasp was seen** (the gripper stayed steady part-way open
+   while the model pressed it closed: it was blocked by the item) and the gripper is empty at the end. Otherwise it says why:
+   no grasp seen, time limit, or "the gripper still holds something".
+
+These rules were checked on the 240 recorded episodes of dataset_v3: the grasp is seen in all of them, and the end in 94% (the
+others were saved before the arm settled; with the model, the time limit and the move back to rest cover them).
+
+The worker answers on a small local web port (`--host`, `--port`, default `127.0.0.1:8790`):
+
+| Request | What it does |
+|---|---|
+| `GET /status` | ready, busy, state (`loading`, `ready`, `picking`, `returning`, `stopped`, `error`), at rest, the last result |
+| `POST /pick` `{"item": "ink_box"}` | one pick; answers when the arm is back at rest: `{"ok", "message", "grasp_seen", "seconds", ...}` |
+| `POST /stop` | stops a pick at once; the arm holds where it is (the next pick first goes back to rest) |
+| `POST /home` | moves the arm back to rest |
+
+The robot server uses `inference/pick_client.py`: `run_pick(item, instruction)` → `(ok, message)`, `stop_arm()` and
+`arm_ready()`. It needs no LeRobot or GR00T. Another address: set `PICK_WORKER_URL`.
+
+Try it from a second terminal while the worker runs:
+
+```bash
+curl localhost:8790/status
+curl -X POST localhost:8790/pick -d '{"item": "ink_box"}'
+curl -X POST localhost:8790/stop
+```
+
+With `--dry_run`, the model runs but the arm does not move, so each pick ends at the time limit (use `--max_s 10`).
+
 ## Options
 
 | Option | Default | Meaning |
@@ -169,7 +225,8 @@ below this, so a normal movement is not slowed, but a wrong prediction cannot ma
 | `--substeps` | 3 | commands per target: the arm is moved part of the way between two targets (90 commands a second instead of 30), so it moves smoothly instead of in small jumps (1 = off) |
 | `--accel` | 0 (off) | acceleration limit of the arm servos, 1 (very gentle) to 253: they ramp their speed up and down instead of starting and stopping hard. Try 50–150; too low makes the arm lag behind the model. The gripper is not limited |
 | `--max_step` | 30 | safety limit per command, see above |
-| `--task` | | an instruction text instead of `--product` |
+| `--task` | | an instruction text instead of `--product` (not for the policy worker) |
+| `--host`, `--port` | 127.0.0.1, 8790 | policy worker only: where it answers |
 | `--follower_port`, `--gripper_cam`, `--scene_cam` | from `.env` | same as for recording |
 | `--fourcc` | | camera format, the same as used for recording |
 
@@ -205,3 +262,5 @@ weights are used as they were trained.
 ## Not tested yet
 
 - The Jetson: speed and memory. If the model is too slow there, the arm waits for it between chunks.
+- The policy worker with the real arm: tested with a simulated arm only (pick, grasp seen, end by itself, move
+  back to rest, stop, time limit, closing).
