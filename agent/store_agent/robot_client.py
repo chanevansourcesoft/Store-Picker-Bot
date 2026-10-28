@@ -100,6 +100,13 @@ def health():
     return _call("GET", "/health")
 
 
+def arm_ready():
+    """True if the robot reports its arm ready (/health "arm_ready": the GR00T policy worker runs
+    with its model loaded). A robot server that does not report it (older version) counts as ready."""
+    answer = health()
+    return is_healthy(answer) and answer.get("arm_ready", True) is not False
+
+
 def status():
     """Get robot status: busy, holding, station, pose, battery, speed, nav_state, obstacle, last_error."""
     return _call("GET", "/status")

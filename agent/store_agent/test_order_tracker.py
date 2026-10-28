@@ -5,6 +5,7 @@ Run:
     python -m store_agent.test_order_tracker
 """
 
+import store_agent.testing_store  # noqa: F401  (first: the tests use the test store in agent/testdata)
 from store_agent.inventory import DEFAULT_INVENTORY
 from store_agent.order_tracker import OrderTracker, unpacked_units
 
@@ -39,10 +40,52 @@ def test_pick_guards():
 
 def test_failed_pick_changes_nothing():
     t = new_tracker()
+    t.record("navigate_to", {"station": "shelf_A"}, OK)
     t.record("pick_item", {"item": "chips_packet"}, {"success": False, "message": "grasp failed"})
     assert t.holding is None and t.check_pick("chips_packet") is None
     assert t.packed_count() == 0
     print("PASS: test_failed_pick_changes_nothing")
+
+
+def test_pick_at_wrong_station_is_refused():
+    t = new_tracker()
+    assert "Call navigate_to shelf_A first" in t.check_pick("chips_packet"), "robot is at home"
+    t.record("navigate_to", {"station": "shelf_B"}, OK)
+    assert "is at shelf_A" in t.check_pick("chips_packet")
+    assert t.check_pick("frooti") is None
+    t.record("navigate_to", {"station": "customer"}, {"success": False, "message": "obstacle"})
+    assert t.station is None, "after a failed drive the robot's station is unknown"
+    print("PASS: test_pick_at_wrong_station_is_refused")
+
+
+def test_not_picked_is_reported_and_order_goes_on():
+    """After the pick retries the item is given up: not missing, not complete, never picked again."""
+    t = new_tracker()
+    t.record("navigate_to", {"station": "shelf_A"}, OK)
+    pack(t, "chips_packet")
+    t.record("pick_item", {"item": "chips_packet"},
+             {"success": False, "not_picked": True, "message": "not picked after 3 tries: time limit"})
+    assert t.given_up() == [{"item": "chips_packet", "qty": 1, "reason": "not picked after 3 tries: time limit"}]
+    assert "could not be picked" in t.check_pick("chips_packet")
+    assert t.missing() == [{"item": "hide_and_seek", "qty": 1}, {"item": "frooti", "qty": 1}]
+    assert t.holding is None and "NOT PICKED" in t.progress_line()
+    t.record("navigate_to", {"station": "shelf_B"}, OK)
+    pack(t, "hide_and_seek")
+    pack(t, "frooti")
+    assert t.missing() == [] and not t.is_complete(), "a unit given up means the order is not complete"
+    assert "Nothing left to pick" in t.progress_line()
+    print("PASS: test_not_picked_is_reported_and_order_goes_on")
+
+
+def test_gripper_still_holding_needs_operator():
+    t = new_tracker()
+    t.record("navigate_to", {"station": "shelf_A"}, OK)
+    message = "no grasp seen: chips_packet was not picked; the gripper still holds something"
+    t.record("pick_item", {"item": "chips_packet"},
+             {"success": False, "not_picked": True, "needs_operator": True, "message": message})
+    assert t.holding == "chips_packet" and t.needs_operator == message
+    assert "operator must check the arm" in t.check_pick("frooti")
+    print("PASS: test_gripper_still_holding_needs_operator")
 
 
 def test_pick_not_in_basket_is_held():
@@ -101,6 +144,9 @@ def run_all_tests():
     print("Running order tracker tests...\n")
     test_pick_guards()
     test_failed_pick_changes_nothing()
+    test_pick_at_wrong_station_is_refused()
+    test_not_picked_is_reported_and_order_goes_on()
+    test_gripper_still_holding_needs_operator()
     test_pick_not_in_basket_is_held()
     test_extra_and_complete()
     test_progress_line()

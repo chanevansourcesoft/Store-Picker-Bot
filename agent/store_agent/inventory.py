@@ -1,8 +1,11 @@
 """
 Products and stock.
 
-catalog.json (in Git) says what the store sells: name, shelf, bin, price, weight, aliases.
-Its item ids and shelves must match policy/instructions.json (the GR00T pick instructions).
+catalog.json (in Git) says what the store sells: name, shelf, level, bin, price, weight, aliases.
+"shelf" is the Nav2 station of the rack the product is on (shelf_A ...); "level" is the shelf
+level on that rack (upper_shelf, lower_shelf). Its item ids must match policy/instructions.json
+(the GR00T pick instructions), whose "shelf" is that level.
+STORE_CATALOG_FILE uses another catalog (the tests use agent/testdata/catalog.json).
 
 The live stock is runtime state, so it is NOT in Git: it lives in STOCK_FILE
 (default <repo>/data/stock.json). A product missing there starts at its
@@ -17,6 +20,7 @@ holds a file lock.
     reserve(items)      -> (ok, problems): take a whole order's stock at once, or nothing
     release(counts)     -> give back {item: n} (units an order did not pack)
     check_catalog()     -> problems compared with policy/instructions.json ([] = OK)
+    station_of(item)    -> the station (rack) the robot drives to for this item, or None
 """
 
 import fcntl
@@ -30,7 +34,7 @@ from store_agent.config import get_setting
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
-CATALOG_FILE = HERE / "catalog.json"
+CATALOG_FILE = Path(get_setting("STORE_CATALOG_FILE", str(HERE / "catalog.json")))
 POLICY_INSTRUCTIONS_FILE = Path(get_setting("POLICY_INSTRUCTIONS_FILE",
                                             str(REPO_ROOT / "policy" / "instructions.json")))
 STOCK_FILE = Path(get_setting("STOCK_FILE", str(REPO_ROOT / "data" / "stock.json")))
@@ -40,6 +44,12 @@ _lock = threading.Lock()
 
 def load_catalog():
     return json.loads(CATALOG_FILE.read_text())["products"]
+
+
+def station_of(item):
+    """The Nav2 station (rack) of an item: where the robot parks to pick it. None if unknown."""
+    info = load_catalog().get(item)
+    return info.get("shelf") if isinstance(info, dict) else None
 
 
 def product_name(item):
@@ -163,7 +173,10 @@ def load_inventory():
 # ---------- contract with the arm policy ----------
 
 def check_catalog(catalog=None, instructions_file=None):
-    """The catalog must sell exactly the items GR00T was trained on, on the same shelves."""
+    """The catalog must sell exactly the items GR00T was trained on, at the same shelf level.
+
+    policy/instructions.json "shelf" is a LEVEL on the rack (upper_shelf ...); it is compared with
+    the catalog's "level", never with the catalog's station ("shelf": shelf_A ...)."""
     catalog = catalog if catalog is not None else load_catalog()
     path = Path(instructions_file or POLICY_INSTRUCTIONS_FILE)
     try:
@@ -176,7 +189,9 @@ def check_catalog(catalog=None, instructions_file=None):
     for item in sorted(set(catalog) - set(policy)):
         problems.append(f"{item} is in the catalog but has no GR00T instruction")
     for item in sorted(set(catalog) & set(policy)):
-        if catalog[item].get("shelf") != policy[item].get("shelf"):
-            problems.append(f"{item}: catalog shelf {catalog[item].get('shelf')} != "
+        if catalog[item].get("level") != policy[item].get("shelf"):
+            problems.append(f"{item}: catalog level {catalog[item].get('level')} != "
                             f"policy shelf {policy[item].get('shelf')}")
+        if not catalog[item].get("shelf"):
+            problems.append(f"{item}: no station (rack) in the catalog")
     return problems

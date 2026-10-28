@@ -4,10 +4,12 @@ Step 2.4: Agent loop — Nemotron picks and packs the order.
 Contract v2: multiple shelves, basket instead of bag, route planning by shelf.
 
 The agent:
-1. Plans a route: visit each shelf once (in optimal order).
-2. At each shelf: pick all items from that shelf (heavy first).
+1. Plans a route: visit each shelf (rack station) once (in optimal order).
+2. At each shelf: pick all items from that shelf (heavy first), without driving in between.
 3. For each unit: pick_item = ONE GR00T run that picks it AND places it in the basket.
-   A failed pick is retried; after too many failures the unit is skipped.
+   The code retries a failed pick (PICK_RETRIES); then the item is reported as not
+   picked and the order goes on. If the gripper still holds something, the planner stops
+   at once (no more robot commands) and a person must check the arm.
 4. After all items: navigate to customer, then home.
 5. Returns a bill with items packed, total, and any problems.
 
@@ -22,7 +24,7 @@ Final status: "done" (exactly as ordered), "done_with_problems" (some items pack
 but missing/extra items), or "failed" (nothing packed).
 
 Run:
-    python -m store_agent.agent "2 chips and one hide and seek"
+    python -m store_agent.agent "2 ink boxes and one biscuit"
 """
 
 import json
@@ -33,14 +35,14 @@ from datetime import datetime
 
 from store_agent import robot_client
 from store_agent.autopilot import Autopilot
-from store_agent.config import MODEL_AGENT, get_client
+from store_agent.config import MODEL_AGENT, PICK_RETRIES, get_client
 from store_agent.inventory import load_inventory
 from store_agent.order_parser import parse_order
 from store_agent.order_tracker import OrderTracker, basket_item
 from store_agent.tools import TOOLS, run_tool
 
 MAX_STEPS = 60  # Stop the loop after this many tool calls.
-MAX_RETRIES = 2  # Retry a failed pick this many times per unit.
+MAX_RETRIES = PICK_RETRIES  # The code retries a failed pick this many times per unit (tools.py).
 MAX_CONTINUE_ATTEMPTS = 3  # How many times to continue if order is incomplete.
 
 # Weight order for sorting (heavy first, at bottom of basket).
@@ -49,6 +51,10 @@ WEIGHT_ORDER = {"heavy": 0, "medium": 1, "light": 2}
 
 class AgentStopped(Exception):
     """The operator pressed STOP: no more model calls, no more robot commands."""
+
+
+class ArmNeedsOperator(Exception):
+    """The gripper still holds something after a pick: no more robot commands, a person checks the arm."""
 
 
 def strip_think(text):
@@ -148,16 +154,18 @@ YOUR TASK:
    a. Call navigate_to with the shelf name (e.g. "shelf_A").
    b. Pick all items from that shelf (heavy first) before moving to the next shelf.
    c. For each unit: call pick_item with the item id. One pick_item picks ONE unit and
-      places it in the basket. Call it once per unit (2x chips_packet = 2 calls).
-      If it fails, call it again (max {MAX_RETRIES} retries per unit). If retries are
-      exhausted, skip that unit (the system notes the problem).
+      places it in the basket. Call it once per unit (2x ink_box = 2 calls), staying at the
+      shelf: do not call navigate_to between picks on the same shelf.
+      The system already retries a failed pick (up to {MAX_RETRIES} more tries). If the result
+      says "not_picked", do NOT pick that product again: it is reported, continue with the rest.
 2. For unknown items, do NOT pick anything.
 3. After all items are packed, call navigate_to with station "customer" to deliver.
 4. Then call navigate_to with station "home" to return.
 5. When everything is done, say "DONE" (the system will build the bill).
 
 RULES:
-- pick_item takes only the item id. The robot knows how to pick each product.
+- pick_item takes only the item id, exactly as written in the inventory (e.g. "ink_box").
+  Never a sentence or an empty id. The robot knows how to pick each product.
 - The robot must be at the item's shelf before pick_item.
 - If a tool fails, read the error message and decide what to do.
 - Pack heavy items first at each shelf, then medium, then light.
@@ -294,7 +302,7 @@ def run_agent_loop(messages, inventory, log, step_offset=0, client=None, on_step
                     tool_args = {}
 
                 check_stop()  # never send a robot command after STOP
-                tool_result = run_tool(tool_name, tool_args, tracker)
+                tool_result = run_tool(tool_name, tool_args, tracker, should_stop=should_stop)
 
                 step_entry = {
                     "step": step,
@@ -318,6 +326,10 @@ def run_agent_loop(messages, inventory, log, step_offset=0, client=None, on_step
                     "tool_call_id": tc.id,
                     "content": content,
                 })
+
+                # Something is still in the gripper: never drive or pick with it. Stop here.
+                if tracker is not None and tracker.holding:
+                    raise ArmNeedsOperator(tracker.needs_operator or f"the robot reports it holds {tracker.holding}")
 
         # If the model is done (no tool calls)
         else:
@@ -405,6 +417,9 @@ def run_agent(order, client=None, on_step=None, should_stop=None):
             stopped_reason = "operator_stop"
             problems.append("Stopped by the operator. No further robot commands were sent.")
             break
+        except ArmNeedsOperator:
+            stopped_reason = "arm_needs_operator"
+            break   # the problem is reported below (tracker.holding); the robot is not moved
         tracker.sync_from_status(robot_client.status())
 
         if tracker.missing():
@@ -421,8 +436,12 @@ def run_agent(order, client=None, on_step=None, should_stop=None):
     # A pick always ends with the arm empty. If the robot still reports an item in the
     # gripper, something went wrong on the arm: report it, do not move the robot.
     if tracker.holding:
-        problems.append(f"Robot reports it still holds {tracker.holding}: the operator must check the arm.")
+        problems.append(f"Robot reports it still holds {tracker.holding}: the operator must check the arm. "
+                        "No further robot commands were sent.")
 
+    for g in tracker.given_up():
+        problems.append(f"Could not pack {g['qty']}x {g['item']}: not picked"
+                        + (f" ({g['reason']})" if g["reason"] else "") + ".")
     for m in tracker.missing():
         problems.append(f"Could not pack {m['qty']}x {m['item']}.")
 
@@ -483,7 +502,7 @@ def process_order(order_text, on_step=None, on_parsed=None):
 
 
 def main():
-    order_text = " ".join(sys.argv[1:]) or "2 chips and one hide and seek"
+    order_text = " ".join(sys.argv[1:]) or "2 ink boxes and one biscuit"
     print(f"Order: {order_text}\n")
 
     print("Parsing order...")

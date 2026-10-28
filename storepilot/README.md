@@ -131,6 +131,8 @@ the Jetson HTTP adapter against a real HTTP server, and disconnect / reconnect r
 | Red "Dashboard backend unreachable" bar | Backend crashed or restarting; systemd restarts it in 3 s and the page reconnects by itself |
 | "Robot disconnected" in live mode | `curl $JETSON_URL/health` from the Pi; same Wi-Fi? Jetson server running on `0.0.0.0:8000`? |
 | "Jetson server runs in STUB mode" | `jetson_server.py` started without ROS 2 sourced: pose / speed / battery are hidden because they are not real |
+| "Arm not ready" | The GR00T policy worker on the Jetson is not running or still loading its model (`curl <jetson>:8790/status` on the Jetson). Missions wait until it is ready |
+| "Check the arm: ... still holds something" | A pick ended with something in the gripper. Remove it by hand, then press Resume |
 | Kiosk does not open at login | `storepilotctl kiosk-logs`; is `~/.config/storepilot/kiosk-disabled` present? |
 | Orders parsed by "offline keyword parser" | `NEBIUS_API_KEY` missing or Nebius unreachable (System page → AI backend) |
 
@@ -247,10 +249,11 @@ the `jetson_server.py` checksum (repo `main` = `44d798191b7dc679…`, repo today
 
 ## Physical STOP verification (before `JETSON_STOP_CONFIRMED=1`)
 
-What the current `jetson_server.py` `/stop` does: cancels the Nav2 goal and publishes **one** zero
-`Twist` on `/cmd_vel`. It does **not** touch the SO-100 arm (the arm is driven from the LeRobot
-policy container), and another `/cmd_vel` publisher can override the single zero message. So with
-today's code the arm test below is expected to fail, and the flag must stay `0`.
+What the current `jetson_server.py` `/stop` does: cancels the Nav2 goal, publishes **one** zero
+`Twist` on `/cmd_vel`, and asks the GR00T policy worker to halt the SO-100 arm where it is
+(`stop_arm()`; the answer says `ARM STOP NOT CONFIRMED` if the worker did not confirm during a
+pick). Another `/cmd_vel` publisher can still override the single zero message. None of this is
+tested on the hardware yet, so the flag stays `0` until the test below passes.
 
 Test only with the wheels off the ground, the arm in a safe pose, people clear, and a hand on the
 hardware E-stop:
@@ -290,9 +293,12 @@ The live adapter (`backend/storepilot/adapters/jetson.py`) speaks the contract o
    there a continuous pose (AMCL / `map→base_link` TF) we can expose when idle?
 5. **Battery and speed:** `/status.battery` stays at its default 100 unless `/battery_state` is
    published, and `speed` is a constant 0.3 while navigating. Which topics give real values?
-6. **Pick:** `/pick` is still a timed stub on the Jetson (`agent/robot_server/arm.py`). It must call
-   the GR00T pick function from `policy/` and report failures in the same JSON. There is no barcode
-   scan; load-cell verification is not connected either.
+6. **Pick:** `/pick` calls the GR00T policy worker (`policy/inference/pick_worker.py`) through
+   `agent/robot_server/arm.py`, after a tight park at the rack. Missions wait while `/health`
+   says `"arm_ready": false`, and while the robot says a person must check the arm
+   (`needs_operator`). Not tested end to end on the robot yet: keep
+   `STOREPILOT_MANIPULATION_VERIFIED=0` until it is. There is no barcode scan; load-cell
+   verification is not connected either.
 7. **Stations:** is `agent/robot_server/stations.yaml` filled with the real store positions? The map
    draws exactly what `/map` returns.
 8. **Map image (optional):** to draw the real occupancy grid, the Jetson would need to serve it

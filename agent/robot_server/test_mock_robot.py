@@ -6,6 +6,7 @@ Run:
     python -m robot_server.test_mock_robot
 """
 
+import store_agent.testing_store  # noqa: F401  (first: the tests use the test store in agent/testdata)
 import contextlib
 import io
 
@@ -101,6 +102,40 @@ def test_return_only_at_own_shelf():
     print("PASS: test_return_only_at_own_shelf")
 
 
+def test_answers_like_the_jetson():
+    """Same fields as jetson_server.py: retryable, needs_operator, pick_try, level; ids only."""
+    reset_robot()
+    mock.navigate(mock.NavigateRequest(station="shelf_A"))
+    failed, _ = pick_chips(fail=True)
+    assert failed["retryable"] and not failed["needs_operator"] and failed["pick_try"] == 1, failed
+    placed, _ = pick_chips(fail=False)
+    assert placed["level"] == "upper_shelf" and placed["shelf"] == "shelf_A" and placed["pick_try"] == 2, placed
+    with contextlib.redirect_stdout(io.StringIO()):
+        for item, problem in (("", "no item id"), ("pick up the chips", "not a product id"),
+                              ("soup_can", "no GR00T instruction")):
+            result = mock.pick(mock.PickRequest(item=item, shelf="shelf_A"))
+            assert not result["success"] and problem in result["message"] and not result["retryable"], result
+    assert mock.health()["arm_ready"] is True
+    print("PASS: test_answers_like_the_jetson")
+
+
+def test_gripper_still_holding_blocks_until_resume():
+    reset_robot()
+    mock.navigate(mock.NavigateRequest(station="shelf_A"))
+    mock.PICK_HOLD_RATE = 1.0
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = mock.pick(mock.PickRequest(item="chips_packet", shelf="shelf_A"))
+    finally:
+        mock.PICK_HOLD_RATE = 0.0
+    assert not result["success"] and result["needs_operator"] and not result["retryable"], result
+    assert mock.status()["holding"] == "chips_packet" and mock.status()["needs_operator"]
+    assert "check the arm" in mock.navigate(mock.NavigateRequest(station="customer"))["message"]
+    mock.resume()
+    assert mock.status()["needs_operator"] is None and mock.status()["holding"] is None
+    print("PASS: test_gripper_still_holding_blocks_until_resume")
+
+
 def run_all_tests():
     print("Running mock robot tests...\n")
     test_error_cleared_after_success()
@@ -108,6 +143,8 @@ def run_all_tests():
     test_one_print_per_pick()
     test_pick_places_in_basket_with_policy_instruction()
     test_return_only_at_own_shelf()
+    test_answers_like_the_jetson()
+    test_gripper_still_holding_blocks_until_resume()
     reset_robot()
     print("\nAll mock robot tests passed!")
 

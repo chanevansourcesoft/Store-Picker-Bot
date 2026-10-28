@@ -69,7 +69,8 @@ class SimRobot(RobotAdapter):
     # ---------- telemetry ----------
 
     def fetch_health(self):
-        return {"status": "ok", "simulated": True}   # no ROS here, so no ros_available claim
+        # no ROS here, so no ros_available claim; the simulated arm is always ready
+        return {"status": "ok", "simulated": True, "arm_ready": True}
 
     def fetch_status(self):
         with self.lock:
@@ -164,9 +165,10 @@ class SimRobot(RobotAdapter):
             return self._fail(f"{item} is not on {shelf}")
         if self.state["station"] != shelf:
             return self._fail(f"not at {shelf}, currently at {self.state['station'] or 'moving'}")
-        instruction, problem = instructions.lookup(item, shelf)
+        entry, problem = instructions.lookup(item)
         if problem:
             return self._fail(problem)
+        instruction = entry["instruction"]
         with self.lock:
             self.state["busy"] = True
             self.state["holding"] = item      # in the gripper during the run

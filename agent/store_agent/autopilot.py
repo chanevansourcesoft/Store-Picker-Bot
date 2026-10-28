@@ -5,8 +5,10 @@ It looks like an OpenAI client (client.chat.completions.create), so the agent
 loop does not change. Instead of a model it follows the same rules the system
 prompt gives Nemotron:
 
-    per unit: go to its shelf -> pick (one GR00T run: pick AND place in the basket),
-              retry a failed pick, skip the item after MAX_TRIES failures
+    per unit: go to its shelf -> pick (one GR00T run: pick AND place in the basket).
+              The pick tool itself retries a failed grasp (PICK_RETRIES); an item it reports
+              as not_picked is skipped. Other failed picks (no arm motion) are tried again,
+              up to MAX_TRIES.
     then: customer -> home -> DONE
 
 It reads the truth from the OrderTracker (what is packed, where the robot is)
@@ -21,7 +23,7 @@ Example:
 import json
 from types import SimpleNamespace
 
-MAX_TRIES = 3          # pick tries per unit, navigation tries per station
+MAX_TRIES = 3          # pick calls per unit that failed without an arm episode, navigation tries per station
 MAX_REFUSALS = 5       # refused commands before we give up (should never happen)
 
 
@@ -92,6 +94,8 @@ class Autopilot:
             item = args["item"]
             if ok:
                 self.pick_tries[item] = 0     # this unit is in the basket; the next unit starts again
+            elif result.get("not_picked"):
+                self.skipped.add(item)        # the tool already retried: reported, go on with the order
             else:
                 self.pick_tries[item] = self.pick_tries.get(item, 0) + 1
 
@@ -110,7 +114,7 @@ class Autopilot:
 
         for entry in t.missing():
             item = entry["item"]
-            if item in self.skipped:
+            if item in self.skipped or t.not_picked.get(item):
                 continue
             if self.pick_tries.get(item, 0) >= MAX_TRIES:
                 self.skipped.add(item)

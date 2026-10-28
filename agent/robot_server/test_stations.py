@@ -8,6 +8,7 @@ Run:
     python -m robot_server.test_stations
 """
 
+import store_agent.testing_store  # noqa: F401  (first: the tests use the test store in agent/testdata)
 import tempfile
 from pathlib import Path
 

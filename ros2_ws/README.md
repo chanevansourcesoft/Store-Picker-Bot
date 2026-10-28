@@ -101,6 +101,18 @@ SLAM, maps and Nav2: see [mecanum_nav/README.md](src/mecanum_nav/README.md). Wit
 `docker compose run --rm ros` in front of each command. After saving a new map, run
 `colcon build --symlink-install` once more: Nav2 only finds maps that were there at the last build.
 
+## 5. The robot API server
+
+The robot server (`agent/robot_server/jetson_server.py`, port 8000) sends Nav2 goals and asks the
+GR00T policy worker for picks. It runs in this image, with the whole repo mounted read-only:
+
+```bash
+docker compose up -d robot_server    # after Nav2 and the policy worker are running
+curl localhost:8000/health           # "arm_ready": true once the policy worker has loaded its model
+```
+
+See [agent/robot_server/README.md](../agent/robot_server/README.md) (stations, parking tolerance, the arm).
+
 ## Moving from the old Jetson
 
 The base used to run on an 8 GB Jetson. Some things it used are not in this repo yet: the IMU

@@ -5,6 +5,7 @@ Run:
     python -m quickpick.test_metrics
 """
 
+import store_agent.testing_store  # noqa: F401  (first: the tests use the test store in agent/testdata)
 from datetime import datetime
 
 from quickpick import metrics

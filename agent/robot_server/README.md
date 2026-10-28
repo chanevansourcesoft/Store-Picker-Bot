@@ -103,24 +103,44 @@ curl -X POST http://localhost:8000/navigate \
 Stations: `home`, `shelf_A`, `shelf_B`, `shelf_C`, `customer`
 
 ### POST /pick
-Pick ONE unit of an item and place it in the basket. This is one GR00T run: from the
-arm's rest pose, pick, place in the basket, back to the rest pose. Send only the item id
-and its shelf; the GR00T instruction is looked up in `policy/instructions.json` (an
-`instruction` field in the request is ignored). The robot must be at that shelf.
+Pick ONE unit of an item and place it in the basket. This is one GR00T run on the policy
+worker: from the arm's rest pose, pick, place in the basket, back to the rest pose. Send only
+the item id and its station (`shelf`); the GR00T instruction is looked up in
+`policy/instructions.json` (an `instruction` field in the request is ignored).
 ```bash
 curl -X POST http://localhost:8000/pick \
   -H "Content-Type: application/json" \
-  -d '{"item": "chips_packet", "shelf": "shelf_A"}'
+  -d '{"item": "ink_box", "shelf": "shelf_A"}'
 ```
+Before the arm moves, the server checks (and answers `"retryable": false` otherwise):
+- `item` is a product id (`ink_box`: lowercase, no spaces; no empty id, no free text) with an
+  instruction in `policy/instructions.json`;
+- the catalog (`store_agent/catalog.json`) puts the item at the station `shelf`, and the robot
+  is parked there (see Parking below);
+- the arm is ready (the policy worker runs, its model loaded), no pick runs, the robot is not stopped.
+
+Then the base is held still for `PICK_SETTLE_SEC` after arriving, and the episode runs.
+
 Success (the unit is in the basket, the arm is empty):
 ```json
-{"success": true, "message": "placed chips_packet in basket", "item": "chips_packet", "shelf": "shelf_A",
- "target": "basket", "instruction": "pick up the chips packet and place it in the basket", "barcode": null}
+{"success": true, "message": "placed ink_box in basket", "item": "ink_box", "shelf": "shelf_A",
+ "level": "upper_shelf", "target": "basket", "instruction": "pick up the ink box and place it in the basket",
+ "barcode": null, "pick_try": 1, "outcome": "placed"}
 ```
-Failure (nothing in the basket, the arm is empty, a retry is allowed):
-`{"success": false, "message": "grasp failed", "item": "chips_packet"}`.
+Failure: `{"success": false, "message": "no grasp seen: ink_box was not picked", "item": "ink_box",
+"pick_try": 1, "outcome": "retry", "retryable": true, "needs_operator": false}`.
+- `retryable: true`: an episode ran and failed (no grasp seen, time limit); nothing is in the
+  basket and the arm is empty. The agent retries (`PICK_RETRIES`, default 2), then reports the
+  item as not picked and goes on with the order.
+- `needs_operator: true`: the gripper still holds something. No retry: the server refuses every
+  `/pick` and `/navigate` until a person has checked the arm and pressed Resume (`/resume`).
+- `outcome`: `placed`, `retry`, `holding`, `stopped`, `refused`, `not_ready` (see `arm.classify`).
+
 Callers count a unit as packed only from `"target": "basket"` and `"item"`, never from the message text.
 `barcode` is always `null` for now (no scanning); it is there for a scanner later.
+
+Several units or products on the same rack: call `/pick` again without `/navigate`. While a
+pick runs, `/navigate` is refused.
 
 ### POST /place
 Return one unit of an item from the basket to its own shelf (the robot must be at that shelf).
@@ -128,19 +148,28 @@ Putting an item in the basket is part of `/pick`; there is no `/scan`.
 ```bash
 curl -X POST http://localhost:8000/place \
   -H "Content-Type: application/json" \
-  -d '{"target": "return", "item": "chips_packet"}'
+  -d '{"target": "return", "item": "ink_box"}'
 ```
 The mock robot does it. The Jetson answers `"success": false` ("not available on the robot yet")
 until there is a GR00T skill for it.
 
 ### POST /stop
-Emergency stop:
+Emergency stop: cancels the Nav2 goal, sends zero velocity, and halts the arm where it is
+(`stop_arm()` on the policy worker, also mid-episode). The arm then holds where it is; the next
+pick first returns to rest by itself. If a pick runs and the worker does not confirm the arm stop,
+the answer is `"success": false` with `ARM STOP NOT CONFIRMED` in the message.
 ```bash
 curl -X POST http://localhost:8000/stop
 ```
 
+### GET /health
+`{"status": "ok", "ros_available": ..., "ros_connected": ..., "arm_ready": false, "arm": {"state": "loading", ...}}`.
+`arm_ready` is true only when the policy worker answers and its model is loaded. The dashboard
+and QuickPick start no order until it is true.
+
 ### POST /resume
-Resume after emergency stop:
+Resume after emergency stop, or after "the gripper still holds something" (only once a person
+has checked the arm):
 ```bash
 curl -X POST http://localhost:8000/resume
 ```
@@ -190,20 +219,65 @@ stations:
 - Restart the server after you change the file.
 - Test the file: `python -m robot_server.test_stations` (from `agent/`).
 
-## Connecting the GR00T policy (the one stub left)
+## The arm: GR00T policy worker
 
-Navigation is real (Nav2). The arm is the one stub: `arm.py`.
+`arm.py` is the one place that moves the arm. It calls the **policy worker**
+(`policy/inference/pick_worker.py`, owned by the policy team; guide: `policy/docs/INFERENCE.md`,
+section 5) through `policy/inference/pick_client.py` (standard library only). The worker keeps
+GR00T loaded and answers on `PICK_WORKER_URL` (default `http://127.0.0.1:8790`); the arm never
+moves unless a pick (or home) is asked for.
 
-- `/pick` looks up the instruction for the item in `policy/instructions.json` (`instructions.py`),
-  then calls `arm.run_pick(item, instruction)` in a worker thread.
-- `run_pick` must run ONE GR00T episode (rest pose -> pick -> place in basket -> rest pose) and
-  return `(ok, message)`. Today it waits 1.5 s and returns success without moving anything.
-- Replace its body with the pick function from `policy/`, for example
-  `from policy.pick import pick_item; return pick_item(item, instruction)` (name to be agreed).
-- If it raises, `/pick` answers a failure and the server keeps running.
-- Only after this is real and tested, set `STOREPILOT_MANIPULATION_VERIFIED=1` on the dashboard.
+- `pick_client.py` is imported from `policy/inference` as it is (never copied):
+  `POLICY_INFERENCE_DIR` if set, else `<repo>/policy/inference`. If it is missing, every pick
+  fails with a clear message and `/health` says the arm is not ready.
+- The worker refuses unknown ids; the robot server never sends them (see `/pick` above).
+- Item -> station (rack) comes from the catalog (`catalog.py` reads `store_agent/catalog.json`).
+  `policy/instructions.json` `"shelf"` is the shelf LEVEL on the rack (`upper_shelf`,
+  `lower_shelf`) and is never compared with the station.
+- Things we would like changed in `policy/`: [POLICY_REQUESTS.md](POLICY_REQUESTS.md).
 
-Test without the arm: `python -m robot_server.test_jetson_pick` (from `agent/`).
+Start the worker first (Jetson): `policy/inference/jetson/pick_worker.sh --model <run>_060000`.
+
+Test without the arm:
+- `python -m robot_server.test_jetson_pick` (from `agent/`): fakes the client, and checks the
+  real `pick_client.py` against a fake worker.
+- Or run the worker in a dry run: `policy/inference/pc/pick_worker.sh --model <name> --dry_run --max_s 10`.
+  The model runs but the arm does not move, so every pick ends at the time limit with ok=false
+  (the agent retries, then reports the item as not picked).
+
+Keep `STOREPILOT_MANIPULATION_VERIFIED=0` on the dashboard until real picks are tested end to end.
+
+## Parking at a rack
+
+GR00T only works close to where it was recorded: the base within a few cm of the position in
+front of the rack, straight or turned slightly. For a rack goal (`shelf_*`) the server sets a
+tight goal tolerance on the Nav2 goal checker, checks the parked pose after Nav2 reports
+success, and sends the goal again if it is off (up to `PARK_ATTEMPTS`). If it is still off,
+`/navigate` fails and no pick is allowed there. Other goals get Nav2's own tolerance back.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PARK_XY_TOLERANCE` | `0.03` | metres from the station position |
+| `PARK_YAW_TOLERANCE` | `0.05` | radians (about 3 degrees) |
+| `PARK_ATTEMPTS` | `2` | Nav2 goals to park within the tolerance |
+| `PICK_SETTLE_SEC` | `1.0` | the base stays still this long after arriving before the arm moves |
+| `NAV2_CONTROLLER` | `/controller_server` | node whose goal checker gets the tolerance |
+| `NAV2_GOAL_CHECKER` | `general_goal_checker` | goal checker plugin name in the Nav2 params |
+
+The rack's station in `stations.yaml` must be the base position used when recording the
+GR00T episodes. `/status` shows the last measured parking error (`parked`).
+
+## Running in Docker (Jetson)
+
+The robot server runs in the ROS image (it needs rclpy and Nav2), with the whole repo mounted
+read-only, so it sees `agent/`, `policy/inference/pick_client.py` and `policy/instructions.json`.
+Host network: the policy worker (policy container, also host network) is `127.0.0.1:8790`.
+
+```bash
+cd ros2_ws
+docker compose build                 # once, and after the Dockerfile changes (adds fastapi, uvicorn)
+docker compose up -d robot_server    # http://<jetson>:8000
+```
 
 ## Troubleshooting
 
@@ -250,7 +324,11 @@ netstat -tlnp | grep 8000
 robot_server/
 ├── mock_robot.py      # Mock server for testing
 ├── jetson_server.py   # Real server for Jetson + Nav2
+├── arm.py             # The arm: policy worker client (policy/inference/pick_client.py)
+├── instructions.py    # GR00T instruction per item id (policy/instructions.json)
+├── catalog.py         # Station (rack) per item (store_agent/catalog.json)
 ├── stations.example.yaml  # Example station positions (copy to stations.yaml)
-├── test_stations.py   # Tests for loading stations.yaml
+├── POLICY_REQUESTS.md # What we would like changed in policy/
+├── test_*.py          # Tests (see agent/README.md)
 └── README.md          # This file
 ```

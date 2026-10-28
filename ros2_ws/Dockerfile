@@ -15,6 +15,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-humble-xacro \
     && rm -rf /var/lib/apt/lists/*
 RUN pip3 install --no-cache-dir transforms3d==0.4.1
+# The robot API server (agent/robot_server/jetson_server.py) runs in this image too: it needs rclpy and Nav2.
+# Same versions as storepilot/backend/requirements.txt.
+RUN pip3 install --no-cache-dir fastapi==0.142.2 uvicorn==0.54.0 pydantic==2.13.5
 
 # Drivers the launch files use that are not on apt: the A1 lidar driver and laser odometry.
 # Pinned commits, built once into /opt/ros_deps.

@@ -5,6 +5,7 @@ Run (from storepilot/backend):
     .venv/bin/python -m tests.test_backend
 """
 
+import store_agent.testing_store  # noqa: F401  (first: the tests use the test store in agent/testdata)
 import math
 import os
 import tempfile
@@ -253,6 +254,33 @@ def test_live_safety_switches():
     print("PASS: test_live_safety_switches")
 
 
+def test_missions_wait_for_the_arm():
+    """/health "arm_ready": false (GR00T policy worker not loaded) blocks a start; a gripper that
+    still holds something ("needs_operator") too, until Resume."""
+    patches = offline()
+    for p in patches:
+        p.start()
+    try:
+        store, robot, tel, m = services()
+        with tel.lock:
+            tel.health = {"status": "ok", "arm_ready": False, "arm": {"state": "loading"}}
+        ok, reason = m.readiness()
+        assert not ok and "arm is not ready" in reason, reason
+        with tel.lock:
+            tel.health = {"status": "ok", "arm_ready": True}
+        assert m.readiness() == (True, "")
+        held = tel.snapshot()
+        held["status"] = dict(held["status"], needs_operator="the gripper still holds something")
+        with patch.object(tel, "snapshot", return_value=held):
+            ok, reason = m.readiness()
+        assert not ok and "check the arm" in reason, reason
+        tel.shutdown()
+    finally:
+        for p in patches:
+            p.stop()
+    print("PASS: test_missions_wait_for_the_arm")
+
+
 def test_jetson_adapter_http():
     import socket
 
@@ -471,6 +499,7 @@ def run_all():
     test_stop_aborts_and_never_resumes_mission()
     test_restart_marks_running_interrupted()
     test_live_safety_switches()
+    test_missions_wait_for_the_arm()
     test_jetson_adapter_http()
     test_disconnect_is_reported()
     test_rosbridge_drive()

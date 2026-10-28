@@ -5,6 +5,7 @@ Run:
     python -m quickpick.test_store
 """
 
+import store_agent.testing_store  # noqa: F401  (first: the tests use the test store in agent/testdata)
 import os
 import tempfile
 from pathlib import Path

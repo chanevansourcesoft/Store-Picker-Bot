@@ -3,6 +3,7 @@
 #   docker compose run --rm ros colcon build --symlink-install   # once, and after adding files
 #   docker compose up -d lidar                                   # lidar driver, restarts by itself
 #   docker compose run --rm ros ros2 launch mecanum_nav base.launch.py
+#   docker compose up -d robot_server                            # robot API on :8000 (agent/robot_server)
 # See README.md.
 x-ros: &ros
   build: .
@@ -41,4 +42,22 @@ services:
   lidar:
     <<: *ros
     command: ros2 launch peripherals sllidar_a1.launch.py
+    restart: unless-stopped
+
+  # The robot API server (agent/robot_server/jetson_server.py, port 8000), Nemotron's side.
+  # The whole repo is mounted read-only so it sees agent/, policy/inference/pick_client.py and
+  # policy/instructions.json. Host network: the policy worker (policy container) is 127.0.0.1:8790.
+  robot_server:
+    <<: *ros
+    volumes:
+      - .:/home/ubuntu/ros2_ws
+      - ..:/home/ubuntu/Store-Picker-Bot:ro
+    device_cgroup_rules: []
+    environment:
+      HOME: /tmp
+      ROS_LOG_DIR: /tmp/ros_log
+      PYTHONDONTWRITEBYTECODE: "1"   # the repo is read-only here
+      PICK_WORKER_URL: ${PICK_WORKER_URL:-http://127.0.0.1:8790}
+    working_dir: /home/ubuntu/Store-Picker-Bot/agent
+    command: python3 -m uvicorn robot_server.jetson_server:app --host 0.0.0.0 --port 8000
     restart: unless-stopped
