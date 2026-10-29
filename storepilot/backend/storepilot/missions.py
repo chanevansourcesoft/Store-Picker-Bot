@@ -188,7 +188,7 @@ class MissionManager:
         if problems:
             self.event("system", "error", "Mission plan rejected: " + " ".join(problems), mission_id)
         else:
-            path = " → ".join(config.station_label(s) for s in route + ["customer", "home"])
+            path = " → ".join(config.station_label(s) for s in route + ["customer"])   # home = reception
             self.event("system", "success", f"Mission plan validated: {path}. Waiting for operator confirmation.",
                        mission_id)
         return self.store.get_mission(mission_id)
@@ -317,7 +317,7 @@ class MissionManager:
                 self.last_finished = (mission_id, status, time.monotonic())
             total = mission["total"]
             text = {
-                "completed": f"Mission completed: {packed}/{total} items delivered to the packing area",
+                "completed": f"Mission completed: {packed}/{total} items delivered to the reception",
                 "completed_with_issues": f"Mission finished with issues: {packed}/{total} items delivered",
                 "failed": "Mission failed",
                 "aborted": f"Mission stopped by operator after {packed}/{total} items",
@@ -418,9 +418,9 @@ class MissionManager:
         if tool == "navigate_to":
             station = args["station"]
             if station == "customer":
-                text = "deliver the basket to the packing area"
+                text = "deliver the basket to the reception"
             elif station == "home":
-                text = "return to the home position"
+                text = "park at the reception"
             else:
                 text = f"drive to {config.station_label(station)}"
             self.event("ai", "info", f"{who}: {text}", mission_id)

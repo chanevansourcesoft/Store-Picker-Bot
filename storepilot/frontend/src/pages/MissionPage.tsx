@@ -71,7 +71,7 @@ export function MissionPage({ snap, toast }: { snap: Snapshot; toast: Toast }) {
               <div className="flex shrink-0 flex-wrap gap-x-4 gap-y-1 px-2 pt-2 text-[12px] text-muted">
                 <span className="flex items-center gap-1.5"><span className="h-3 w-2 rounded-sm border-2 border-[#3a4757]" />Table</span>
                 <span className="flex items-center gap-1.5"><span className="h-3 w-2 rounded-sm border-2 border-brand" />Table in this order</span>
-                <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm border-2 border-dashed border-ok" />Packing area</span>
+                <span className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm border-2 border-dashed border-ok" />Reception</span>
                 <span className="flex items-center gap-1.5"><span className="h-0.5 w-5 bg-info" />Current leg</span>
                 <span className="flex items-center gap-1.5"><span className="h-0 w-5 border-t-2 border-dashed border-info/50" />Planned route</span>
               </div>

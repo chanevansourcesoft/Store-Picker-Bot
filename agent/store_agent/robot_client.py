@@ -4,7 +4,7 @@ Only ROBOT_URL in .env changes when we switch to the real robot.
 
 Demo mode: if DEMO_MODE=1, or ROBOT_URL does not answer at startup, we use
 the mock robot inside this Python process (no robot server needed).
-Good for Streamlit Community Cloud. The choice is made once per process.
+The choice is made once per process.
 
 Contract v2: multiple shelves, basket, emergency stop, pose, battery.
 /pick runs one GR00T episode that picks the item AND places it in the basket.

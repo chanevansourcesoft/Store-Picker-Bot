@@ -85,12 +85,14 @@ STALE_AFTER_SEC = 3.0        # telemetry older than this is "stale"
 DISCONNECTED_AFTER_SEC = 6.0  # no successful poll for this long -> "disconnected"
 
 # Display names for stations (the robot uses the ids on the left)
+# The store: one table (two shelf levels) and the reception. The robot hands the basket over at
+# the reception and parks there, so "home" and "customer" are the same place.
 STATION_LABELS = {
-    "home": "Home",
+    "home": "Reception",
     "shelf_A": "Table",       # one table with two shelf levels (upper_shelf, lower_shelf)
     "shelf_B": "Shelf B",
     "shelf_C": "Shelf C",
-    "customer": "Packing area",
+    "customer": "Reception",
 }
 
 MAX_UNITS_PER_MISSION = 10   # sanity limit for one order

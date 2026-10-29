@@ -92,7 +92,7 @@ def test_sim_moves_and_stops():
     assert robot.return_item("chips_packet")["success"]
 
     slow = SimRobot(INVENTORY, time_scale=1.0, nav_fail=0)
-    t = threading.Thread(target=lambda: setattr(slow, "result", slow.navigate("customer")))
+    t = threading.Thread(target=lambda: setattr(slow, "result", slow.navigate("shelf_A")))   # home = reception
     t.start()
     time.sleep(0.3)
     slow.stop()

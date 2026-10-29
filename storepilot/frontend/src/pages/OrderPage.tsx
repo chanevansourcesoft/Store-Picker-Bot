@@ -7,7 +7,7 @@ import type { Tab } from "../components/Shell";
 import { label } from "./OpsPage";
 
 const EXAMPLES = [
-  "2 biscuits and 1 Fevicol to the packing area",
+  "2 biscuits and 1 Fevicol to the reception",
   "An ink box and a screen cleaning gel please",
   "1 Frooti, 2 biscuits and a pizza",
 ];
@@ -16,7 +16,7 @@ function ConfirmDialog({ mission, snap, onCancel, onStart, busy }: {
   mission: Mission; snap: Snapshot; onCancel: () => void; onStart: () => void; busy: boolean;
 }) {
   const [clear, setClear] = useState(false);
-  const stops = [...mission.route, "customer", "home"].map((s) => label(snap, s)).join(" → ");
+  const stops = [...mission.route, "customer"].map((s) => label(snap, s)).join(" → ");
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-5" role="dialog" aria-modal="true">
       <div className="w-full max-w-[640px] rounded-2xl border-2 border-warn/60 bg-panel p-6 shadow-2xl">
@@ -120,7 +120,7 @@ function Review({ m, snap, toast, goto }: {
 
       <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[14px]">
         <dt className="text-dim">Route</dt>
-        <dd className="font-medium">{[...m.route, "customer", "home"].map((s) => label(snap, s)).join(" → ")}</dd>
+        <dd className="font-medium">{[...m.route, "customer"].map((s) => label(snap, s)).join(" → ")}</dd>
         <dt className="text-dim">Parsed by</dt>
         <dd className="flex items-center gap-1.5 text-muted"><Brain size={14} aria-hidden />{m.parser ? niceModels(m.parser) : "—"}</dd>
         <dt className="text-dim">Estimate</dt>
@@ -168,7 +168,7 @@ export function OrderPage({ snap, toast, goto }: {
     const parts = catalog.filter((c) => qty[c.id]).map((c) => `${qty[c.id]} ${c.name}`);
     if (!parts.length) return "";
     const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];
-    return `Pick ${list} and bring them to the packing area`;
+    return `Pick ${list} and bring them to the reception`;
   }, [qty, catalog]);
 
   useEffect(() => { if (built) setText(built); }, [built]);
@@ -219,7 +219,7 @@ export function OrderPage({ snap, toast, goto }: {
       <div className="flex flex-col gap-3 lg:order-1 lg:gap-4">
       <Panel title="New order">
         <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} maxLength={500}
-          placeholder="e.g. Pick 2 biscuits and 1 Fevicol and bring them to the packing area"
+          placeholder="e.g. Pick 2 biscuits and 1 Fevicol and bring them to the reception"
           className="w-full resize-none rounded-lg border border-line-strong bg-raised px-3.5 py-3 text-[17px] leading-snug text-ink placeholder:text-dim focus:border-info focus:outline-none" />
         <div className="mt-2 flex flex-wrap gap-2">
           {EXAMPLES.map((ex) => (

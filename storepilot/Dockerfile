@@ -20,6 +20,8 @@ RUN pip install --no-cache-dir -r storepilot/backend/requirements.txt -e agent
 COPY --from=web /web/dist storepilot/frontend/dist
 # The products GR00T picks (policy/instructions.json is not in Git; the demo uses this copy)
 COPY storepilot/deploy/demo_instructions.json policy/instructions.json
+# Missions, stock and videos are written here. Hosts like Hugging Face run the container as user 1000.
+RUN mkdir -p /app/storepilot/data /app/data && chmod -R a+rwX /app/storepilot/data /app/data
 ENV STOREPILOT_MODE=mock STOREPILOT_HOST=0.0.0.0 PYTHONUNBUFFERED=1
 EXPOSE 8080
 WORKDIR /app/storepilot/backend

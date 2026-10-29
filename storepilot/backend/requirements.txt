@@ -1,4 +1,4 @@
-# StorePilot AI dashboard backend (Raspberry Pi). Versions match the tested QuickPick venv.
+# StorePilot AI dashboard backend.
 fastapi==0.142.2
 uvicorn==0.54.0
 websockets==16.1.1

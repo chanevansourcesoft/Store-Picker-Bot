@@ -18,11 +18,13 @@ export function routeProgress(snap: Snapshot) {
   const m = snap.mission;
   const active = m && (m.status === "running" || m.status === "awaiting_confirmation");
   if (!m || !active) return { stops: [] as string[], current: -1 };
-  const stops = [...m.route, "customer", "home"];
+  // the robot parks at the reception (home = customer), so the route ends there
+  const stops = [...m.route, "customer"];
+  const atReception = (s: string | null) => (s === "home" ? "customer" : s);
   let current = 0;
   if (m.status === "running") {
-    const target = snap.robot.target;
-    const here = snap.robot.station;
+    const target = atReception(snap.robot.target);
+    const here = atReception(snap.robot.station);
     const doneShelves = new Set<string>();
     // a shelf is done once the robot left it for a later stop
     if (target && stops.includes(target)) current = stops.indexOf(target);
@@ -37,8 +39,10 @@ export function StoreMap({ snap, compact = false, fill = false }: { snap: Snapsh
   // Only the tables that hold products (or are in the route): the store has one table with two shelves
   const inUse = new Set(Object.keys(snap.store ?? {}));
   const routeStops = routeProgress(snap).stops;
-  const stations = snap.map.stations && Object.fromEntries(Object.entries(snap.map.stations).filter(([name]) =>
-    !name.startsWith("shelf") || inUse.size === 0 || inUse.has(name) || routeStops.includes(name)));
+  // Home is the reception (the robot parks there), so only the reception and the table are drawn
+  const allStations = snap.map.stations;
+  const stations = allStations && Object.fromEntries(Object.entries(allStations).filter(([name]) => name !== "home" &&
+    (!name.startsWith("shelf") || inUse.size === 0 || inUse.has(name) || routeStops.includes(name))));
   const labels = snap.map.labels;
   const pose = snap.robot.pose;
   if (!stations || Object.keys(stations).length === 0) {
@@ -65,8 +69,8 @@ export function StoreMap({ snap, compact = false, fill = false }: { snap: Snapsh
 
   const { stops, current } = routeProgress(snap);
   const running = snap.mission?.status === "running";
-  const target = snap.robot.target;
-  const at = (s: string) => stations[s];
+  const target = snap.robot.target === "home" ? "customer" : snap.robot.target;
+  const at = (s: string) => allStations?.[s];   // positions, also of the (hidden) home
   const done = running && stops.length ? ["home", ...stops.slice(0, Math.max(current, 0))].filter(at) : [];
   const upcoming = stops.slice(Math.max(current, 0)).filter(at);
   const pathOf = (names: string[], start?: Pose | null) =>

@@ -15,9 +15,10 @@ from robot_server import instructions
 
 from .base import VALID_STATIONS, RobotAdapter
 
-# Simulated store layout (meters). Not the real store.
+# Simulated store layout (meters): the reception (where the robot hands over the basket and parks,
+# so home = customer) and one table. Shelves B and C exist for the tests only; the map hides them.
 SIM_STATIONS = {
-    "home":     {"x": 0.6, "y": 0.6, "theta": 0.0},
+    "home":     {"x": 0.7, "y": 3.8, "theta": math.pi},
     "shelf_A":  {"x": 3.4, "y": 1.0, "theta": 0.0},
     "shelf_B":  {"x": 3.4, "y": 2.3, "theta": 0.0},
     "shelf_C":  {"x": 3.4, "y": 3.6, "theta": 0.0},

@@ -50,7 +50,7 @@ policy/      LeRobot project: GR00T data collection and pick service (owns arm a
 ros2_ws/     ROS 2 workspace: bringup, base driver, docking, tray scale, task executor
 agent/       Shared Nemotron agent (store_agent) and the robot API server (robot_server, runs on the Jetson)
 storepilot/  The apps: StorePilot AI touchscreen dashboard (backend/, frontend/) and the
-             QuickPick customer kiosk + owner dashboard (quickpick/, Streamlit)
+             with the shared Nemotron agent in agent/
 docs/        Architecture notes and tool feedback
 ```
 
