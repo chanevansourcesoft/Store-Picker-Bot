@@ -73,8 +73,8 @@ steps; a step unlocks when the one before it is done.
    Yellow warnings point at likely problems (for example "does not end in the usual rest pose").
    When every episode has a decision, press **Next round**.
 5. Repeat **Record → Review** until the plan is complete. At the end, if some episodes were flagged,
-   press **Remove flagged episodes** on the Review page. The dataset is then renumbered, and the old
-   copy is kept next to it as `<dataset>_old` (the admin deletes it after checking).
+   press **Remove flagged episodes** on the Review page. They are deleted for good (no backup is kept),
+   and the dataset is renumbered.
 
 6. **Train:** opens once the campaign has episodes.
    - **Send dataset** copies the dataset to the training PC. Every episode must be reviewed and the

@@ -257,6 +257,9 @@ lists them all. Useful ones:
   The rounds cover the base position; the episodes cover the product position.
 - If other products sit on the same shelf in the store, keep them there while recording: GR00T must
   learn that the instruction decides which product to take.
+- Record some episodes with another product already in the basket, placed differently each time. A
+  model that only saw an empty basket can stop and not move when a product is in it (seen with
+  dataset_v3: it treated a product in the basket as "task done").
 - Move smoothly and at a similar speed every time, with the same grasp for the same product. If several
   people record, practise together first.
 - A calm re-grasp after a slip is a useful demo; keep it. Cancel (X) a chaotic one, a dropped product,
@@ -314,8 +317,7 @@ python data_collection/remove_bad_episodes.py dataset_v1_12102026_153045
 ```
 
 It lists the marked episodes and asks before removing them. The remaining episodes are renumbered from 0,
-and the episode log is updated to match. The original is kept as `dataset_v1_12102026_153045_old/` next
-to it: check the new dataset, then delete the `_old` folder.
+and the episode log is updated to match. The removed episodes are deleted for good: no backup is kept.
 
 ## 8. Move the dataset to the training machine
 

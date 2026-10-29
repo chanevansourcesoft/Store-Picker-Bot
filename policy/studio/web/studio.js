@@ -609,7 +609,7 @@ function renderPlanComplete() {
   const fin = S.finish;
   $("planCompleteText").innerHTML = c.to_review ? `Review the last ${c.to_review} episode(s) first.`
     : c.flagged ? `${c.approved} episodes approved. <b>${c.flagged} flagged</b> episode(s) are still in the dataset: remove them ` +
-      `before training. The dataset is then renumbered, and the old copy is kept next to it as <code>${esc(c.folder)}_old</code> (the admin deletes it).`
+      `before training. They are deleted for good (no backup is kept), and the dataset is renumbered.`
     : `All ${c.approved} episodes are approved. The dataset is ready: <code>policy/data_collection/dataset/${esc(c.folder)}</code>.`;
   $("removeFlaggedBtn").hidden = !(c.flagged && !c.to_review) || finishing();
   $("finishStatus").hidden = !fin;
@@ -622,7 +622,7 @@ function renderPlanComplete() {
   if (fin) $("finishLog").textContent = fin.log.join("\n");
 }
 $("removeFlaggedBtn").onclick = async () => {
-  if (!confirm(`Remove the ${camp().flagged} flagged episode(s) from the dataset? The episodes are renumbered.`)) return;
+  if (!confirm(`Remove the ${camp().flagged} flagged episode(s) from the dataset? They are deleted for good (no backup) and the episodes are renumbered.`)) return;
   try { await api("/api/remove_flagged", {}); S = await api("/api/studio"); prevFinishing = true; renderPlanComplete(); } catch (e) { toast(e.message, 6000); }
 };
 

@@ -2,8 +2,8 @@
 Remove the episodes marked bad (key B in record.py) from a dataset.
 
 LeRobot's delete_episodes writes a new copy without them; the episodes after a removed one are
-renumbered. The original folder is kept next to it as <folder>_old until you delete it, and the
-plan and episode log are carried over with the new numbers.
+renumbered. The new copy replaces the original folder (no backup is kept), and the plan and
+episode log are carried over with the new numbers.
 
 Usage (from policy/):
     docker compose run --rm policy python3 data_collection/remove_bad_episodes.py dataset_v1_12102026_153045  # Jetson
@@ -41,11 +41,11 @@ def main():
     bad = sorted(e["episode_index"] for e in log["episodes"] if e["bad"])
     if not bad:
         sys.exit("No episodes are marked bad. Nothing to do.")
-    backup = root.with_name(root.name + "_old")
-    if backup.exists():
-        sys.exit(f"{backup.name} already exists (backup of an earlier removal). Check and delete it first.")
+    old_root = root.with_name(root.name + "_old")
+    if old_root.exists():
+        sys.exit(f"{old_root.name} already exists (left over from an earlier removal). Check and delete it first.")
 
-    print(f"{root.name}: removing {len(bad)} episode(s) marked bad: {bad}")
+    print(f"{root.name}: removing {len(bad)} episode(s) marked bad for good (no backup is kept): {bad}")
     if not args.yes and input("Continue? [y/N] ").strip().lower() not in ("y", "yes"):
         sys.exit("Nothing changed.")
 
@@ -68,10 +68,11 @@ def main():
     if (root / "meta" / PLAN_FILE).exists():
         shutil.copy2(root / "meta" / PLAN_FILE, new_root / "meta" / PLAN_FILE)
 
-    root.rename(backup)
+    # Swap the folders first, so the dataset is never missing; then delete the original.
+    root.rename(old_root)
     new_root.rename(root)
-    print(f"Done: {root.name} now has {len(kept)} episodes. The original is in {backup.name}: "
-          "check the new dataset, then delete the backup.")
+    shutil.rmtree(old_root)
+    print(f"Done: {root.name} now has {len(kept)} episodes.")
 
 
 if __name__ == "__main__":
