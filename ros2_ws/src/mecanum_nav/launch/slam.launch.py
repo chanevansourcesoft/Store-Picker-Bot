@@ -39,9 +39,14 @@ def launch_setup(context):
 
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
     enable_save = LaunchConfiguration('enable_save', default='true').perform(context)
+    # Off while mapping: the map is built by teleop, and axis_lock turns teleop's diagonal keys
+    # (vx and vy together) into a straight move along whichever is larger. It exists for Nav2's
+    # blended output, which navigation.launch.py still enables.
+    axis_lock = LaunchConfiguration('axis_lock', default='false')
 
     use_sim_time_arg = DeclareLaunchArgument('use_sim_time', default_value=use_sim_time)
     enable_save_arg = DeclareLaunchArgument('enable_save', default_value=enable_save)
+    axis_lock_arg = DeclareLaunchArgument('axis_lock', default_value='false')
 
     if compiled == 'True':
         mecanum_path = get_package_share_directory('mecanum_nav')
@@ -50,7 +55,7 @@ def launch_setup(context):
 
     base_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(mecanum_path, 'launch/base.launch.py')),
-        launch_arguments={'use_sim_time': use_sim_time}.items(),
+        launch_arguments={'use_sim_time': use_sim_time, 'axis_lock': axis_lock}.items(),
     )
 
     slam_params = RewrittenYaml(
@@ -78,6 +83,7 @@ def launch_setup(context):
 
     return [use_sim_time_arg,
             enable_save_arg,
+            axis_lock_arg,
             base_launch,
             # The base needs to be publishing TF and scans before slam_toolbox starts looking
             # for them, otherwise it spends its first seconds complaining.

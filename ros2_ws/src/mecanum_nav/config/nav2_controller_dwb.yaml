@@ -62,7 +62,13 @@ controller_server:
       # Must be at least sqrt(max_vel_x^2 + max_vel_y^2) = 0.5, or diagonal motion gets clipped
       # into an arc: the planner asks for forward+sideways together and the cap trims it unevenly.
       max_speed_xy: 0.55
-      min_speed_theta: 0.0
+      # 2026-10-28: 0.0 -> 0.35. Turning on the spot has a MEASURED deadband (since the speed
+      # calibration in mecanum_base.yaml): commanded 0.20 rad/s -> 0.002 real, 0.25 -> 0.04,
+      # 0.30 -> 0.21, 0.40 -> 0.36. DWB near obstacles and RotateToGoal picked gentle turns
+      # inside that band, the robot stood still, and the progress checker aborted ("Failed to
+      # make progress"). Straight driving moves down to 0.02 m/s, so min_speed_xy stays 0.
+      # OLD: min_speed_theta: 0.0
+      min_speed_theta: 0.35
 
       acc_lim_x: 2.5
       acc_lim_y: 2.5            # MECANUM: was 0.0
@@ -91,7 +97,11 @@ controller_server:
       critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign",
                 "PathDist", "GoalDist"]
 
-      BaseObstacle.scale: 0.02
+      # 2026-10-27: 0.02 -> 0.3. At 0.02 the worst footprint cost (~250) scored ~5, while
+      # straying one 5 cm cell from the path scored 32 (PathDist), so DWB would rather brush an
+      # obstacle than leave the path. At 0.3 a cell's worth of clearance is worth taking.
+      # OLD: BaseObstacle.scale: 0.02
+      BaseObstacle.scale: 0.3
 
       # PathAlign and GoalAlign reward pointing the robot's NOSE along the path. On a
       # differential or Ackermann base that is essential, because the nose direction is the only

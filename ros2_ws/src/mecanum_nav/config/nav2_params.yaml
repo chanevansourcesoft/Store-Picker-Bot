@@ -243,7 +243,31 @@ local_costmap:
       # +/-0.1115 in y (0.0965 joint offset + 0.015 half wheel width). So it is symmetric and
       # much smaller. Keeping the old polygon would reserve 13 cm of phantom clearance ahead
       # and claim 5 cm of real wheel as free space on each side.
-      footprint: "[[0.135, 0.120], [0.135, -0.120], [-0.135, -0.120], [-0.135, 0.120]]"
+      # 2026-10-26: rear edge -0.135 -> -0.245 for the bucket mounted at the back. MEASURED: it
+      # sticks out 11 cm behind the rear tyres (tyre edge -0.1275 = 0.0875 axle + 0.040 radius),
+      # plus the same ~7 mm margin the wheels already had. Front (lidar side) and width
+      # unchanged: the arm in its parked pose and the camera mast stay inside them.
+      # The arm and mast stand ABOVE the 2D lidar's scan plane, so obstacles only at their
+      # height (a table top, a shelf edge) are not seen by the costmaps at all.
+      # 2026-10-28: rear edge -0.245 -> -0.315 for the new, larger basket. MEASURED: it sticks
+      # out 18 cm behind the rear tyres (-0.1275 - 0.18 = -0.3075, plus the same ~7 mm margin).
+      # Width unchanged: the basket and the camera mast stay within the tyres.
+      # Note the lidar is BLIND behind (the arm stands closer to it than its 0.15 m minimum and
+      # blocks ~90 deg, +146..-120 deg), so behind the robot the costmap only knows what was
+      # seen earlier. This outline is what keeps reverses and turns clear of that memory.
+      # 2026-10-28, later: a bulge on the RIGHT for the camera, which sticks out 5 cm past the
+      # right tyres around the middle of the robot and kept hitting things. Tyre edge -0.1115,
+      # -0.05 camera, small margin -> y -0.17, from x +0.08 to -0.15 (generous, as "middle"
+      # was not measured exactly). The rest of the outline is unchanged.
+      # OLD: footprint: "[[0.135, 0.120], [0.135, -0.120], [-0.135, -0.120], [-0.135, 0.120]]"
+      # OLD: footprint: "[[0.135, 0.120], [0.135, -0.120], [-0.245, -0.120], [-0.245, 0.120]]"
+      # OLD: footprint: "[[0.135, 0.120], [0.135, -0.120], [-0.315, -0.120], [-0.315, 0.120]]"
+      # 2026-10-28: front +0.135 -> +0.170. The A1 sees nothing closer than 0.15 m and sits at
+      # x +0.08, so the last ~10 cm ahead of the bumper is blind; the collision monitor only
+      # uses the LIVE scan, so an obstacle that reached that zone vanished and the robot drove
+      # on into it. 3.5 cm of extra outline makes it stop before the obstacle gets there.
+      # OLD: footprint (front at +0.135, same otherwise)
+      footprint: "[[0.170, 0.120], [0.170, -0.120], [0.080, -0.120], [0.080, -0.170], [-0.150, -0.170], [-0.150, -0.120], [-0.315, -0.120], [-0.315, 0.120]]"
       plugins: ["voxel_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
@@ -255,8 +279,18 @@ local_costmap:
         cost_scaling_factor: 5.0
         # MECANUM: 0.25 -> 0.20. Scaled with the robot: circumscribed radius is now 0.18 m
         # against the Ackermann 0.33 m.
+        # 2026-10-26: 0.20 -> 0.30, scaled with the robot again. The footprint grew to -0.245
+        # at the back for the bucket, so the circumscribed radius is now
+        # sqrt(0.245^2 + 0.12^2) = 0.27 m. At 0.20 the inflation was smaller than the robot:
+        # DWB had no cost pushing it away until it was almost touching, and then the longer
+        # outline could neither back up nor spin out (observed: wedged 1 cm from an obstacle,
+        # backup and spin both "Collision Ahead").
+        # 2026-10-28: 0.30 -> 0.35 with the new basket: circumscribed radius is now
+        # sqrt(0.315^2 + 0.12^2) = 0.34 m, and the inflation must not be smaller than the robot.
         # OLD: inflation_radius: 0.25
-        inflation_radius: 0.20
+        # OLD: inflation_radius: 0.20
+        # OLD: inflation_radius: 0.30
+        inflation_radius: 0.35
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"
         enabled: True
@@ -359,7 +393,45 @@ global_costmap:
       # +/-0.1115 in y (0.0965 joint offset + 0.015 half wheel width). So it is symmetric and
       # much smaller. Keeping the old polygon would reserve 13 cm of phantom clearance ahead
       # and claim 5 cm of real wheel as free space on each side.
-      footprint: "[[0.135, 0.120], [0.135, -0.120], [-0.135, -0.120], [-0.135, 0.120]]"
+      # 2026-10-26: rear edge -0.135 -> -0.245 for the bucket mounted at the back. MEASURED: it
+      # sticks out 11 cm behind the rear tyres (tyre edge -0.1275 = 0.0875 axle + 0.040 radius),
+      # plus the same ~7 mm margin the wheels already had. Front (lidar side) and width
+      # unchanged: the arm in its parked pose and the camera mast stay inside them.
+      # The arm and mast stand ABOVE the 2D lidar's scan plane, so obstacles only at their
+      # height (a table top, a shelf edge) are not seen by the costmaps at all.
+      # 2026-10-28: rear edge -0.245 -> -0.315 for the new, larger basket. MEASURED: it sticks
+      # out 18 cm behind the rear tyres (-0.1275 - 0.18 = -0.3075, plus the same ~7 mm margin).
+      # Width unchanged: the basket and the camera mast stay within the tyres.
+      # Note the lidar is BLIND behind (the arm stands closer to it than its 0.15 m minimum and
+      # blocks ~90 deg, +146..-120 deg), so behind the robot the costmap only knows what was
+      # seen earlier. This outline is what keeps reverses and turns clear of that memory.
+      # 2026-10-28, later: a bulge on the RIGHT for the camera, which sticks out 5 cm past the
+      # right tyres around the middle of the robot and kept hitting things. Tyre edge -0.1115,
+      # -0.05 camera, small margin -> y -0.17, from x +0.08 to -0.15 (generous, as "middle"
+      # was not measured exactly). The rest of the outline is unchanged.
+      # OLD: footprint: "[[0.135, 0.120], [0.135, -0.120], [-0.135, -0.120], [-0.135, 0.120]]"
+      # OLD: footprint: "[[0.135, 0.120], [0.135, -0.120], [-0.245, -0.120], [-0.245, 0.120]]"
+      # OLD: footprint: "[[0.135, 0.120], [0.135, -0.120], [-0.315, -0.120], [-0.315, 0.120]]"
+      # 2026-10-28, later: the GLOBAL costmap plans with a CIRCLE, not the polygon.
+      # SmacPlanner2D only checks the cost under the robot's CENTRE, and a polygon's inscribed
+      # radius is its narrowest half-width (0.12 m here). So it planned through spots a point
+      # 0.12 m wide fits but this 0.45 m robot with basket and camera cannot manoeuvre in --
+      # next to desks, into corners -- and DWB (which checks the real polygon) then could not
+      # follow, recoveries could not turn the long outline, and the robot stopped ("Failed to
+      # make progress", "Starting point in lethal space", backup/spin "Collision Ahead").
+      # 0.28 m keeps plans where the robot really fits (gaps under ~0.56 m are refused);
+      # turning on the spot needs the full circumscribed 0.34 m. The LOCAL costmap keeps the
+      # exact polygon for DWB, the collision monitor and the recoveries.
+      # REVERTED the same day: with a 0.28 m circle every pose within 0.28 m of furniture was
+      # "Starting point in lethal space" for BOTH planners (GridBased and Escape), so the robot
+      # could not plan its way out of anywhere near a desk -- 22 failures in two minutes.
+      # OLD: robot_radius: 0.28
+      # 2026-10-28: front +0.135 -> +0.170. The A1 sees nothing closer than 0.15 m and sits at
+      # x +0.08, so the last ~10 cm ahead of the bumper is blind; the collision monitor only
+      # uses the LIVE scan, so an obstacle that reached that zone vanished and the robot drove
+      # on into it. 3.5 cm of extra outline makes it stop before the obstacle gets there.
+      # OLD: footprint (front at +0.135, same otherwise)
+      footprint: "[[0.170, 0.120], [0.170, -0.120], [0.080, -0.120], [0.080, -0.170], [-0.150, -0.170], [-0.150, -0.120], [-0.315, -0.120], [-0.315, 0.120]]"
       resolution: 0.05
       track_unknown_space: true
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
@@ -532,7 +604,11 @@ planner_server:
       # line and an off-centre line are the SAME length, so centring costs no path length and
       # needs only a light touch to win; avoiding a corridor altogether costs 10-25 m, which a
       # small penalty will never buy. 0.5 allowed about an 11% detour in a 1.0 m corridor.
-      cost_penalty: 0.5
+      # 2026-10-27: 0.5 -> 2.0 (Nav2's default). At 0.5 the inflation cost was nearly free, so
+      # plans ran along furniture edges and DWB, which follows the path closely, brushed past
+      # them. 2.0 makes the plan keep clear of obstacles where there is room to.
+      # OLD: cost_penalty: 0.5
+      cost_penalty: 2.0
       use_final_approach_orientation: false
       smooth_path: True
       smoother:
@@ -605,7 +681,12 @@ behavior_server:
     # smoother and the collision monitor, so this parameter is the ONLY thing that can block
     # them. Nothing downstream will stop an escape once it starts.
     # OLD: simulate_ahead_time: 2.0, then 1.0
-    simulate_ahead_time: 0.25
+    # 2026-10-28: 0.25 -> 0.8. With the long basket and the right-side camera, a 0.25 s check
+    # (~2 cm of backup, ~6 deg of spin) let recoveries sweep the outline into furniture, and
+    # backing up is blind (the arm blocks the lidar's rear view). 0.8 s refuses an escape that
+    # would hit something soon; the RoundRobin then tries the next recovery.
+    # OLD: simulate_ahead_time: 0.25
+    simulate_ahead_time: 0.8
     # 2026-10-12: 1.0 -> 0.7. The behaviour server publishes to /cmd_vel DIRECTLY, bypassing
     # the velocity smoother and the collision monitor, so recovery speeds are not governed by
     # anything above -- a Spin at 1.0 rad/s stayed fast even after everything else was slowed.

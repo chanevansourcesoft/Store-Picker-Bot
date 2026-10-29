@@ -129,7 +129,12 @@ def main():
     vx = vy = wz = 0.0
     # A key counts as held while presses keep arriving within this long. Terminals send no
     # key-release event, so the auto-repeat rate is the only signal available.
-    HOLD = 0.35
+    # 0.6, not 0.35: Windows waits ~0.5 s before auto-repeat starts, and SSH over Wi-Fi adds
+    # jitter, so 0.35 stopped the robot between the first press and the first repeat -- a
+    # judder at the start of every key. mecanum_base's own 0.5 s timeout still applies if
+    # this process dies.
+    # OLD: HOLD = 0.35
+    HOLD = 0.6
     last_press = 0.0
 
     try:

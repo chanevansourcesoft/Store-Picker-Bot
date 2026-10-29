@@ -2851,10 +2851,16 @@
   <!-- Frame only, on the deck at the chassis centre, axes aligned with base_link. -->
   <link name="imu_link"/>
 
+  <!-- 2026-10-22: roll pi, because the controller board's IMU is mounted UPSIDE DOWN. MEASURED at rest:
+       linear_acceleration.z = -9.19 m/s^2 (REP-103 expects +9.8 with z up), and a commanded
+       anticlockwise turn that the robot physically made clockwise read POSITIVE on the gyro.
+       With rpy 0 the EKF fused a yaw rate of the wrong sign against rf2o's correct one.
+       robot_localization rotates IMU data through this transform, so roll pi flips z back.
+       OLD: rpy="0 0 0" -->
   <joint name="imu_joint" type="fixed">
     <parent link="base_link"/>
     <child link="imu_link"/>
-    <origin xyz="0 0 0.0265" rpy="0 0 0"/>
+    <origin xyz="0 0 0.0265" rpy="3.14159265358979 0 0"/>
   </joint>
 
   <!-- ===================== Arm mount ===================== -->

@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-humble-navigation2 ros-humble-nav2-common \
         ros-humble-slam-toolbox ros-humble-robot-localization ros-humble-laser-filters \
         ros-humble-imu-tools ros-humble-robot-state-publisher ros-humble-joint-state-publisher \
-        ros-humble-xacro \
+        ros-humble-xacro ros-humble-rviz2 ros-humble-nav2-rviz-plugins \
     && rm -rf /var/lib/apt/lists/*
 RUN pip3 install --no-cache-dir transforms3d==0.4.1
 

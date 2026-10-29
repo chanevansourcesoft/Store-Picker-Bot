@@ -100,12 +100,21 @@
       # with the robot standing still, rf2o's yaw moved +0.72 deg while the IMU's moved
       # -2.53 deg. With nothing absolute anchoring yaw, the filter had only rate measurements
       # to integrate and inherited the gyro's bias forever.
-      # Position (x, y) stays OFF on purpose: those really do drift without bound and are the
-      # odom frame's job to accumulate, with AMCL correcting them in the map frame.
       # OLD: yaw false
-      odom0_config: [false, false, false,
+      #
+      # 2026-10-22 NEW JETSON: position (x, y) ON, velocities vx and vy OFF.
+      # rf2o's TWIST is not in base_footprint: linear.x is the forward speed of the LIDAR
+      # (lin_speed = acu_trans(0,2)/dt in CLaserOdometry2D.cpp), and this lidar faces
+      # backwards (lidar_frame yaw pi), so it is reversed; linear.y is hard-coded 0.0, so a
+      # strafe looked like standing still. MEASURED: driving 0.175 m forward, rf2o's pose said
+      # +0.175 and this filter, fusing the twist, said -0.177; sliding 0.127 m left it said 0.
+      # rf2o's POSE is in base_footprint, correct in every direction and continuous, so x, y
+      # and yaw come from it; vyaw (sign-safe under the yaw-pi mount) stays.
+      # OLD: odom0_config: [false, false, false, false, false, true,
+      #                     true, true, false, false, false, true, false, false, false]
+      odom0_config: [true, true, false,
                      false, false, true,
-                     true, true, false,
+                     false, false, false,
                      false, false, true,
                      false, false, false]
 

@@ -58,7 +58,12 @@ def launch_setup(context):
     log_level_arg = DeclareLaunchArgument('log_level', default_value=log_level)
     use_rviz_arg = DeclareLaunchArgument('use_rviz', default_value=use_rviz)
     speed_arg = DeclareLaunchArgument('speed', default_value='0.12')
-    axis_lock_arg = DeclareLaunchArgument('axis_lock', default_value='true')
+    # Off for navigation (2026-10-28). DWB scores and collision-checks a BLENDED twist; with
+    # axis_lock the base executed only its largest component, so the robot drove a different
+    # path from the one that was checked and cut corners into obstacles. teleop/base.launch.py
+    # keep their own default. Run with axis_lock:=true for the old straight-segment motion.
+    # OLD: default_value='true'
+    axis_lock_arg = DeclareLaunchArgument('axis_lock', default_value='false')
 
     if compiled == 'True':
         mecanum_path = get_package_share_directory('mecanum_nav')
@@ -71,7 +76,19 @@ def launch_setup(context):
 
     params_file = os.path.join(mecanum_path, 'config/nav2_params.yaml')
     controller_params = os.path.join(mecanum_path, 'config/nav2_controller_dwb.yaml')
-    map_yaml = os.path.join(slam_path, 'maps', map_name + '.yaml')
+    # Always the SOURCE maps folder, even when compiled: slam_toolbox's save_map writes there
+    # (see slam.launch.py), and the installed share/slam/maps is only filled by colcon build,
+    # so a freshly saved map is missing from it and map_server fails with "bad file".
+    # OLD: map_yaml = os.path.join(slam_path, 'maps', map_name + '.yaml')
+    map_yaml = os.path.join(SRC, 'slam', 'maps', map_name + '.yaml')
+    # Refuse to start without the map. Otherwise everything else still comes up -- base, motors,
+    # odometry, controller -- with map_server failed, and that half-stack fights any other
+    # navigation already running (a mistyped map:=con11 did exactly that, twice).
+    if not os.path.isfile(map_yaml):
+        maps_dir = os.path.dirname(map_yaml)
+        saved = sorted(f[:-5] for f in os.listdir(maps_dir) if f.endswith('.yaml'))
+        raise RuntimeError('No map "%s" (%s). Saved maps: %s'
+                           % (map_name, map_yaml, ', '.join(saved) or 'none'))
 
     remappings = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
 
@@ -103,7 +120,7 @@ def launch_setup(context):
     base_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(mecanum_path, 'launch/base.launch.py')),
         launch_arguments={'use_sim_time': use_sim_time,
-                          'axis_lock': LaunchConfiguration('axis_lock', default='true')}.items(),
+                          'axis_lock': LaunchConfiguration('axis_lock', default='false')}.items(),
     )
 
     container = Node(

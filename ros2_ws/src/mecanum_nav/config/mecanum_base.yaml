@@ -30,46 +30,66 @@
     track_width: 0.193        # m, left wheel to right wheel
     wheel_diameter: 0.080     # m, over the rollers
 
-    # Motor id -> wheel. MEASURED on this robot with scripts/check_motor_mapping.py
-    # (2026-10-08), not assumed:
-    #     id 1 -> rear-right      id 2 -> rear-left
-    #     id 3 -> front-right     id 4 -> front-left
-    # Note ids 1 and 4 are DIAGONALLY swapped relative to the obvious 1=FL,2=RL,3=FR,4=RR
-    # guess. Getting this wrong does not merely mirror the motion: the kinematics applies a
-    # different formula to each corner, so a swapped diagonal turns a commanded strafe into a
-    # rotation. All four wheels do turn, so this robot is genuinely 4WD and can strafe.
+    # Motor id -> wheel, and per-wheel polarity. MEASURED 2026-10-22 on the floor, against
+    # three sensors that agree with each other: rf2o (lidar, after the sllidar 'inverted' fix
+    # that removed a left/right mirror), the IMU gyro for rotation, and the IMU accelerometer's
+    # start/stop jolt for which way forward is.
+    #     id 1 -> front-left  (reversed)     id 4 -> rear-left
+    #     id 2 -> front-right                id 3 -> rear-right (reversed)
+    # The 2026-10-21 map (FL=4 RL=1 FR=3 RR=2) was calibrated against the then-MIRRORED lidar:
+    # forward and rotation were right, but strafe came out reversed (a commanded left slid
+    # right). Swapping front and rear on each side, each motor keeping its polarity, fixes
+    # strafe and leaves forward and rotation unchanged.
+    # Do not trust calibrate_motor_mapping.py's ROTATION column at its default speed: the robot
+    # turns ~3x faster than commanded and rf2o loses track (gyro +92 deg, rf2o +247 deg).
+    # 2026-10-22, later: ROTATED 180 deg. Every calibration above measured motion with rf2o,
+    # and rf2o was silently working in the LIDAR's frame, not base_footprint: it reads the
+    # base->lidar transform once, on its first scan, and that lookup failed at startup
+    # ("base_footprint does not exist"), so it assumed identity. The lidar faces backwards
+    # (lidar_frame yaw pi, verified 2026-10-09), so those maps were right in the lidar's frame
+    # and 180 deg wrong on the robot: w drove arm-first. Rotating moves every wheel to the
+    # diagonally opposite corner (FL<->RR, RL<->FR) and reverses its forward direction.
+    # Confirmed by eye: w now drives lidar side first. base.launch.py now feeds rf2o late.
+    # 2026-10-22, last: LEFT and RIGHT swapped, each motor keeping its polarity. The rotation
+    # sign used above came from the IMU gyro, and the IMU is mounted UPSIDE DOWN (accel z
+    # -9.19 at rest; see imu_joint in mecanum_robot.urdf), so every "anticlockwise" in those
+    # measurements was clockwise. By eye with the previous map: a slid RIGHT, j turned
+    # CLOCKWISE, w was right. Swapping sides flips strafe and rotation and leaves forward alone.
+    # OLD: FL=3(+1) RL=2(-1) FR=4(-1) RR=1(+1)   (2026-10-22, before the side swap)
+    # OLD: FL=1(-1) RL=4(+1) FR=2(+1) RR=3(-1)                                     (2026-10-22)
+    # OLD: id_front_left: 4, id_rear_left: 1, id_front_right: 3, id_rear_right: 2   (2026-10-21)
+    # OLD: id_front_left: 4, id_rear_left: 2, id_front_right: 3, id_rear_right: 1   (2026-10-08)
     id_front_left: 4
-    id_rear_left: 2
+    id_rear_left: 1
     id_front_right: 3
-    id_rear_right: 1
+    id_rear_right: 2
 
-    # PER-WHEEL inversion. DERIVED FROM ROBOT BEHAVIOUR (2026-10-09), which is more reliable
-    # than eyeballing a wheel: on a mecanum wheel the rollers spin visibly while the hub turns,
-    # so "which way is the wheel going" is genuinely easy to misread. Robot-level motion is not.
-    #
-    # Observed with all four set to +1.0:
-    #     key d  (sends FL+ RL- FR- RR+)  ->  robot drove straight FORWARD
-    #     key a  (sends FL- RL+ FR+ RR-)  ->  robot drove straight BACK
-    #     key w  (sends FL+ RL+ FR+ RR+)  ->  robot moved sideways / scrubbed
-    #     key q                            ->  spun
-    #
-    # For "FL+ RL- FR- RR+" to be pure forward motion, the two motors given a NEGATIVE command
-    # must be the ones that drive forward when commanded negative. So rear-left and front-right
-    # are wired with reversed polarity, and those two are a DIAGONAL -- which is why the old
-    # invert_left/invert_right pair could not express it and why every key did the wrong thing.
-    #
-    # If the robot drives backward on w after this, flip all four signs at once: that is the one
-    # remaining global ambiguity and it does not affect strafe or rotation.
-    invert_front_left: 1.0
-    invert_rear_left: -1.0
-    invert_front_right: -1.0
-    invert_rear_right: 1.0
+    # PER-WHEEL inversion. Polarity belongs to the motor, so each one keeps its sign as it
+    # changes side.
+    # OLD: FL +1, RL -1, FR -1, RR +1   (2026-10-22, before the side swap)
+    # OLD: FL -1, RL +1, FR +1, RR -1   (2026-10-22, before the 180 deg turn)
+    # OLD: FL +1, RL -1, FR -1, RR +1   (2026-10-21)
+    invert_front_left: -1.0
+    invert_rear_left: 1.0
+    invert_front_right: 1.0
+    invert_rear_right: -1.0
 
     # Command limits applied in the base node, before the kinematics. The board itself has no
     # limiter, so this is the only thing standing between a bad command and a wall.
     max_linear_x: 0.5         # m/s forward/back
     max_linear_y: 0.4         # m/s strafe -- lower than x on purpose, see below
     max_angular_z: 2.0        # rad/s
+
+    # Real speed per commanded speed. MEASURED 2026-10-26 on the floor, steady state (1-3 s of
+    # a 3 s run): commanded vx 0.050 m/s -> 0.143 m/s by rf2o; commanded wz 0.150 rad/s ->
+    # 0.618 rad/s by the gyro. mecanum_base divides every command by these, so nav2's speed is
+    # the robot's speed. Without it the robot drove ~3x and turned ~4x faster than nav2
+    # planned, so the collision monitor (0.9 s horizon) and the recoveries (0.25 s look-ahead)
+    # braked and checked far too late: it hit some obstacles and missed others.
+    # Strafe uses the linear gain (not measured separately). Re-measure after changing
+    # wheels, motors or the board's motor settings. 1.0 = no correction.
+    measured_linear_gain: 2.87
+    measured_angular_gain: 4.12
 
     # Move along ONE axis at a time: drive, or strafe, or turn -- never a blend.
     # Nav2's controller always emits a mixed twist, which a holonomic base executes as a curve

@@ -22,7 +22,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription, LaunchService
 from launch.actions import (DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription,
-                            OpaqueFunction)
+                            OpaqueFunction, TimerAction)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -32,8 +32,48 @@ from nav2_common.launch import ReplaceString
 SRC = '/home/ubuntu/ros2_ws/src'
 
 
+# Any of these on the graph means a stack is already up. Not just mecanum_base: a stack whose
+# terminal was killed can lose its base nodes but keep its Nav2 container (AMCL, controller,
+# bt_navigator) alive, and that leftover blocks the next stack's Nav2 from coming up.
+STACK_NODES = ('mecanum_base', 'amcl', 'bt_navigator', 'controller_server', 'slam_toolbox')
+
+
+def base_already_running(wait=8.0):
+    """Name of a node from an already running stack, or None.
+
+    wait is generous on purpose: DDS discovery of a running base MEASURED anywhere from 0.2 s
+    to 2.9 s on this Jetson, and a 3.0 s wait missed it once and started a second stack.
+
+    Two stacks means two board drivers, two EKFs and two rf2o instances: the motors get
+    interleaved commands and odometry fights itself, which shows up as a jumping pose and a
+    robot that drives anywhere. Every stack (slam, navigation) comes through this file.
+    """
+    import time
+    import rclpy
+    ctx = rclpy.Context()
+    rclpy.init(context=ctx)
+    node = rclpy.create_node('base_launch_probe', context=ctx)
+    try:
+        end = time.time() + wait
+        while time.time() < end:
+            found = [n for n in STACK_NODES if n in node.get_node_names()]
+            if found:
+                return found[0]
+            time.sleep(0.2)
+        return None
+    finally:
+        node.destroy_node()
+        rclpy.shutdown(context=ctx)
+
+
 def launch_setup(context):
     compiled = os.environ['need_compile']
+
+    running = base_already_running()
+    if running:
+        raise RuntimeError('%s is already running -- another slam/navigation/base is up. '
+                           'Stop it first (Ctrl+C there, or: docker ps), or use '
+                           'bash ~/start_nav.sh, which does that for you.' % running)
 
     enable_odom = LaunchConfiguration('enable_odom', default='true')
     axis_lock = LaunchConfiguration('axis_lock', default='true').perform(context)
@@ -150,7 +190,17 @@ def launch_setup(context):
             robot_description_launch,
             robot_controller_launch,
             mecanum_base_node,
-            laser_filter_node,
+            # rf2o reads the base_footprint -> lidar_frame transform ONCE, on its first scan,
+            # and never retries. The lidar driver runs on its own (lidar_watchdog), so scans are
+            # already flowing: rf2o's first /scan arrived before its own TF buffer had received
+            # the URDF, the lookup failed ("base_footprint"/"lidar_frame" does not exist) and
+            # rf2o silently assumed the lidar sits at the centre facing FORWARD. It faces
+            # backwards (lidar_frame yaw pi), so odometry came out reversed: RViz showed the
+            # robot driving forward while it drove backward.
+            # Delaying rf2o itself does not help -- its buffer starts empty whenever it starts.
+            # Delaying its INPUT does: rf2o (and its buffer) start now, /scan only 5 s later.
+            # OLD: laser_filter_node, started together with everything else
+            TimerAction(period=5.0, actions=[laser_filter_node]),
             imu_filter_launch,
             rf2o_node,
             ekf_node]

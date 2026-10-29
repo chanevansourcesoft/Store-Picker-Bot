@@ -101,13 +101,13 @@ def main():
     for motor_id, (which, fwd) in sorted(results.items()):
         if which in name_to_param:
             print('    %-16s %d' % (name_to_param[which] + ':', motor_id))
-    print()
-    lefts = [fwd for i, (w, fwd) in results.items() if w in ('fl', 'rl') and fwd is not None]
-    rights = [fwd for i, (w, fwd) in results.items() if w in ('fr', 'rr') and fwd is not None]
-    if lefts:
-        print('    invert_left:     %.1f' % (1.0 if all(lefts) else -1.0))
-    if rights:
-        print('    invert_right:    %.1f' % (1.0 if all(rights) else -1.0))
+    # Per wheel, matching mecanum_base.yaml: polarity need not follow the side (on this robot
+    # the reversed pair was once a diagonal), so a per-side answer can be wrong.
+    # OLD: printed invert_left / invert_right
+    for motor_id, (which, fwd) in sorted(results.items()):
+        if which in name_to_param and fwd is not None:
+            print('    %-20s %.1f' % (name_to_param[which].replace('id_', 'invert_') + ':',
+                                      1.0 if fwd else -1.0))
     print()
     print('(A wheel whose top moves toward the front of the robot on a positive command is')
     print(' driving the robot forward, so that side needs no inversion.)')

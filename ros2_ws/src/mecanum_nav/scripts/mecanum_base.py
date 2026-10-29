@@ -106,6 +106,11 @@ class MecanumBase(Node):
         self.declare_parameter('odom_frame_id', 'odom')
         self.declare_parameter('linear_correction_factor', 1.0)
         self.declare_parameter('angular_correction_factor', 1.0)
+        # Real speed per commanded speed, MEASURED on the floor (see mecanum_base.yaml). Every
+        # command is divided by these before the kinematics, so what nav2 asks for is what the
+        # robot does. 1.0 = the board and kinematics are already right.
+        self.declare_parameter('measured_linear_gain', 1.0)
+        self.declare_parameter('measured_angular_gain', 1.0)
 
         g = lambda n: self.get_parameter(n).value
 
@@ -125,6 +130,8 @@ class MecanumBase(Node):
         self.odom_frame_id = g('odom_frame_id')
         self.linear_factor = float(g('linear_correction_factor'))
         self.angular_factor = float(g('angular_correction_factor'))
+        self.linear_gain = float(g('measured_linear_gain'))
+        self.angular_gain = float(g('measured_angular_gain'))
 
         # The largest rim speed any single wheel may be asked for. The three twist components add
         # per wheel, so the worst case is max_x + max_y + k*max_w -- asking for all three at once
@@ -166,9 +173,10 @@ class MecanumBase(Node):
         # in the log makes "the robot drives in a circle" a two-second diagnosis.
         self.get_logger().info(
             'mecanum_base up: wheelbase=%.3f track=%.3f wheel_d=%.3f k=%.4f '
-            'limits vx=%.2f vy=%.2f wz=%.2f timeout=%.2fs'
+            'limits vx=%.2f vy=%.2f wz=%.2f timeout=%.2fs gain lin=%.2f ang=%.2f'
             % (self.kin.wheelbase, self.kin.track_width, self.kin.wheel_diameter, self.kin.k,
-               self.max_x, self.max_y, self.max_w, self.timeout))
+               self.max_x, self.max_y, self.max_w, self.timeout,
+               self.linear_gain, self.angular_gain))
         self.get_logger().info(
             'axis_lock: %s (hysteresis %.2f)'
             % ('ON - one direction at a time' if self.axis_lock else 'off - blended motion',
@@ -222,7 +230,8 @@ class MecanumBase(Node):
             self.last_cmd_time = time.time()
 
     def motors_msg(self, vx, vy, wz):
-        v_fl, v_rl, v_fr, v_rr = self.kin.inverse(vx, vy, wz)
+        v_fl, v_rl, v_fr, v_rr = self.kin.inverse(vx / self.linear_gain, vy / self.linear_gain,
+                                                  wz / self.angular_gain)
         (v_fl, v_rl, v_fr, v_rr), _ = self.kin.scale_to_limit(
             (v_fl, v_rl, v_fr, v_rr), self.max_wheel_mps)
 
