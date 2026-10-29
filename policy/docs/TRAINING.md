@@ -181,6 +181,9 @@ background, like the original run ("In the background" above), and the app's **R
 When a dataset gets more episodes (for example to fix one situation), you can go on from a trained model instead of
 starting again from NVIDIA's base model: the model already knows the task, so far fewer steps are needed.
 
+In the Store Picker Bot app: Train step, **Start from**, choose the checkpoint ([DATA_STUDIO.md](DATA_STUDIO.md)). From a
+terminal:
+
 ```bash
 # in the background, like a normal run (the run name is printed)
 FROM_MODEL=27102026_121427_dataset_v3_26102026_191752_060000 STEPS=20000 CONDA_ENV=lerobot_env \

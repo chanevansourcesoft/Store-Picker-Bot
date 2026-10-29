@@ -81,6 +81,10 @@ steps; a step unlocks when the one before it is done.
      flagged ones removed first. The app sends over 4 connections at once, which is about 4 times faster
      when the network limits each connection (500 MB took about 2 minutes instead of 8); it shows the
      progress. Sending again later only copies what changed, and removes files the dataset no longer has.
+   - **Start from:** NVIDIA's base model trains a new model. Or choose a checkpoint of an earlier run to
+     train that model further on the dataset, for example after recording more episodes: it starts from
+     what the model already knows, with a new learning-rate schedule, so fewer steps are needed
+     ([TRAINING.md](TRAINING.md), step 7). The dataset must hold all episodes, old and new.
    - Choose the number of **training steps** (default 50,000) and press **Start training**. The page
      shows how long it takes and how much disk space it needs at most. It refuses to start when the
      dataset there is not the same as here, a training is already running there, the GPU is in use,

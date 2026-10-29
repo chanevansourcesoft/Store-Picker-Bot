@@ -652,6 +652,22 @@ async function loadTrain() {
   renderTrain();
   renderSteps();
 }
+// The trained models on the training PC that a training can start from: <run>_<step>, newest first.
+function renderFromModels() {
+  const runs = T.status.ok ? T.status.runs : [];
+  const models = runs.flatMap((r) => r.checkpoints.filter((c) => c.model).map((c) => ({
+    value: `${r.run}_${String(c.step).padStart(6, "0")}`, label: `${r.run}, step ${c.step.toLocaleString()}` })))
+    .sort((a, b) => (a.value < b.value ? 1 : -1));
+  const sel = $("trainFrom"), keep = sel.value;
+  const key = models.map((m) => m.value).join();
+  if (sel.dataset.key !== key) {
+    sel.dataset.key = key;
+    sel.innerHTML = `<option value="">NVIDIA's base model (a new model)</option>` +
+      models.map((m) => `<option value="${esc(m.value)}">${esc(m.label)}</option>`).join("");
+    sel.value = models.some((m) => m.value === keep) ? keep : "";
+  }
+  $("trainFromHint").hidden = !sel.value;
+}
 function renderTrain() {
   const st = T.status;
   if (!st.ok) {
@@ -664,8 +680,10 @@ function renderTrain() {
       ["Free disk", gb(st.free_gb)], ["GPUs", gpus || "none found"]])}</dl>`;
   }
   renderSend();
-  const steps = Number($("trainSteps").value);
-  renderPlan(T.plan && T.plan.steps === steps ? T.plan : stepsPlan && stepsPlan.steps === steps ? stepsPlan : null);
+  renderFromModels();
+  const steps = Number($("trainSteps").value), from = $("trainFrom").value || null;
+  renderPlan(T.plan && T.plan.steps === steps && !from ? T.plan
+    : stepsPlan && stepsPlan.steps === steps && stepsPlan.from_model === from ? stepsPlan : null);
   renderRuns();
   const fetching = !!(T.fetch && T.fetch.status === "running");
   if (prevFetching && !fetching && T.fetch) toast(T.fetch.status === "finished" ? `Model copied: inference/models/${T.fetch.info.name}` :
@@ -710,7 +728,8 @@ function renderPlan(plan) {
   if (!plan) { $("trainPlan").innerHTML = ""; return; }
   const tight = plan.free_gb != null && plan.disk_needed_gb > plan.free_gb - 2;
   $("trainPlan").innerHTML = kv([
-    ["Settings", `GPU ${esc(plan.gpu)}, batch ${plan.batch_size}, memory mode ${esc(plan.memory_mode)}`],
+    ["Settings", plan.from_model ? `GPU ${esc(plan.gpu)}, batch ${plan.batch_size}, the model's own settings`
+      : `GPU ${esc(plan.gpu)}, batch ${plan.batch_size}, memory mode ${esc(plan.memory_mode)}`],
     ["Time", `about ${hm(plan.hours * 3600)} (${plan.sec_per_step} s per step)`],
     ["Checkpoints", `every ${plan.save_freq.toLocaleString()} steps; the newest ${plan.keep_last} are kept complete` +
       (plan.keep_model_every ? `, older ones only at every ${plan.keep_model_every.toLocaleString()} steps (model only)` : ", older ones are deleted")],
@@ -720,10 +739,13 @@ function renderPlan(plan) {
 $("trainSteps").oninput = () => {
   clearTimeout(planTimer);
   planTimer = setTimeout(async () => {
-    try { stepsPlan = await api("/api/train/plan", { steps: $("trainSteps").value }); renderPlan(stepsPlan); $("trainMsg").textContent = ""; }
-    catch (e) { stepsPlan = null; renderPlan(null); $("trainMsg").textContent = e.message; }
+    try {
+      stepsPlan = await api("/api/train/plan", { steps: $("trainSteps").value, from_model: $("trainFrom").value || null });
+      renderPlan(stepsPlan); $("trainMsg").textContent = "";
+    } catch (e) { stepsPlan = null; renderPlan(null); $("trainMsg").textContent = e.message; }
   }, 400);
 };
+$("trainFrom").onchange = () => { $("trainFromHint").hidden = !$("trainFrom").value; $("trainSteps").oninput(); };
 $("sendBtn").onclick = async () => {
   $("sendBtn").disabled = true;
   try { await api("/api/train/send", {}); S = await api("/api/studio"); prevSending = sending(); renderSend(); }
@@ -731,11 +753,12 @@ $("sendBtn").onclick = async () => {
 };
 $("sendStopBtn").onclick = () => api("/api/train/send/stop", {}).catch((e) => toast(e.message));
 $("trainStartBtn").onclick = async () => {
-  const steps = Number($("trainSteps").value);
-  if (!confirm(`Start training on ${camp().folder} for ${steps.toLocaleString()} steps on the training PC?`)) return;
+  const steps = Number($("trainSteps").value), from = $("trainFrom").value || null;
+  if (!confirm(`Start training on ${camp().folder} for ${steps.toLocaleString()} steps on the training PC, ` +
+    `from ${from || "NVIDIA's base model"}?`)) return;
   $("trainStartBtn").disabled = true; $("trainMsg").textContent = "Starting…";
   try {
-    const r = await api("/api/train/start", { steps });
+    const r = await api("/api/train/start", { steps, from_model: from });
     selectedRun = r.run; toast("Training started.", 5000); $("trainMsg").textContent = "";
     await loadTrain(); loadRun();
   } catch (e) { $("trainMsg").textContent = e.message; $("trainStartBtn").disabled = false; }
@@ -782,6 +805,7 @@ async function loadRun() {
     ? `<span class="chips">${r.checkpoints.map((c) => `<span class="chip ${c.resume ? "full" : ""}" title="${c.resume ? "model + resume state" : "model only"}">${c.step.toLocaleString()}</span>`).join("")}</span>`
     : "none yet";
   const rows = [["Dataset", `<code>${esc(r.dataset)}</code>`]];
+  if (r.from_model) rows.push(["Started from", `<code>${esc(r.from_model)}</code>`]);
   if (r.status !== "unknown") {
     rows.push(["Step", `${(r.step || 0).toLocaleString()} / ${(r.steps || 0).toLocaleString()}`]);
     if (r.loss != null) rows.push(["Loss", r.loss.toFixed(4)]);

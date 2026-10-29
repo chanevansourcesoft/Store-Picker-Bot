@@ -178,7 +178,7 @@ def run_status(name, detail=False):
     row = {"run": name, "app": bool(meta), "dataset": meta.get("dataset") or re.sub(r"^\d{8}_\d{6}_", "", name),
            "started": meta.get("started") or (run_dir.stat().st_mtime if run_dir.exists() else None),
            "steps": meta.get("steps"), "gpu": meta.get("gpu"), "batch_size": meta.get("batch_size"),
-           "checkpoints": checkpoints(run_dir),
+           "from_model": meta.get("from_model"), "checkpoints": checkpoints(run_dir),
            "size_gb": round(folder_size(run_dir) / 1e9, 1) if run_dir.exists() else 0}
     if not meta:
         row["status"] = "unknown"  # started by hand: no log here

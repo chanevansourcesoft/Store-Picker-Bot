@@ -941,9 +941,10 @@ class Studio:
         if job:
             job.stop()
 
-    def plan_training(self, steps):
+    def plan_training(self, steps, from_model=None):
         link = self._link()
-        return link.plan(self._check_steps(steps), link.status())
+        status = link.status()
+        return link.plan(self._check_steps(steps), status, self._check_from_model(from_model, status))
 
     @staticmethod
     def _check_steps(steps):
@@ -955,7 +956,18 @@ class Studio:
             raise ValueError(f"Steps must be between {MIN_STEPS:,} and {MAX_STEPS:,}.")
         return steps
 
-    def start_training(self, steps):
+    @staticmethod
+    def _check_from_model(from_model, status):
+        """None (NVIDIA's base model), or <run>_<step> of a checkpoint with a model on the training PC."""
+        if not from_model:
+            return None
+        for r in (status or {}).get("runs", []):
+            for c in r["checkpoints"]:
+                if c["model"] and from_model == f"{r['run']}_{c['step']:06d}":
+                    return from_model
+        raise ValueError(f"No model {from_model} on the training PC.")
+
+    def start_training(self, steps, from_model=None):
         link = self._link()
         steps = self._check_steps(steps)
         if self.sending():
@@ -967,6 +979,7 @@ class Studio:
         status = link.status(max_age=0)
         if not status.get("ok"):
             raise ValueError(status["error"])
+        from_model = self._check_from_model(from_model, status)
         link.forget_dataset(folder)
         if not link.dataset_same(campaign_root(folder), folder, stamp):
             raise ValueError("The training PC does not have this exact dataset: send it first.")
@@ -975,8 +988,9 @@ class Studio:
         if plan["disk_needed_gb"] > status["free_gb"] - DISK_MARGIN_GB:
             raise ValueError(f"Not enough disk space on the training PC: this run needs up to {plan['disk_needed_gb']:.0f} GB, "
                              f"{status['free_gb']:.0f} GB are free. Delete old runs there, or train fewer steps.")
-        run = link.start(folder, steps)
-        print(f"[INFO] {time.strftime('%Y-%m-%d %H:%M:%S')} Training started on {link.host}: {run}", flush=True)
+        run = link.start(folder, steps, from_model)
+        print(f"[INFO] {time.strftime('%Y-%m-%d %H:%M:%S')} Training started on {link.host}: {run}"
+              + (f", from {from_model}" if from_model else ""), flush=True)
         return run
 
     @staticmethod
@@ -1213,9 +1227,9 @@ class Handler(BaseHTTPRequestHandler):
                 STUDIO.stop_send()
                 return self._json({"ok": True})
             if path == "api/train/plan":
-                return self._json(STUDIO.plan_training(body.get("steps")))
+                return self._json(STUDIO.plan_training(body.get("steps"), body.get("from_model")))
             if path == "api/train/start":
-                return self._json({"ok": True, "run": STUDIO.start_training(body.get("steps"))})
+                return self._json({"ok": True, "run": STUDIO.start_training(body.get("steps"), body.get("from_model"))})
             if path == "api/train/resume":
                 return self._json({"ok": True, "message": STUDIO.resume_training(body.get("run"))})
             if path == "api/train/fetch":

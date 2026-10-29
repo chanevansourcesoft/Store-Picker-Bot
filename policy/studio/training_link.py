@@ -478,8 +478,9 @@ class TrainingLink:
         return SendJob(self, local_root, folder, int(self.cfg.get("send_streams", 4)))
 
     # --- training ---
-    def plan(self, steps, status):
-        """Settings and estimates of a run of this many steps, from the training PC's status."""
+    def plan(self, steps, status, from_model=None):
+        """Settings and estimates of a run of this many steps, from the training PC's status.
+        from_model: <run>_<step> of a model to go on from (FROM_MODEL), or None for NVIDIA's base model."""
         cfg = self.cfg
         sizes = (status or {}).get("sizes") or DEFAULT_SIZES
         need = disk_needed_gb(steps, cfg["save_freq"], cfg["keep_last"], cfg["keep_model_every"], sizes)
@@ -488,13 +489,15 @@ class TrainingLink:
         return {"steps": steps, "gpu": cfg["gpu"], "batch_size": cfg["batch_size"], "memory_mode": cfg["memory_mode"],
                 "save_freq": cfg["save_freq"], "keep_last": cfg["keep_last"], "keep_model_every": cfg["keep_model_every"],
                 "disk_needed_gb": need, "free_gb": (status or {}).get("free_gb"),
-                "hours": round(steps * pace / 3600, 1), "sec_per_step": pace}
+                "hours": round(steps * pace / 3600, 1), "sec_per_step": pace, "from_model": from_model}
 
-    def start(self, folder, steps):
+    def start(self, folder, steps, from_model=None):
         cfg = self.cfg
         env = {"GPU": cfg["gpu"], "STEPS": steps, "BATCH_SIZE": cfg["batch_size"], "MEMORY_MODE": cfg["memory_mode"],
                "SAVE_FREQ": cfg["save_freq"], "KEEP_LAST": cfg["keep_last"], "KEEP_MODEL_EVERY": cfg["keep_model_every"],
                "CONDA_ENV": cfg.get("conda_env", "")}
+        if from_model:
+            env["FROM_MODEL"] = from_model
         assignments = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env.items())
         training = shlex.quote(self.remote_path("policy", "training"))
         out = self.ssh(f"cd {training} && {assignments} ./start_training.sh {shlex.quote(folder)}", timeout=60)

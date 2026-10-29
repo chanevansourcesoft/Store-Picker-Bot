@@ -222,6 +222,9 @@
         </div>
         <div class="card">
           <h2>2. Start training</h2>
+          <label>Start from <select id="trainFrom"><option value="">NVIDIA's base model (a new model)</option></select></label>
+          <p class="muted small" id="trainFromHint" hidden>Goes on from this model with the whole dataset (old and new
+            episodes) and a new learning-rate schedule, so fewer steps are needed than for a new model.</p>
           <label>Training steps <input id="trainSteps" type="number" step="1000"></label>
           <dl class="kv" id="trainPlan"></dl>
           <div class="row" style="margin-top: 14px">
