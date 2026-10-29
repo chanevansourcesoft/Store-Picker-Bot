@@ -432,9 +432,15 @@ def api_resume():
         _error(e)
 
 
+@app.get("/api/analysis")
+def api_analysis():
+    """Today's store numbers: orders, robot performance, stock and restock (exact, from the database)."""
+    return services.missions.analysis()
+
+
 @app.post("/api/shift-report")
 def api_shift_report():
-    """Today's shift report for the owner (Nemotron Ultra; a few seconds)."""
+    """Nemotron Ultra's findings and actions for the owner, as a table (a few seconds)."""
     return services.missions.shift_report()
 
 

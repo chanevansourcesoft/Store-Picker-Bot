@@ -590,84 +590,148 @@ class MissionManager:
         action = self.action
         return action["args"].get("item") if action and action["tool"] == "pick_item" else None
 
-    # ---------- shift report for the owner (Nemotron Ultra) ----------
+    # ---------- store analysis and the owner's shift report (Nemotron Ultra) ----------
 
-    def shift_facts(self):
-        """Today's missions, robot performance and stock, from the database (no guessing)."""
+    LOW_STOCK_SHARE = 0.3   # a product is low when it has 30 % (and at least 3) of its starting stock or less
+
+    def analysis(self):
+        """Today's store numbers, computed from the database (exact, no AI): orders, robot, stock and restock."""
         today = datetime.now().date().isoformat()
         missions = [m for m in self.store.list_missions(limit=500) if (m.get("created_at") or "").startswith(today)]
         ran = [m for m in missions if m.get("confirmed_at") and m["status"] in FINISHED]
         facts = [self.mission_facts(m) for m in ran]
         times = [f["duration_seconds"] for f, m in zip(facts, ran)
                  if f["duration_seconds"] is not None and m["status"].startswith("completed")]
-        ordered = {}
-        for m in ran:
-            for i in m["items"]:
-                ordered[i["name"]] = ordered.get(i["name"], 0) + i["qty"]
-        inventory = load_inventory()
-        stock = {config.product_label(k): v.get("stock", 0) for k, v in inventory.items()}
         count = lambda status: sum(m["status"] == status for m in missions)  # noqa: E731
+        completed = count("completed") + count("completed_with_issues")
+        attempts = sum(f["pick_attempts"] for f in facts)
+        missed = sum(f["failed_picks"] for f in facts)
+
+        ordered, delivered = {}, {}
+        for m in ran:
+            packed = {}
+            for e in m.get("step_log") or []:
+                item = basket_item(e)
+                if item:
+                    packed[item] = packed.get(item, 0) + 1
+            for i in m["items"]:
+                ordered[i["item"]] = ordered.get(i["item"], 0) + i["qty"]
+                delivered[i["item"]] = delivered.get(i["item"], 0) + min(i["qty"], packed.get(i["item"], 0))
+        refused_for_stock = sum(any("in stock" in p for p in (m.get("problems") or []))
+                                for m in missions if m["status"] == "rejected")
+
+        products = []
+        for item, info in load_inventory().items():
+            stock, start = info.get("stock", 0), info.get("initial_stock", 0)
+            low_at = max(3, round(start * self.LOW_STOCK_SHARE))
+            status = "out" if stock <= 0 else "low" if stock <= low_at else "ok"
+            products.append({
+                "id": item, "name": config.product_label(item),
+                "shelf": config.station_label(info.get("shelf")), "level": info.get("level"),
+                "stock": stock, "start": start, "ordered_today": ordered.get(item, 0),
+                "delivered_today": delivered.get(item, 0), "status": status,
+                "restock": max(0, start - stock) if status != "ok" else 0,
+            })
         return {
             "date": today,
-            "missions_run": len(ran),
-            "completed": count("completed"),
-            "completed_with_issues": count("completed_with_issues"),
-            "failed": count("failed"),
-            "stopped_by_operator": count("aborted"),
-            "orders_refused_before_start": count("rejected"),
-            "items_delivered": sum(m["packed"] for m in ran),
-            "items_ordered": sum(m["total"] for m in ran),
-            "pick_attempts": sum(f["pick_attempts"] for f in facts),
-            "failed_picks": sum(f["failed_picks"] for f in facts),
-            "failed_drives": sum(f["failed_drives"] for f in facts),
-            "commands_blocked_by_safety_checks": sum(f["commands_blocked_by_safety_checks"] for f in facts),
-            "average_mission_seconds": round(sum(times) / len(times)) if times else None,
-            "products_ordered": ordered,
+            "orders": {
+                "placed": len(missions),
+                "started": len(ran),
+                "completed": count("completed"),
+                "completed_with_issues": count("completed_with_issues"),
+                "failed": count("failed"),
+                "stopped": count("aborted"),
+                "refused": count("rejected"),
+                "refused_for_stock": refused_for_stock,
+                "waiting": count("awaiting_confirmation"),
+                "success_rate": round(100 * completed / len(ran)) if ran else None,
+                "items_ordered": sum(m["total"] for m in ran),
+                "items_delivered": sum(m["packed"] for m in ran),
+            },
+            "robot": {
+                "pick_attempts": attempts,
+                "missed_grasps": missed,
+                "pick_success_rate": round(100 * (attempts - missed) / attempts) if attempts else None,
+                "failed_drives": sum(f["failed_drives"] for f in facts),
+                "safety_blocks": sum(f["commands_blocked_by_safety_checks"] for f in facts),
+                "average_mission_seconds": round(sum(times) / len(times)) if times else None,
+            },
+            "products": products,
             "problems": sorted({p for m in missions for p in (m.get("problems") or [])})[:8],
-            "stock": stock,
-            "low_stock_3_or_less": [name for name, qty in stock.items() if qty <= 3],
-            "robot": "simulated robot" if self.simulated else "real robot",
+            "robot_kind": "simulated robot" if self.simulated else "real robot",
         }
 
     @staticmethod
-    def rule_shift_report(f):
-        text = (f"Today: {f['missions_run']} missions run, {f['completed']} completed cleanly, "
-                f"{f['completed_with_issues']} with issues, {f['failed']} failed, "
-                f"{f['orders_refused_before_start']} orders refused before start. "
-                f"{f['items_delivered']} of {f['items_ordered']} items delivered")
-        if f["pick_attempts"]:
-            ok = f["pick_attempts"] - f["failed_picks"]
-            text += f"; {ok} of {f['pick_attempts']} picks worked"
-        text += "."
-        if f["average_mission_seconds"] is not None:
-            text += f" Average mission time {f['average_mission_seconds']} s."
-        text += " Restock: " + (", ".join(f["low_stock_3_or_less"]) or "nothing urgent") + "."
-        if f["problems"]:
-            text += " Problems: " + "; ".join(f["problems"][:3]) + "."
-        return text
+    def rule_insights(a):
+        """The same structure Nemotron Ultra returns, from simple rules (no API key)."""
+        o, r = a["orders"], a["robot"]
+        rows = []
+        rows.append({"area": "Orders", "finding": f"{o['completed']} of {o['started']} started orders completed cleanly"
+                     + (f", {o['refused']} refused before start" if o["refused"] else "") + ".",
+                     "action": "Check the refused orders on the Activity log." if o["refused"] else "No action needed."})
+        if r["pick_attempts"]:
+            rows.append({"area": "Robot", "finding": f"{r['pick_attempts'] - r['missed_grasps']} of {r['pick_attempts']} "
+                         f"arm attempts picked the item; {r['failed_drives']} drives failed.",
+                         "action": "Check the gripper and the item placement." if r["missed_grasps"] else "No action needed."})
+        restock = [p for p in a["products"] if p["restock"]]
+        rows.append({"area": "Stock", "finding": ", ".join(f"{p['name']} {p['stock']} left" for p in restock)
+                     if restock else "All products are above their low-stock level.",
+                     "action": "Restock " + ", ".join(f"{p['restock']} {p['name']}" for p in restock) + "."
+                     if restock else "No restocking needed."})
+        if r["safety_blocks"]:
+            rows.append({"area": "Safety", "finding": f"{r['safety_blocks']} planner commands were blocked.",
+                         "action": "Review the blocked commands in the Activity log."})
+        headline = f"{o['started']} orders run today, {o['success_rate'] if o['success_rate'] is not None else '—'}% completed."
+        return headline, rows
+
+    @staticmethod
+    def parse_insights(text):
+        """{"headline", "insights": [{"area", "finding", "action"}]} from the model reply, or None."""
+        text = strip_think(text or "")
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            data = json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            return None
+        rows = [{"area": str(i.get("area", ""))[:20], "finding": str(i.get("finding", ""))[:300],
+                 "action": str(i.get("action", ""))[:300]}
+                for i in data.get("insights") or [] if isinstance(i, dict) and i.get("finding")]
+        headline = str(data.get("headline") or "").strip()[:300]
+        return (headline, rows[:6]) if headline and rows else None
 
     def shift_report(self):
-        """Owner's shift report: Nemotron Ultra analyses today's missions and stock (rule-based without a key)."""
-        facts = self.shift_facts()
-        text, by = None, None
+        """The owner's analysis: Nemotron Ultra reads today's numbers and returns findings and actions
+        as a table (rule-based without a key). The numbers themselves always come from analysis()."""
+        a = self.analysis()
+        result, by = None, None
         if has_llm():
-            prompt = ("You are the operations assistant of a dark store that uses a picking robot. Write a short "
-                      "shift report for the store owner in 4 to 6 plain sentences: how the shift went, how well the "
-                      "robot picked and how long missions took, any problems worth noticing, what to restock, and "
-                      "one practical suggestion. Use only these facts. Recommend restocking only the products in "
-                      "low_stock_3_or_less; if that list is empty, say no restocking is needed. "
-                      "No markdown, no lists, no greeting.\n\n"
-                      "Facts: " + json.dumps(facts))
+            prompt = (
+                "You are the operations analyst of a dark store that uses a picking robot. Analyse today's numbers "
+                "for the store owner. Reply with JSON only, in this exact shape:\n"
+                '{"headline": "one sentence on how the shift went", "insights": [{"area": "Orders | Robot | Stock | '
+                'Safety | Customers", "finding": "what the numbers show, with the numbers", "action": "what the '
+                'owner should do"}]}\n'
+                "Give 3 to 5 insights, most important first. Use only these facts. A product needs restocking only "
+                "if its status is low or out; use its restock number as the quantity. If nothing needs restocking, "
+                "say so. Keep each finding and action under 25 words.\n\nFacts: " + json.dumps(a))
             try:
                 reply = get_client().with_options(timeout=90.0).chat.completions.create(
-                    model=MODEL_ULTRA, messages=[{"role": "user", "content": prompt}], max_tokens=2000)
-                text = strip_think(reply.choices[0].message.content or "")
-                by = f"NVIDIA Nemotron ({model_name(MODEL_ULTRA)})"
+                    model=MODEL_ULTRA, messages=[{"role": "user", "content": prompt}], max_tokens=2500)
+                result = self.parse_insights(reply.choices[0].message.content)
+                if result:
+                    by = f"NVIDIA Nemotron ({model_name(MODEL_ULTRA)})"
+                else:
+                    self.event("ai", "warning", "Nemotron Ultra's analysis was not in the expected table format. "
+                               "Used the rule-based analysis instead.")
             except Exception as e:
-                self.event("ai", "warning", f"Nemotron Ultra could not write the shift report "
-                           f"({e.__class__.__name__}). Used a rule-based summary instead.")
-        if not text:
-            text, by = self.rule_shift_report(facts), "rule-based summary (no Nemotron)"
-        self.shift = {"text": text, "by": by, "at": now_iso(), "missions": facts["missions_run"]}
-        self.event("ai", "success", f"Shift report by {by}: {text}")
+                self.event("ai", "warning", f"Nemotron Ultra could not write the analysis "
+                           f"({e.__class__.__name__}). Used the rule-based analysis instead.")
+        if not result:
+            result, by = self.rule_insights(a), "rule-based analysis (no Nemotron)"
+        headline, insights = result
+        self.shift = {"text": headline, "insights": insights, "by": by, "at": now_iso(),
+                      "missions": a["orders"]["started"]}
+        self.event("ai", "success", f"Store analysis by {by}: {headline}")
         return self.shift

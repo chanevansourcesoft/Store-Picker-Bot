@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Clapperboard, Link2, Lock, Trash2, Upload } from "lucide-react";
+import { Clapperboard, Link2, Lock, Trash2, Upload, Video as VideoIcon } from "lucide-react";
 import { api } from "../api";
 import { VideoPlayer } from "../components/RobotCamera";
 import { Button, Panel } from "../components/ui";
@@ -139,6 +139,14 @@ export function VideosPage({ snap, toast }: { snap: Snapshot; toast: Toast }) {
   return (
     <div className="grid items-start gap-3 lg:grid-cols-12 lg:gap-4">
       <div className="flex flex-col gap-3 lg:col-span-8 lg:gap-4">
+        {snap.media.camera_url && (
+          <Panel title="Robot camera" icon={<VideoIcon size={15} />} bodyClass="p-2"
+            right={<span className="flex items-center gap-1.5 text-[12px] font-bold uppercase tracking-wider text-err">
+              <span className="pulse-dot inline-block h-2 w-2 rounded-full bg-err" />Live</span>}>
+            <img src={snap.media.camera_url} alt="Live view from the robot camera"
+              className="aspect-video w-full rounded-lg bg-black object-contain" />
+          </Panel>
+        )}
         <Panel title="The real robot" icon={<Clapperboard size={15} />}>
           <p className="text-[15px] text-muted">
             Recordings of the real Store-Picker-Bot: a mobile base with an SO-100 arm, running NVIDIA GR00T N1.7 on a

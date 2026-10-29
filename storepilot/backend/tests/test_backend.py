@@ -141,11 +141,24 @@ def test_offline_mission_runs_after_confirm_only():
             time.sleep(0.02)
         report = store.get_mission(draft["id"])
         assert report["summary_by"].startswith("rule-based") and "3 of 3 items delivered" in report["summary"], report
-        # the owner's shift report covers today's missions and stock
+        # the store analysis: exact numbers from the database
+        a = m.analysis()
+        assert a["orders"]["started"] == 1 and a["orders"]["success_rate"] == 100, a["orders"]
+        assert (a["orders"]["items_ordered"], a["orders"]["items_delivered"]) == (3, 3), a["orders"]
+        chips = next(p for p in a["products"] if p["id"] == "chips_packet")
+        assert (chips["ordered_today"], chips["delivered_today"]) == (2, 2), chips
+        assert chips["status"] == "ok" and chips["restock"] == 0, chips   # (test inventory: fixed stock)
+        # the owner's analysis table (rule-based without Nemotron), same shape as Nemotron Ultra's
         shift = m.shift_report()
         assert shift["by"].startswith("rule-based") and shift["missions"] == 1, shift
-        assert "1 missions run, 1 completed cleanly" in shift["text"] and "3 of 3 items delivered" in shift["text"], shift
+        assert [r["area"] for r in shift["insights"]][:3] == ["Orders", "Robot", "Stock"], shift
+        assert "No restocking needed." in [r["action"] for r in shift["insights"]], shift
         assert m.shift is shift
+        # Nemotron's JSON reply is parsed, extra text and <think> are ignored, a bad reply is refused
+        parsed = MissionManager.parse_insights('<think>x</think> Here: {"headline": "Good shift", "insights": '
+                                               '[{"area": "Stock", "finding": "Ink low", "action": "Restock 6 Ink Box"}]}')
+        assert parsed == ("Good shift", [{"area": "Stock", "finding": "Ink low", "action": "Restock 6 Ink Box"}]), parsed
+        assert MissionManager.parse_insights("no json here") is None
         # the map's front view: products per table and shelf level
         assert m.layout()["shelf_A"]["upper_shelf"][0]["id"] == "chips_packet", m.layout()
         tel.shutdown()
@@ -186,6 +199,22 @@ def test_code_retry_is_not_a_planner_decision():
         for p in patches:
             p.stop()
     print("PASS: test_code_retry_is_not_a_planner_decision")
+
+
+def test_restock_rule():
+    """Low = 30 % of the starting stock (at least 3) or less; restock back to the starting stock."""
+    store, robot, tel, m = services()
+    stock = {"ink_box": {"shelf": "shelf_A", "level": "upper_shelf", "stock": 2, "initial_stock": 10},
+             "frooti": {"shelf": "shelf_A", "level": "lower_shelf", "stock": 0, "initial_stock": 12},
+             "biscuit": {"shelf": "shelf_A", "level": "lower_shelf", "stock": 9, "initial_stock": 15}}
+    with patch("storepilot.missions.load_inventory", return_value=stock):
+        rows = {p["id"]: (p["status"], p["restock"]) for p in m.analysis()["products"]}
+        assert rows == {"ink_box": ("low", 8), "frooti": ("out", 12), "biscuit": ("ok", 0)}, rows
+        insights = MissionManager.rule_insights(m.analysis())[1]
+        stock_row = next(r for r in insights if r["area"] == "Stock")
+        assert "8" in stock_row["action"] and "12" in stock_row["action"], stock_row
+    tel.shutdown()
+    print("PASS: test_restock_rule")
 
 
 def test_videos():
@@ -590,6 +619,7 @@ def run_all():
     test_mentioned()
     test_mentioned_uses_aliases()
     test_code_retry_is_not_a_planner_decision()
+    test_restock_rule()
     test_videos()
     test_sim_moves_and_stops()
     test_offline_mission_runs_after_confirm_only()

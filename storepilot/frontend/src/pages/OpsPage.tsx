@@ -1,8 +1,7 @@
 import { ArrowRight, BatteryMedium, Compass, Crosshair, Gauge, Hand, MapPin, Plus, Radio, TriangleAlert } from "lucide-react";
 import { fmtDuration, missionDuration } from "../api";
 import { NemotronPanel } from "../components/NemotronPanel";
-import { RobotCamera } from "../components/RobotCamera";
-import { SessionStats } from "../components/SessionStats";
+import { StoreAnalysisPanel, TodayPanel, useAnalysis } from "../components/StoreAnalysis";
 import type { Tab } from "../components/Shell";
 import { Button, LevelIcon, MissionStatusTag, Panel, ProgressBar, STATE_META, Stat, StateBadge, Tag } from "../components/ui";
 import type { Snapshot } from "../types";
@@ -153,6 +152,7 @@ export function Telemetry({ snap }: { snap: Snapshot }) {
 export function OpsPage({ snap, goto, toast }: {
   snap: Snapshot; goto: (t: Tab) => void; toast: (t: string, tone?: "ok" | "err" | "warn") => void;
 }) {
+  const analysis = useAnalysis(snap);
   return (
     <div className="flex flex-col gap-3 lg:gap-4">
       <div className="grid gap-3 lg:grid-cols-12 lg:gap-4">
@@ -177,13 +177,13 @@ export function OpsPage({ snap, goto, toast }: {
             <Telemetry snap={snap} />
           </Panel>
         </div>
-        <div className="flex flex-col gap-3 lg:col-span-5 lg:gap-4">
-          <RobotCamera snap={snap} goto={goto} />
-          <SessionStats snap={snap} toast={toast} />
+        <div className="lg:col-span-5">
+          <TodayPanel a={analysis} />
         </div>
       </div>
 
       <NemotronPanel snap={snap} />
+      <StoreAnalysisPanel snap={snap} a={analysis} toast={toast} />
     </div>
   );
 }
