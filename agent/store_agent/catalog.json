@@ -11,7 +11,7 @@
       "weight": "light",
       "size": "1 box",
       "category": "Stationery",
-      "aliases": ["ink box", "ink boxes", "ink", "ink cartridge", "cartridge"],
+      "aliases": ["ink box", "ink boxes", "ink", "ink bottle", "ink cartridge", "cartridge"],
       "initial_stock": 10
     },
     "biscuit": {
@@ -24,8 +24,47 @@
       "weight": "light",
       "size": "1 pack",
       "category": "Biscuits",
-      "aliases": ["biscuit", "biscuits", "biscuit pack", "cookie", "cookies"],
+      "aliases": ["biscuit", "biscuits", "biscuit pack", "biscuit packet", "cookie", "cookies"],
       "initial_stock": 15
+    },
+    "fevicol": {
+      "name": "Fevicol",
+      "shelf": "shelf_A",
+      "level": "upper_shelf",
+      "bin": "A-upper",
+      "barcode": "0000000000035",
+      "price": 20,
+      "weight": "light",
+      "size": "50 g",
+      "category": "Stationery",
+      "aliases": ["fevicol", "fevical", "fevicol bottle", "glue", "white glue", "adhesive"],
+      "initial_stock": 10
+    },
+    "screen_cleaning_gel": {
+      "name": "Screen Cleaning Gel",
+      "shelf": "shelf_A",
+      "level": "upper_shelf",
+      "bin": "A-upper",
+      "barcode": "0000000000042",
+      "price": 99,
+      "weight": "light",
+      "size": "100 ml",
+      "category": "Electronics Care",
+      "aliases": ["screen cleaning gel", "screen cleaner", "screen gel", "cleaning gel", "screen cleaning", "lcd cleaner"],
+      "initial_stock": 8
+    },
+    "frooti": {
+      "name": "Frooti",
+      "shelf": "shelf_A",
+      "level": "lower_shelf",
+      "bin": "A-lower",
+      "barcode": "0000000000059",
+      "price": 15,
+      "weight": "medium",
+      "size": "125 ml",
+      "category": "Drinks",
+      "aliases": ["frooti", "mango drink", "mango juice", "juice", "drink"],
+      "initial_stock": 12
     }
   }
 }

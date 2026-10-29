@@ -181,7 +181,7 @@ with col1:
         "What would you like to order?",
         value=st.session_state.order_text,
         height=100,
-        placeholder="Example: 2 chips and one hide and seek",
+        placeholder="Example: 2 biscuits and one fevicol",
         key="order_input"
     )
 
@@ -189,12 +189,12 @@ with col1:
     st.caption("Quick examples:")
     example_cols = st.columns(3)
     with example_cols[0]:
-        if st.button("🥫 Soup + Chips", use_container_width=True):
-            st.session_state.order_text = "2 chips and one hide and seek"
+        if st.button("🍪 Biscuits + Fevicol", use_container_width=True):
+            st.session_state.order_text = "2 biscuits and one fevicol"
             st.rerun()
     with example_cols[1]:
         if st.button("🧃 All Items", use_container_width=True):
-            st.session_state.order_text = "chips, frooti and mentos"
+            st.session_state.order_text = "biscuit, frooti, fevicol, ink and screen cleaning gel"
             st.rerun()
     with example_cols[2]:
         if st.button("🍕 With Unknown", use_container_width=True):

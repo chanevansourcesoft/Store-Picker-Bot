@@ -14,6 +14,7 @@ Safety rules enforced here:
 - After a restart, nothing resumes by itself (see Store.close_unfinished).
 """
 
+import json
 import threading
 import time
 from datetime import datetime
@@ -24,8 +25,8 @@ from .db import now_iso
 # Shared agent code (agent/store_agent, installed with pip install -e ../../agent)
 import store_agent.agent as shared_agent
 import store_agent.tools as shared_tools
-from store_agent.agent import group_items_by_shelf, plan_shelf_route, run_agent
-from store_agent.config import MODEL_AGENT, MODEL_FAST, has_llm
+from store_agent.agent import group_items_by_shelf, plan_shelf_route, run_agent, strip_think
+from store_agent.config import MODEL_AGENT, MODEL_FAST, MODEL_ULTRA, get_client, has_llm
 from store_agent.inventory import load_inventory, release, reserve
 from store_agent.order_parser import parse_order, parse_order_offline
 from store_agent.order_tracker import basket_item, unpacked_units
@@ -43,12 +44,14 @@ class MissionError(Exception):
     """A request the operator made cannot be done now (shown as a message)."""
 
 
-def mentioned(item, text):
-    """True if the order text names this product (id word or display-name word, singular or plural).
-    A parsed item that is not mentioned was inferred by the model and needs the operator's eye."""
+def mentioned(item, text, aliases=()):
+    """True if the order text names this product (id word, display-name word or a catalog alias, singular
+    or plural). A parsed item that is not mentioned was inferred by the model and needs the operator's eye."""
+    text = text.lower()
+    if any(a.lower() in text for a in aliases if len(a) > 2):
+        return True
     words = set(item.lower().split("_")) | set(config.product_label(item).lower().split())
     words -= {"can", "pack", "box", "packet", "bottle", "and", "the"}   # container and filler words prove nothing
-    text = text.lower()
     return any(w in text or w + "s" in text or w.rstrip("s") in text.split() for w in words if len(w) > 2)
 
 
@@ -93,6 +96,8 @@ class MissionManager:
         self.lock = threading.Lock()
         self.current_id = None          # running mission
         self.action = None              # {"tool", "args", "started"} while a robot command runs
+        self.unanswered = None          # (tool, args, tries) sent to the robot, not yet reported to the planner
+        self.shift = None               # last shift report {"text", "by", "at"}
         self.abort = threading.Event()
         self.thread = None
         self.last_finished = None       # (mission_id, status, monotonic time)
@@ -121,8 +126,17 @@ class MissionManager:
     def catalog(self):
         inventory = load_inventory()
         return [{"id": name, "name": config.product_label(name), "shelf": info.get("shelf"),
-                 "shelf_name": config.station_label(info.get("shelf")), "stock": info.get("stock", 0),
-                 "price": info.get("price", 0)} for name, info in inventory.items()]
+                 "shelf_name": config.station_label(info.get("shelf")), "level": info.get("level"),
+                 "stock": info.get("stock", 0), "price": info.get("price", 0)} for name, info in inventory.items()]
+
+    def layout(self):
+        """{station: {level: [{"id", "name", "stock"}]}} in catalog order: what the map draws on each table."""
+        out = {}
+        for name, info in load_inventory().items():
+            shelf = out.setdefault(info.get("shelf"), {})
+            shelf.setdefault(info.get("level") or "shelf", []).append(
+                {"id": name, "name": config.product_label(name), "stock": info.get("stock", 0)})
+        return out
 
     # ---------- 1. order -> draft ----------
 
@@ -151,7 +165,7 @@ class MissionManager:
             parser = "offline keyword parser (no API key)"
 
         items = [{"item": e["item"], "name": config.product_label(e["item"]), "qty": e["qty"],
-                  "shelf": inventory.get(e["item"], {}).get("shelf"), "inferred": not mentioned(e["item"], text)}
+                  "shelf": inventory.get(e["item"], {}).get("shelf"), "inferred": not mentioned(e["item"], text, inventory.get(e["item"], {}).get("aliases", ()))}
                  for e in parsed.get("items", [])]
         unknown = list(dict.fromkeys(parsed.get("unknown", [])))
         route = [shelf for shelf, _ in plan_shelf_route(group_items_by_shelf(parsed.get("items", []), inventory))]
@@ -311,6 +325,77 @@ class MissionManager:
             level = {"completed": "success", "completed_with_issues": "warning"}.get(status, "error")
             detail = (" · " + "; ".join(problems)) if problems and status != "completed" else ""
             self.event("system", level, text + detail, mission_id)
+            threading.Thread(target=self.summarize, args=(mission_id,), name=f"summary-{mission_id}",
+                             daemon=True).start()
+
+    # ---------- 4. mission report (Nemotron Ultra) ----------
+
+    @staticmethod
+    def mission_facts(m):
+        """What happened, from the mission record and its step log (no guessing)."""
+        log = m.get("step_log") or []
+        picks = [e for e in log if e.get("tool") == "pick_item" and not (e.get("result") or {}).get("refused")]
+        # one pick command can be several arm attempts: the code retries a missed grasp ("tries")
+        arm_attempts = sum((e.get("result") or {}).get("tries") or 1 for e in picks)
+        in_basket = sum(1 for e in picks if basket_item(e))
+        navs = [e for e in log if e.get("tool") == "navigate_to"]
+        failed_navs = [e for e in navs if not (e.get("result") or {}).get("success")]
+        refused = [e for e in log if (e.get("result") or {}).get("refused")]
+        seconds = None
+        if m.get("confirmed_at") and m.get("finished_at"):
+            seconds = round((datetime.fromisoformat(m["finished_at"]) -
+                             datetime.fromisoformat(m["confirmed_at"])).total_seconds())
+        return {
+            "order": m["text"],
+            "items": ", ".join(f"{i['qty']}x {i['name']}" for i in m["items"]),
+            "result": m["status"].replace("_", " "),
+            "delivered": f"{m['packed']} of {m['total']} items",
+            "duration_seconds": seconds,
+            "pick_attempts": arm_attempts,
+            "failed_picks": arm_attempts - in_basket,
+            "drives": len(navs),
+            "failed_drives": len(failed_navs),
+            "commands_blocked_by_safety_checks": len(refused),
+            "problems": m.get("problems") or [],
+            "robot": "simulated robot" if m["mode"] == "mock" else "real robot",
+        }
+
+    @staticmethod
+    def rule_summary(f):
+        text = f"Mission {f['result']}: {f['delivered']} delivered"
+        if f["duration_seconds"] is not None:
+            text += f" in {f['duration_seconds']} s"
+        text += f" ({f['pick_attempts']} pick attempts, {f['failed_picks']} failed"
+        text += f", {f['commands_blocked_by_safety_checks']} commands blocked)." \
+            if f["commands_blocked_by_safety_checks"] else ")."
+        if f["problems"]:
+            text += " Problems: " + "; ".join(f["problems"])
+        return text
+
+    def summarize(self, mission_id):
+        """Short report for the operator, written by Nemotron Ultra (rule-based without a key)."""
+        m = self.store.get_mission(mission_id)
+        if not m or m["status"] not in FINISHED:
+            return
+        facts = self.mission_facts(m)
+        summary, by = None, None
+        if has_llm():
+            prompt = ("You are the operations assistant of a dark-store picking robot. Write a short mission report "
+                      "for the store operator in 2 or 3 plain sentences: what was ordered, what was delivered, "
+                      "how long it took, and any problem or retry worth noticing. Use only these facts, no "
+                      "markdown, no lists, no greeting.\n\nFacts: " + json.dumps(facts))
+            try:
+                reply = get_client().with_options(timeout=90.0).chat.completions.create(
+                    model=MODEL_ULTRA, messages=[{"role": "user", "content": prompt}], max_tokens=2000)
+                summary = strip_think(reply.choices[0].message.content or "")
+                by = f"NVIDIA Nemotron ({model_name(MODEL_ULTRA)})"
+            except Exception as e:
+                self.event("ai", "warning", f"Nemotron Ultra could not write the mission report "
+                           f"({e.__class__.__name__}). Used a rule-based summary instead.", mission_id)
+        if not summary:
+            summary, by = self.rule_summary(facts), "rule-based summary (no Nemotron)"
+        self.store.update_mission(mission_id, summary=summary, summary_by=by)
+        self.event("ai", "success", f"Mission report by {by}: {summary}", mission_id)
 
     def before_command(self, tool, args):
         """Called by RobotProxy just before a robot command."""
@@ -319,18 +404,29 @@ class MissionManager:
         mission_id = self.current_id
         with self.lock:
             self.action = {"tool": tool, "args": args, "started": time.monotonic()}
+        # The same command again before the planner saw an answer = the code's automatic pick retry
+        # (store_agent.tools.pick_with_retries), not a new planner decision
+        if self.unanswered and self.unanswered[:2] == (tool, args):
+            tries = self.unanswered[2] + 1
+            self.unanswered = (tool, args, tries)
+            self.event("robot", "warning", f"Grasp missed: retrying the {config.product_label(args.get('item'))} "
+                       f"pick automatically (try {tries})", mission_id)
+            return
+        self.unanswered = (tool, args, 1)
+        # The planner chose this command: credit it to the planner, the robot's answer follows in on_step
+        who = "Nemotron Super decided" if has_llm() else "Autopilot decided"
         if tool == "navigate_to":
             station = args["station"]
             if station == "customer":
-                text = "Delivering basket to the packing area"
+                text = "deliver the basket to the packing area"
             elif station == "home":
-                text = "Returning to home position"
+                text = "return to the home position"
             else:
-                text = f"Navigating to {config.station_label(station)}"
-            self.event("robot", "info", text, mission_id)
+                text = f"drive to {config.station_label(station)}"
+            self.event("ai", "info", f"{who}: {text}", mission_id)
         elif tool == "pick_item":
-            self.event("robot", "info", f"Pick requested: {config.product_label(args['item'])} "
-                       "(one GR00T run: pick and place in basket)", mission_id)
+            self.event("ai", "info", f"{who}: pick {config.product_label(args['item'])} with the arm (GR00T)",
+                       mission_id)
 
     def after_command(self):
         with self.lock:
@@ -342,6 +438,7 @@ class MissionManager:
         """Called by the agent after every tool call with the robot's answer."""
         tool, args = entry.get("tool"), entry.get("input") or {}
         result = entry.get("result") or {}
+        self.unanswered = None
         ok = bool(result.get("success"))
         message = result.get("message") or ""
         mission = self.store.get_mission(mission_id)
@@ -487,3 +584,90 @@ class MissionManager:
         if action and action["tool"] == "navigate_to":
             return action["args"]["station"]
         return None
+
+    def picking(self):
+        """The product the arm is picking right now, or None."""
+        action = self.action
+        return action["args"].get("item") if action and action["tool"] == "pick_item" else None
+
+    # ---------- shift report for the owner (Nemotron Ultra) ----------
+
+    def shift_facts(self):
+        """Today's missions, robot performance and stock, from the database (no guessing)."""
+        today = datetime.now().date().isoformat()
+        missions = [m for m in self.store.list_missions(limit=500) if (m.get("created_at") or "").startswith(today)]
+        ran = [m for m in missions if m.get("confirmed_at") and m["status"] in FINISHED]
+        facts = [self.mission_facts(m) for m in ran]
+        times = [f["duration_seconds"] for f, m in zip(facts, ran)
+                 if f["duration_seconds"] is not None and m["status"].startswith("completed")]
+        ordered = {}
+        for m in ran:
+            for i in m["items"]:
+                ordered[i["name"]] = ordered.get(i["name"], 0) + i["qty"]
+        inventory = load_inventory()
+        stock = {config.product_label(k): v.get("stock", 0) for k, v in inventory.items()}
+        count = lambda status: sum(m["status"] == status for m in missions)  # noqa: E731
+        return {
+            "date": today,
+            "missions_run": len(ran),
+            "completed": count("completed"),
+            "completed_with_issues": count("completed_with_issues"),
+            "failed": count("failed"),
+            "stopped_by_operator": count("aborted"),
+            "orders_refused_before_start": count("rejected"),
+            "items_delivered": sum(m["packed"] for m in ran),
+            "items_ordered": sum(m["total"] for m in ran),
+            "pick_attempts": sum(f["pick_attempts"] for f in facts),
+            "failed_picks": sum(f["failed_picks"] for f in facts),
+            "failed_drives": sum(f["failed_drives"] for f in facts),
+            "commands_blocked_by_safety_checks": sum(f["commands_blocked_by_safety_checks"] for f in facts),
+            "average_mission_seconds": round(sum(times) / len(times)) if times else None,
+            "products_ordered": ordered,
+            "problems": sorted({p for m in missions for p in (m.get("problems") or [])})[:8],
+            "stock": stock,
+            "low_stock_3_or_less": [name for name, qty in stock.items() if qty <= 3],
+            "robot": "simulated robot" if self.simulated else "real robot",
+        }
+
+    @staticmethod
+    def rule_shift_report(f):
+        text = (f"Today: {f['missions_run']} missions run, {f['completed']} completed cleanly, "
+                f"{f['completed_with_issues']} with issues, {f['failed']} failed, "
+                f"{f['orders_refused_before_start']} orders refused before start. "
+                f"{f['items_delivered']} of {f['items_ordered']} items delivered")
+        if f["pick_attempts"]:
+            ok = f["pick_attempts"] - f["failed_picks"]
+            text += f"; {ok} of {f['pick_attempts']} picks worked"
+        text += "."
+        if f["average_mission_seconds"] is not None:
+            text += f" Average mission time {f['average_mission_seconds']} s."
+        text += " Restock: " + (", ".join(f["low_stock_3_or_less"]) or "nothing urgent") + "."
+        if f["problems"]:
+            text += " Problems: " + "; ".join(f["problems"][:3]) + "."
+        return text
+
+    def shift_report(self):
+        """Owner's shift report: Nemotron Ultra analyses today's missions and stock (rule-based without a key)."""
+        facts = self.shift_facts()
+        text, by = None, None
+        if has_llm():
+            prompt = ("You are the operations assistant of a dark store that uses a picking robot. Write a short "
+                      "shift report for the store owner in 4 to 6 plain sentences: how the shift went, how well the "
+                      "robot picked and how long missions took, any problems worth noticing, what to restock, and "
+                      "one practical suggestion. Use only these facts. Recommend restocking only the products in "
+                      "low_stock_3_or_less; if that list is empty, say no restocking is needed. "
+                      "No markdown, no lists, no greeting.\n\n"
+                      "Facts: " + json.dumps(facts))
+            try:
+                reply = get_client().with_options(timeout=90.0).chat.completions.create(
+                    model=MODEL_ULTRA, messages=[{"role": "user", "content": prompt}], max_tokens=2000)
+                text = strip_think(reply.choices[0].message.content or "")
+                by = f"NVIDIA Nemotron ({model_name(MODEL_ULTRA)})"
+            except Exception as e:
+                self.event("ai", "warning", f"Nemotron Ultra could not write the shift report "
+                           f"({e.__class__.__name__}). Used a rule-based summary instead.")
+        if not text:
+            text, by = self.rule_shift_report(facts), "rule-based summary (no Nemotron)"
+        self.shift = {"text": text, "by": by, "at": now_iso(), "missions": facts["missions_run"]}
+        self.event("ai", "success", f"Shift report by {by}: {text}")
+        return self.shift

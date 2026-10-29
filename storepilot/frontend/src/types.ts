@@ -28,6 +28,8 @@ export interface Mission {
   total: number;
   bill: { total?: number } | Record<string, never>;
   problems: string[];
+  summary?: string | null;
+  summary_by?: string | null;
   eta?: { total_sec: number; samples: number; remaining_sec?: number | null } | null;
 }
 
@@ -66,13 +68,14 @@ export interface Snapshot {
     telemetry: { state: "simulated" | "live" | "stub" | "stale" | "unavailable"; age_sec: number | null };
     ai: {
       state: "ready" | "degraded" | "error" | "offline" | "unknown"; detail: string; provider: string | null;
-      parser_model: string | null; planner_model: string | null; checked_at: number | null;
+      parser_model: string | null; planner_model: string | null; summary_model: string | null; checked_at: number | null;
     };
   };
   robot: {
     state: RobotState; detail: string; pose: Pose | null; station: string | null; nav_state: string | null;
     battery: number | null; speed: number | null; holding: string | null; obstacle: boolean | null;
     stopped: boolean | null; busy: boolean | null; last_error: string | null; target: string | null;
+    picking_item?: string | null;
     stop_pending: boolean;
     unverified: string[];
     battery_v?: number | null;
@@ -113,8 +116,13 @@ export interface Snapshot {
   mission: Mission | null;
   map: { stations: Record<string, Pose> | null; source: "simulated" | "jetson" | null; labels: Record<string, string>;
     station_counts?: Record<string, number> | null };
+  store: Record<string, Record<string, { id: string; name: string; stock: number }[]>>;
+  shift_report: { text: string; by: string; at: string; missions: number } | null;
+  media: { camera_url: string | null; featured_video: Video | null; upload_enabled: boolean };
   alerts: { level: Level; text: string }[];
   events: EventItem[];
 }
 
-export interface CatalogItem { id: string; name: string; shelf: string; shelf_name: string; stock: number; price: number }
+export interface CatalogItem { id: string; name: string; shelf: string; shelf_name: string; level?: string | null; stock: number; price: number }
+
+export interface Video { id: string; title: string; kind: "file" | "youtube"; url: string; size?: number | null; created_at: string }

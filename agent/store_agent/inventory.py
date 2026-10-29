@@ -53,7 +53,7 @@ def station_of(item):
 
 
 def product_name(item):
-    """Display name from the catalog ("hide_and_seek" -> "Hide & Seek")."""
+    """Display name from the catalog ("screen_cleaning_gel" -> "Screen Cleaning Gel")."""
     info = load_catalog().get(item)
     return info["name"] if info else str(item or "?").replace("_", " ").title()
 

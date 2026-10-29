@@ -231,7 +231,7 @@ if __name__ == "__main__":
     start_worker()
 
     # Create a test order
-    items = [{"item": "chips_packet", "qty": 1}]
+    items = [{"item": "biscuit", "qty": 1}]
     order_id, problems = store.create_order(items)
 
     if order_id:

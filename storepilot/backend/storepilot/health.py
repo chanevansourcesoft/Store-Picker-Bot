@@ -9,7 +9,7 @@ import shutil
 import threading
 import time
 
-from store_agent.config import MODEL_AGENT, MODEL_FAST, get_client, has_llm
+from store_agent.config import MODEL_AGENT, MODEL_FAST, MODEL_ULTRA, get_client, has_llm
 
 STARTED = time.monotonic()
 
@@ -98,6 +98,7 @@ class AIStatus:
                 "provider": "Nebius Token Factory" if has_llm() else None,
                 "parser_model": MODEL_FAST.split("/")[-1] if has_llm() else None,
                 "planner_model": MODEL_AGENT.split("/")[-1] if has_llm() else "offline autopilot",
+                "summary_model": MODEL_ULTRA.split("/")[-1] if has_llm() else None,
                 "checked_at": self.checked_at,
                 "last_call": self.last_call,
             }

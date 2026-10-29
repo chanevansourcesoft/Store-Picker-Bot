@@ -10,3 +10,5 @@ data/*.tmp
 quickpick/venv/
 quickpick/**/__pycache__/
 quickpick/.streamlit/secrets.toml
+logs/
+data/videos/

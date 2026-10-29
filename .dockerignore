@@ -1,0 +1,15 @@
+# Docker build context for storepilot/Dockerfile (repo root). Only agent/ and storepilot/ are needed.
+.git
+**/node_modules
+**/.venv
+**/venv
+**/__pycache__
+**/.env
+**/.env.*
+storepilot/frontend/dist
+storepilot/data
+storepilot/logs
+data
+policy
+ros2_ws
+docs

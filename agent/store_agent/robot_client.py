@@ -160,7 +160,7 @@ if __name__ == "__main__":
     print("/map:", get_map())
 
     print("\nNavigate to shelf_A:", navigate("shelf_A"))
-    print("Pick chips_packet:", pick("chips_packet", "shelf_A"))
+    print("Pick biscuit:", pick("biscuit", "shelf_A"))
 
     print("\nNavigate to customer:", navigate("customer"))
     print("Navigate to home:", navigate("home"))

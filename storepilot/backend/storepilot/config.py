@@ -69,6 +69,15 @@ DB_PATH = Path(os.environ.get("STOREPILOT_DB", ROOT / "data" / "storepilot.db"))
 STATIONS_PATH = Path(os.environ.get("STOREPILOT_STATIONS", ROOT / "data" / "stations.json"))
 STATIC_DIR = ROOT / "frontend" / "dist"
 
+# Real robot videos (Real robot page). Uploading, adding links and deleting need this team password;
+# empty = the page only plays the videos already there (anyone can watch).
+VIDEOS_DIR = Path(os.environ.get("STOREPILOT_VIDEOS_DIR", ROOT / "data" / "videos"))
+UPLOAD_PASSWORD = os.environ.get("STOREPILOT_UPLOAD_PASSWORD", "")
+MAX_VIDEO_MB = int(os.environ.get("STOREPILOT_MAX_VIDEO_MB", "500"))
+# Live robot camera as an MJPEG stream the browser can open (live mode), e.g. http://<jetson>:8090/live/scene_cam.mjpg.
+# Empty = the Robot camera panel plays the newest real robot video instead.
+CAMERA_URL = os.environ.get("STOREPILOT_CAMERA_URL", "").strip()
+
 # Telemetry timing
 POLL_SEC_LIVE = 1.0
 POLL_SEC_MOCK = 0.2
@@ -78,7 +87,7 @@ DISCONNECTED_AFTER_SEC = 6.0  # no successful poll for this long -> "disconnecte
 # Display names for stations (the robot uses the ids on the left)
 STATION_LABELS = {
     "home": "Home",
-    "shelf_A": "Shelf A",
+    "shelf_A": "Table",       # one table with two shelf levels (upper_shelf, lower_shelf)
     "shelf_B": "Shelf B",
     "shelf_C": "Shelf C",
     "customer": "Packing area",
