@@ -1,9 +1,7 @@
-"""Shared settings for the store agent (used by QuickPick and StorePilot).
+"""Shared settings for the store agent (used by the StorePilot AI dashboard).
 
 Settings come from environment variables (or the .env file in the folder the app
 is started from, or one of its parents).
-If a setting is not there, we look in Streamlit secrets (.streamlit/secrets.toml,
-or the "Secrets" box on Streamlit Community Cloud).
 """
 
 import os
@@ -15,17 +13,8 @@ load_dotenv(find_dotenv(usecwd=True))
 
 
 def get_setting(name, default=""):
-    """Read a setting: first the environment, then st.secrets. Never print secrets."""
-    value = os.environ.get(name)
-    if value:
-        return value
-    try:
-        import streamlit as st
-        if name in st.secrets:
-            return str(st.secrets[name])
-    except Exception:
-        pass  # no secrets file, or not running in Streamlit
-    return default
+    """Read a setting from the environment (or .env). Never print secrets."""
+    return os.environ.get(name) or default
 
 
 NEBIUS_BASE_URL = "https://api.tokenfactory.nebius.com/v1/"
@@ -62,5 +51,5 @@ def has_llm():
 
 def get_client():
     if not NEBIUS_API_KEY:
-        raise RuntimeError("NEBIUS_API_KEY is missing. Add it to .env or .streamlit/secrets.toml.")
+        raise RuntimeError("NEBIUS_API_KEY is missing. Add it to storepilot/.env.")
     return OpenAI(base_url=NEBIUS_BASE_URL, api_key=NEBIUS_API_KEY)

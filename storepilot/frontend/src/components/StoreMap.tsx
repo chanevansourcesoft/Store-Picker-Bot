@@ -7,7 +7,7 @@ function labelAt(name: string, p: Pose) {
   if (name === "home") return { x: p.x, y: p.y - 0.5 };
   const fx = p.x + Math.cos(p.theta) * 0.5;
   const fy = p.y + Math.sin(p.theta) * 0.5;
-  const [along, across] = name === "customer" ? [0.24, 0.55] : [0.18, 0.5];
+  const [along, across] = name === "customer" ? [0.24, 0.55] : [0.24, 0.62];
   const top = Math.abs(Math.sin(p.theta)) * along + Math.abs(Math.cos(p.theta)) * across;
   return { x: fx, y: fy + top + 0.16 };
 }
@@ -18,11 +18,13 @@ export function routeProgress(snap: Snapshot) {
   const m = snap.mission;
   const active = m && (m.status === "running" || m.status === "awaiting_confirmation");
   if (!m || !active) return { stops: [] as string[], current: -1 };
-  const stops = [...m.route, "customer", "home"];
+  // the robot parks at the reception (home = customer), so the route ends there
+  const stops = [...m.route, "customer"];
+  const atReception = (s: string | null) => (s === "home" ? "customer" : s);
   let current = 0;
   if (m.status === "running") {
-    const target = snap.robot.target;
-    const here = snap.robot.station;
+    const target = atReception(snap.robot.target);
+    const here = atReception(snap.robot.station);
     const doneShelves = new Set<string>();
     // a shelf is done once the robot left it for a later stop
     if (target && stops.includes(target)) current = stops.indexOf(target);
@@ -32,8 +34,15 @@ export function routeProgress(snap: Snapshot) {
   return { stops, current };
 }
 
-export function StoreMap({ snap, compact = false }: { snap: Snapshot; compact?: boolean }) {
-  const stations = snap.map.stations;
+/** fill: take the parent's height and fit the whole map inside it (no scrolling), centered. */
+export function StoreMap({ snap, compact = false, fill = false }: { snap: Snapshot; compact?: boolean; fill?: boolean }) {
+  // Only the tables that hold products (or are in the route): the store has one table with two shelves
+  const inUse = new Set(Object.keys(snap.store ?? {}));
+  const routeStops = routeProgress(snap).stops;
+  // Home is the reception (the robot parks there), so only the reception and the table are drawn
+  const allStations = snap.map.stations;
+  const stations = allStations && Object.fromEntries(Object.entries(allStations).filter(([name]) => name !== "home" &&
+    (!name.startsWith("shelf") || inUse.size === 0 || inUse.has(name) || routeStops.includes(name))));
   const labels = snap.map.labels;
   const pose = snap.robot.pose;
   if (!stations || Object.keys(stations).length === 0) {
@@ -60,8 +69,8 @@ export function StoreMap({ snap, compact = false }: { snap: Snapshot; compact?: 
 
   const { stops, current } = routeProgress(snap);
   const running = snap.mission?.status === "running";
-  const target = snap.robot.target;
-  const at = (s: string) => stations[s];
+  const target = snap.robot.target === "home" ? "customer" : snap.robot.target;
+  const at = (s: string) => allStations?.[s];   // positions, also of the (hidden) home
   const done = running && stops.length ? ["home", ...stops.slice(0, Math.max(current, 0))].filter(at) : [];
   const upcoming = stops.slice(Math.max(current, 0)).filter(at);
   const pathOf = (names: string[], start?: Pose | null) =>
@@ -72,8 +81,9 @@ export function StoreMap({ snap, compact = false }: { snap: Snapshot; compact?: 
   for (let gy = Math.ceil(minY * 2) / 2; gy <= maxY; gy += 0.5) grid.push(<line key={`y${gy}`} y1={Y(gy)} y2={Y(gy)} x1={0} x2={W} />);
 
   return (
-    <div className="relative">
-      <svg viewBox={`0 0 ${W.toFixed(0)} ${H.toFixed(0)}`} className="block h-auto w-full rounded-lg bg-[#0d131a]"
+    <div className={`relative ${fill ? "h-full" : ""}`}>
+      <svg viewBox={`0 0 ${W.toFixed(0)} ${H.toFixed(0)}`}
+        className={`block w-full rounded-lg bg-[#0d131a] ${fill ? "h-full" : "h-auto"}`}
         role="img" aria-label="Store map with robot position">
         <g stroke="#1a232e" strokeWidth={1}>{grid}</g>
 
@@ -84,14 +94,15 @@ export function StoreMap({ snap, compact = false }: { snap: Snapshot; compact?: 
           const inRoute = stops.includes(name);
           const fx = p.x + Math.cos(p.theta) * 0.5;
           const fy = p.y + Math.sin(p.theta) * 0.5;
-          const accent = isTarget ? "var(--color-info)" : inRoute ? "var(--color-warn)" : "#3a4757";
+          const accent = isTarget ? "var(--color-info)" : inRoute ? "var(--color-brand)" : "#3a4757";
           return (
             <g key={name}>
               {isShelf && (
                 <g transform={`translate(${X(fx)} ${Y(fy)}) rotate(${deg(p.theta)})`}>
-                  <rect x={-18} y={-50} width={36} height={100} rx={4} fill={isTarget ? "#132a40" : "#16202b"}
+                  {/* the table seen from above; its two shelf levels are drawn in the front view */}
+                  <rect x={-24} y={-62} width={48} height={124} rx={6} fill={isTarget ? "#132a40" : "#1b1712"}
                     stroke={accent} strokeWidth={isTarget ? 4 : 2.5} />
-                  {[-25, 0, 25].map((o) => <line key={o} x1={-14} x2={14} y1={o} y2={o} stroke="#2a3644" strokeWidth={2} />)}
+                  <rect x={-16} y={-54} width={32} height={108} rx={3} fill="none" stroke="#3a3127" strokeWidth={2} strokeDasharray="5 5" />
                 </g>
               )}
               {name === "customer" && (
@@ -133,7 +144,7 @@ export function StoreMap({ snap, compact = false }: { snap: Snapshot; compact?: 
             <circle r={34} fill="var(--color-info)" opacity={0.12} />
             <g style={{ transition: "transform 250ms linear" }} transform={`rotate(${deg(pose.theta)})`}>
               <rect x={-20} y={-17} width={40} height={34} rx={8} fill="#1d2a38" stroke="var(--color-ink)" strokeWidth={3} />
-              <path d="M 4 -10 L 20 0 L 4 10 Z" fill="var(--color-warn)" />
+              <path d="M 4 -10 L 20 0 L 4 10 Z" fill="var(--color-brand)" />
             </g>
           </g>
         )}

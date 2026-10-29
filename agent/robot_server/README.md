@@ -165,7 +165,7 @@ curl -X POST http://localhost:8000/stop
 ### GET /health
 `{"status": "ok", "ros_available": ..., "ros_connected": ..., "arm_ready": false, "arm": {"state": "loading", ...}}`.
 `arm_ready` is true only when the policy worker answers and its model is loaded. The dashboard
-and QuickPick start no order until it is true.
+starts no order until it is true.
 
 ### POST /resume
 Resume after emergency stop, or after "the gripper still holds something" (only once a person
@@ -310,13 +310,13 @@ netstat -tlnp | grep 8000
    uvicorn robot_server.mock_robot:app --port 8000
    ```
 
-2. In another terminal, run the Streamlit app:
+2. In another terminal, run the StorePilot AI dashboard against it (live mode over HTTP):
    ```bash
-   cd ../storepilot/quickpick
-   streamlit run Home.py
+   cd ../storepilot/backend
+   STOREPILOT_MODE=live JETSON_LINK=http JETSON_URL=http://127.0.0.1:8000 .venv/bin/python -m storepilot
    ```
 
-3. Place an order from the Customer page and watch the Owner dashboard.
+3. Open http://localhost:8080 and place an order on the Order page.
 
 ## Files
 

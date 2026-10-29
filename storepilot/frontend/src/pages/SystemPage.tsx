@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Bot, Brain, Cpu, History, Radio } from "lucide-react";
-import { api, fmtDuration, fmtTime, missionDuration } from "../api";
+import { api, fmtDuration, fmtTime, missionDuration, modelName } from "../api";
 import { RobotSoftware } from "../components/RobotSoftware";
 import { Dot, MissionStatusTag, Panel } from "../components/ui";
 import type { Mission, Snapshot } from "../types";
@@ -51,20 +51,18 @@ export function SystemPage({ snap, toast }: { snap: Snapshot; toast: (t: string,
     api<Mission[]>("/api/missions?limit=40").then(setMissions).catch(() => undefined);
   }, [latestStatus]);
 
-  const finished = missions.filter((m) => !["awaiting_confirmation", "running"].includes(m.status));
-  const ok = finished.filter((m) => m.status === "completed").length;
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid grid-cols-2 gap-3">
-        <Health title="Raspberry Pi dashboard" icon={<Cpu size={16} aria-hidden />} state={c.dashboard.state} rows={[
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <Health title="Dashboard server" icon={<Cpu size={16} aria-hidden />} state={c.dashboard.state} rows={[
           ["CPU temp", c.dashboard.cpu_temp_c === null ? null : `${c.dashboard.cpu_temp_c} °C`],
           ["Load (1 min)", `${c.dashboard.load_1m} / ${c.dashboard.cpus} cores`],
           ["Memory used", c.dashboard.mem_used_pct === null ? null : `${c.dashboard.mem_used_pct}%`],
           ["Disk free", `${c.dashboard.disk_free_gb} GB`],
           ["Dashboard up", fmtDuration(c.dashboard.dashboard_uptime_sec)],
         ]} />
-        <Health title="Jetson link" icon={<Bot size={16} aria-hidden />} state={c.jetson.state} rows={[
+        <Health title="Robot link" icon={<Bot size={16} aria-hidden />} state={c.jetson.state} rows={[
           ["Endpoint", c.jetson.url ?? (c.jetson.state === "simulated" ? "built-in simulator" : "JETSON_URL not set")],
           ["Latency", c.jetson.latency_ms === null ? null : `${c.jetson.latency_ms} ms`],
           ["ROS 2 on Jetson", c.jetson.ros_available === null || c.jetson.ros_available === undefined ? null : c.jetson.ros_available ? "available" : "not available"],
@@ -79,8 +77,9 @@ export function SystemPage({ snap, toast }: { snap: Snapshot; toast: (t: string,
         ]} />
         <Health title="AI backend" icon={<Brain size={16} aria-hidden />} state={c.ai.state} rows={[
           ["Provider", c.ai.provider ?? "none (offline)"],
-          ["Parser", c.ai.parser_model ?? "keyword parser"],
-          ["Planner", c.ai.planner_model],
+          ["Reads orders", c.ai.parser_model ? modelName(c.ai.parser_model) : "keyword parser"],
+          ["Plans the robot", c.ai.provider ? modelName(c.ai.planner_model) : c.ai.planner_model],
+          ["Writes reports", c.ai.summary_model ? modelName(c.ai.summary_model) : "rule-based"],
           ["Status", c.ai.detail],
         ]} />
       </div>
@@ -88,7 +87,7 @@ export function SystemPage({ snap, toast }: { snap: Snapshot; toast: (t: string,
       {snap.jetson_ctl && <RobotSoftware snap={snap} toast={toast} />}
 
       <Panel title="Mission history" icon={<History size={15} />}
-        right={<span className="text-[12px] text-dim">{finished.length ? `${ok} of ${finished.length} completed · stored on this Pi` : "stored on this Pi"}</span>}
+
         bodyClass="py-1">
         {missions.length === 0 ? (
           <p className="py-6 text-center text-sm text-dim">No missions yet.</p>
@@ -106,6 +105,7 @@ export function SystemPage({ snap, toast }: { snap: Snapshot; toast: (t: string,
                     {m.total ? ` · ${m.packed}/${m.total} items` : ""}
                     {m.confirmed_at ? ` · ${fmtDuration(missionDuration(m))}` : ""}
                   </p>
+                  {m.summary && <p className="mt-0.5 line-clamp-2 text-[13px] text-muted">{m.summary}</p>}
                 </div>
                 <MissionStatusTag status={m.status} />
               </li>

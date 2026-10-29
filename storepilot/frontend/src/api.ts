@@ -95,3 +95,21 @@ export function missionDuration(m: { confirmed_at: string | null; finished_at: s
   const end = m.finished_at ? new Date(m.finished_at).getTime() : Date.now();
   return (end - new Date(m.confirmed_at).getTime()) / 1000;
 }
+
+/** "NVIDIA-Nemotron-3-Nano-30B-A3B" / "nemotron-3-super-120b-a12b" -> "Nemotron 3 Nano 30B-A3B". */
+export function modelName(id: string | null | undefined) {
+  if (!id) return "";
+  const words = id.replace(/^nvidia[/-]/i, "").split("-");
+  const out: string[] = [];
+  for (const w of words) {
+    if (/^a?\d+b$/i.test(w) && out.length && /\d+B$/.test(out[out.length - 1])) out[out.length - 1] += `-${w.toUpperCase()}`;
+    else if (/^a?\d+b$/i.test(w)) out.push(w.toUpperCase());
+    else out.push(w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+  }
+  return out.join(" ");
+}
+
+/** Replace raw Nemotron model ids inside a sentence with readable names. */
+export function niceModels(text: string | null | undefined) {
+  return (text ?? "").replace(/(NVIDIA-)?Nemotron-3-[A-Za-z]+-\d+b-a\d+b/gi, (id) => modelName(id));
+}

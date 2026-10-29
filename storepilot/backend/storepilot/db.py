@@ -31,7 +31,9 @@ CREATE TABLE IF NOT EXISTS missions (
     bill TEXT NOT NULL DEFAULT '{}',
     problems TEXT NOT NULL DEFAULT '[]',
     step_log TEXT NOT NULL DEFAULT '[]',
-    stock_reserved INTEGER NOT NULL DEFAULT 0
+    stock_reserved INTEGER NOT NULL DEFAULT 0,
+    summary TEXT,
+    summary_by TEXT
 );
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,8 +61,13 @@ class Store:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(SCHEMA)
         # Databases from before stock reservation: add the column (old missions = not reserved)
-        if "stock_reserved" not in [r[1] for r in self.conn.execute("PRAGMA table_info(missions)")]:
+        columns = [r[1] for r in self.conn.execute("PRAGMA table_info(missions)")]
+        if "stock_reserved" not in columns:
             self.conn.execute("ALTER TABLE missions ADD COLUMN stock_reserved INTEGER NOT NULL DEFAULT 0")
+        # Databases from before the mission summary (Nemotron Ultra)
+        for column in ("summary", "summary_by"):
+            if column not in columns:
+                self.conn.execute(f"ALTER TABLE missions ADD COLUMN {column} TEXT")
         self.conn.commit()
 
     # ---------- missions ----------

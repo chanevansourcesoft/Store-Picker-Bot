@@ -122,7 +122,7 @@ export function LiveDrive({ snap, toast }: { snap: Snapshot; toast: Toast }) {
             : mode === "pose" ? setPending({ kind: "pose", p }) : pickGoal(p)} />
         {snap.ros?.costmap && (
           <label className="flex min-h-10 items-center gap-2 px-1 pt-1 text-[13px] text-muted">
-            <input type="checkbox" checked={showCostmap} onChange={(e) => setShowCostmap(e.target.checked)} className="h-5 w-5 accent-[#a78bfa]" />
+            <input type="checkbox" checked={showCostmap} onChange={(e) => setShowCostmap(e.target.checked)} className="h-5 w-5 accent-[#8b7cf6]" />
             Show Nav2 costmap (purple = inflation, red = lethal) and robot footprint (teal)
           </label>
         )}
@@ -136,7 +136,7 @@ export function LiveDrive({ snap, toast }: { snap: Snapshot; toast: Toast }) {
             <button key={m} onClick={() => { setMode(m); setPending(null); }}
               className={`flex min-h-12 items-center justify-center gap-1.5 rounded-lg border text-[14px] font-semibold ${
                 mode === m ? (m === "pose" ? "border-plan bg-plan/15 text-plan" : m === "goal" ? "border-ok bg-ok/15 text-ok"
-                  : m === "route" ? "border-warn bg-warn/15 text-warn" : "border-info bg-info/15 text-info")
+                  : m === "route" ? "border-brand bg-brand/15 text-brand" : "border-info bg-info/15 text-info")
                   : "border-line-strong text-muted active:bg-raised"}`}>
               <Icon size={18} aria-hidden />{text}
             </button>
@@ -240,13 +240,13 @@ export function LiveDrive({ snap, toast }: { snap: Snapshot; toast: Toast }) {
             return saveOpen ? (
               <button key={s} disabled={!r.localized || busy}
                 onClick={() => run("/api/stations", { name: s }, `${label(s)} saved here`)}
-                className="flex min-h-14 flex-col items-center justify-center rounded-lg border border-warn/50 bg-warn/10 text-[13px] font-semibold text-warn active:bg-warn/20 disabled:opacity-40">
+                className="flex min-h-14 flex-col items-center justify-center rounded-lg border border-brand/50 bg-brand/10 text-[13px] font-semibold text-brand active:bg-brand/20 disabled:opacity-40">
                 <Save size={16} aria-hidden />Here = {label(s)}
               </button>
             ) : (
               <button key={s} disabled={!saved || !!blocker} onClick={() => setPending({ kind: "station", name: s })}
                 className="flex min-h-14 flex-col items-center justify-center gap-0.5 rounded-lg border border-line-strong bg-raised text-[14px] font-semibold text-ink active:bg-line disabled:opacity-35">
-                <MapPin size={16} aria-hidden className={saved ? "text-warn" : "text-dim"} />{label(s)}
+                <MapPin size={16} aria-hidden className={saved ? "text-brand" : "text-dim"} />{label(s)}
                 {!saved && <span className="text-[10px] font-medium text-dim">not saved</span>}
               </button>
             );

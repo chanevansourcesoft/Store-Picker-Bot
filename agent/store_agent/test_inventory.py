@@ -37,6 +37,9 @@ def test_real_catalog_matches_policy():
     assert {item: (info["shelf"], info["level"]) for item, info in catalog.items()} == {
         "ink_box": ("shelf_A", "upper_shelf"),
         "biscuit": ("shelf_A", "lower_shelf"),
+        "fevicol": ("shelf_A", "upper_shelf"),
+        "screen_cleaning_gel": ("shelf_A", "upper_shelf"),
+        "frooti": ("shelf_A", "lower_shelf"),
     }, catalog
     policy_file = inventory.REPO_ROOT / "policy" / "instructions.json"
     if policy_file.exists():

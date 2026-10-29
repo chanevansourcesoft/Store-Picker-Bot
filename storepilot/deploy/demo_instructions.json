@@ -1,0 +1,7 @@
+{
+  "ink_box": {"shelf": "upper_shelf", "instruction": "pick up the ink box and place it in the basket"},
+  "biscuit": {"shelf": "lower_shelf", "instruction": "pick up the biscuit packet and place it in the basket"},
+  "fevicol": {"shelf": "upper_shelf", "instruction": "pick up the Fevicol bottle and place it in the basket"},
+  "screen_cleaning_gel": {"shelf": "upper_shelf", "instruction": "pick up the screen cleaning gel bottle and place it in the basket"},
+  "frooti": {"shelf": "lower_shelf", "instruction": "pick up the Frooti mango drink box and place it in the basket"}
+}

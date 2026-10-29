@@ -21,7 +21,9 @@
   --color-warn: #f2a33a;
   --color-err: #f0524f;
   --color-info: #4ea8f5;
-  --color-plan: #a78bfa;
+  --color-plan: #8b7cf6;   /* = brand: the AI is the brand */
+  --color-brand: #8b7cf6;
+  --color-pick: #f472b6;
   --color-teal: #2dd4bf;
 }
 

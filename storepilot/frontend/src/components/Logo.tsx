@@ -1,0 +1,25 @@
+/** The project logo: the robot from the Devpost thumbnail (same file as public/favicon.svg). */
+export function Logo({ className = "h-9 w-9" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 32 32" className={`shrink-0 ${className}`} aria-hidden>
+      <rect width="32" height="32" rx="8" fill="#525D5A"/>
+      <g fill="none" stroke="#77E6A8" strokeOpacity=".45" strokeWidth="1.2">
+      <rect x="22.5" y="4.5" width="6" height="22" rx="1.2"/>
+      <path d="M22.5 11.5h6M22.5 18.5h6"/>
+      </g>
+      <rect x="24" y="7.6" width="1.6" height="3" rx=".4" fill="#F2767A"/>
+      <rect x="26" y="7.6" width="1.6" height="3" rx=".4" fill="#F2767A"/>
+      <rect x="24" y="14.6" width="1.6" height="3" rx=".4" fill="#A3D6FF"/>
+      <rect x="26" y="14.6" width="1.6" height="3" rx=".4" fill="#A3D6FF"/>
+      <path d="M8.5 19.5 L10 11 L19.5 8" fill="none" stroke="#EFFFF7" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+      <rect x="19" y="6.2" width="3.6" height="3.6" rx=".7" fill="#FFAD77" transform="rotate(-12 20.8 8)"/>
+      <circle cx="10" cy="11" r="1.9" fill="#77E6A8"/>
+      <circle cx="8.5" cy="19.5" r="1.9" fill="#77E6A8"/>
+      <path d="M12.5 16.2h6.5l-.9 3.3h-4.7z" fill="#F5C26B"/>
+      <rect x="4.5" y="19.5" width="16" height="5.5" rx="1.8" fill="#EFFFF7"/>
+      <circle cx="9" cy="22.2" r=".8" fill="#77E6A8"/><circle cx="11.5" cy="22.2" r=".8" fill="#77E6A8"/>
+      <rect x="5.5" y="25" width="4.5" height="2.4" rx="1" fill="#2F3836"/>
+      <rect x="15" y="25" width="4.5" height="2.4" rx="1" fill="#2F3836"/>
+    </svg>
+  );
+}

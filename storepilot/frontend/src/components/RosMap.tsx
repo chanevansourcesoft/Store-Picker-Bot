@@ -95,7 +95,7 @@ export function RosMap({ snap, mode = "view", onPick, compact = false, draft = [
   const goalActive = goal && (goal.status === "accepted" || goal.status === "executing");
   const plan = ros.plan.map(([x, y]) => `${X(x).toFixed(1)},${Y(y).toFixed(1)}`).join(" ");
   const stations = snap.map.stations ?? {};
-  const pickColor = mode === "pose" ? "var(--color-plan)" : mode === "route" ? "var(--color-warn)" : "var(--color-ok)";
+  const pickColor = mode === "pose" ? "var(--color-plan)" : mode === "route" ? "var(--color-brand)" : "var(--color-ok)";
   const active = snap.route?.busy ? snap.route.route : null;
   const routePts = active ? active.waypoints : draft;
   const routeLine = [...(pose && routePts.length ? [pose] : []), ...routePts]
@@ -104,7 +104,7 @@ export function RosMap({ snap, mode = "view", onPick, compact = false, draft = [
   return (
     <div className="relative">
       <svg ref={svgRef} viewBox={`${X(vx)} ${Y(vy + viewH)} ${viewW * S} ${viewH * S}`}
-        className={`block w-full touch-none rounded-lg bg-[#0d131a] ${compact ? "max-h-[300px]" : "max-h-[560px]"} ${mode !== "view" ? "cursor-crosshair" : ""}`}
+        className={`block w-full touch-none rounded-lg bg-[#0d131a] ${compact ? "max-h-[300px]" : "max-h-[calc(100vh-330px)]"} ${mode !== "view" ? "cursor-crosshair" : ""}`}
         style={{ aspectRatio: `${world.w} / ${world.h}` }}
         onPointerDown={compact ? undefined : down} onPointerMove={compact ? undefined : move} onPointerUp={compact ? undefined : up}
         role="img" aria-label="Live robot map">
@@ -131,7 +131,7 @@ export function RosMap({ snap, mode = "view", onPick, compact = false, draft = [
         {/* saved stations */}
         {Object.entries(stations).map(([name, s]) => (
           <g key={name} transform={`translate(${X(s.x)} ${Y(s.y)})`}>
-            <circle r={9 * k} fill="var(--color-warn)" stroke="#0d131a" strokeWidth={3 * k} />
+            <circle r={9 * k} fill="var(--color-brand)" stroke="#0d131a" strokeWidth={3 * k} />
             <text y={-15 * k} textAnchor="middle" fontSize={(compact ? 20 : 15) * k} fontWeight={700} fill="#ffd59a">
               {(snap.map.labels[name] ?? name).toUpperCase()}
             </text>
@@ -140,13 +140,13 @@ export function RosMap({ snap, mode = "view", onPick, compact = false, draft = [
 
         {/* route: draft waypoints, or the running route (done = dim, current = blue) */}
         {routePts.length > 0 && (
-          <polyline points={routeLine} fill="none" stroke="var(--color-warn)" strokeWidth={3 * k}
+          <polyline points={routeLine} fill="none" stroke="var(--color-brand)" strokeWidth={3 * k}
             strokeDasharray={`${10 * k} ${8 * k}`} opacity={0.7} />
         )}
         {routePts.map((p, i) => {
           const done = active && i < active.index;
           const current = active && i === active.index;
-          const color = badPoints.includes(i) ? "var(--color-err)" : current ? "var(--color-info)" : done ? "#3a4757" : "var(--color-warn)";
+          const color = badPoints.includes(i) ? "var(--color-err)" : current ? "var(--color-info)" : done ? "#3a4757" : "var(--color-brand)";
           return (
             <g key={`wp${i}`} transform={`translate(${X(p.x)} ${Y(p.y)})`}>
               <path d={`M 0 0 L ${30 * k * Math.cos(p.theta)} ${-30 * k * Math.sin(p.theta)}`} stroke={color} strokeWidth={4 * k} />
@@ -214,7 +214,7 @@ function Robot({ pose, X, Y, k }: { pose: Pose; X: (x: number) => number; Y: (y:
       style={{ transition: "transform 250ms linear" }}>
       <circle r={30 * k} fill="var(--color-info)" opacity={0.15} />
       <rect x={-16 * k} y={-13 * k} width={32 * k} height={26 * k} rx={6 * k} fill="#1d2a38" stroke="var(--color-ink)" strokeWidth={3 * k} />
-      <path d={`M ${2 * k} ${-8 * k} L ${17 * k} 0 L ${2 * k} ${8 * k} Z`} fill="var(--color-warn)" />
+      <path d={`M ${2 * k} ${-8 * k} L ${17 * k} 0 L ${2 * k} ${8 * k} Z`} fill="var(--color-brand)" />
     </g>
   );
 }

@@ -15,27 +15,24 @@ explicit HTTP interface. The Jetson stays the source of truth and runs all robot
                                               └─ live: Jetson robot server, Contract v2 (HTTP)
 ```
 
-This folder holds both store apps. They share the agent in `../agent` (Nemotron planner,
-order parser, OrderTracker guards, robot client) and one `.env`:
-
-| Folder | App | Start (mock, no robot, no key) |
-|---|---|---|
-| `backend/` + `frontend/` | StorePilot AI dashboard (this README) | `./dev.sh`, or the installed service on :8080 |
-| `quickpick/` | QuickPick customer kiosk + owner dashboard (Streamlit) | `cd quickpick && DEMO_MODE=1 streamlit run Home.py` ([README](quickpick/README.md)) |
+The dashboard uses the shared agent in `../agent` (Nemotron planner, order parser, OrderTracker
+guards) and one `.env`. Start it without a robot or API key: `./run_local.sh` (after
+`./run_local.sh setup` once), or `./dev.sh` for development.
 
 ## What it shows
 
-| Page | Contents |
+| Tab | Contents |
 |---|---|
-| **Operations** | Robot state (Idle · Planning · Navigating · Picking · Returning · Completed · Paused · Error · Disconnected), mission and "2 of 4 items picked", destination, live mini-map, battery / speed / position / heading / navigation / holding, alerts, latest planner and robot events |
-| **Order** | Natural-language order box, tap-to-build product steppers (works without a keyboard), parsed items with shelf and qty, unknown products, items the AI *inferred* (flagged), route, estimate (only after 3+ completed missions), Start / Discard |
-| **Map** | Stations, shelves, packing area, robot pose and heading, planned route, current leg, distance to destination, route progress |
-| **Activity** | Every mission event, filterable by AI planner / robot / operator / system |
-| **System** | Raspberry Pi health, Jetson link, robot telemetry, AI backend, mission history |
+| **Operations** | Robot state and mission progress, alerts, telemetry, **Today** (order success, items delivered, arm pick success, mission time, order and robot breakdown), **Nemotron at work** (Nano reads the order → Super plans → GR00T picks → Ultra reports), **Store analysis** (stock and restock table, Nemotron Ultra findings and actions) |
+| **Order** | Natural-language order box, tap-to-build product cards (with shelf level), parsed items, items the AI *inferred* (flagged), route, Start / Discard. Start opens Live mission |
+| **Live mission** | The whole store map in one view with the table's front view (upper and lower shelf, ordered and picked products), route progress, and the mission activity: every Nemotron decision with the robot's result under it (filters: All · Nemotron · Robot). Live mode: the robot's real map and driving tools |
+| **Real robot** | Videos of the real robot (uploads and YouTube links need `STOREPILOT_UPLOAD_PASSWORD`); live robot camera when `STOREPILOT_CAMERA_URL` is set |
+| **System** | Dashboard server, robot link, telemetry, AI backend (the three Nemotron models), mission history with each mission's report |
 
 **Honest data rule:** a value that is not known is shown as *Unavailable*, never as a number.
-In mock mode a striped banner, a "Simulation" badge, a "Simulated map" tag and "sim" tags on
-every event make it impossible to mistake simulated data for the robot.
+In mock mode a striped banner, a "Simulation" badge and a "Simulated map" tag make it impossible
+to mistake simulated data for the robot. Store analysis numbers are computed from the database;
+Nemotron Ultra only writes the findings and actions about them.
 
 ## Safety boundaries (built in)
 

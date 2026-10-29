@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
-import { Activity, ClipboardList, Gauge, Map as MapIcon, OctagonX, Server, ShieldAlert } from "lucide-react";
+import { ClipboardList, Clapperboard, Gauge, Map as MapIcon, OctagonX, Server, ShieldAlert } from "lucide-react";
 import { api, type Link } from "../api";
 import type { Snapshot } from "../types";
+import { Logo } from "./Logo";
 import { Dot } from "./ui";
 
-export type Tab = "ops" | "order" | "map" | "activity" | "system";
+export type Tab = "ops" | "order" | "mission" | "videos" | "system";
 
 export const TABS: { id: Tab; label: string; icon: typeof Gauge }[] = [
   { id: "ops", label: "Operations", icon: Gauge },
   { id: "order", label: "Order", icon: ClipboardList },
-  { id: "map", label: "Map", icon: MapIcon },
-  { id: "activity", label: "Activity", icon: Activity },
+  { id: "mission", label: "Live mission", icon: MapIcon },
+  { id: "videos", label: "Real robot", icon: Clapperboard },
   { id: "system", label: "System", icon: Server },
 ];
 
@@ -62,13 +63,10 @@ export function TopBar({ snap, link, toast }: { snap: Snapshot | null; link: Lin
   return (
     <header className="flex h-[68px] shrink-0 items-center gap-3 border-b border-line bg-panel px-4">
       <div className="flex min-w-0 items-center gap-2.5">
-        <svg viewBox="0 0 32 32" className="h-9 w-9 shrink-0" aria-hidden>
-          <rect width="32" height="32" rx="8" fill="#18202b" stroke="#34414f" />
-          <path d="M9 21l7-12 7 12-7-3z" fill="#F2A33A" />
-        </svg>
+        <Logo className="h-10 w-10" />
         <div className="min-w-0 leading-tight">
-          <div className="truncate text-[17px] font-bold tracking-tight">StorePilot <span className="text-warn">AI</span></div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-dim">Robot control panel</div>
+          <div className="truncate text-[17px] font-bold tracking-tight">StorePilot <span className="text-brand">AI</span></div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-dim">Dark store picking robot · NVIDIA Nemotron</div>
         </div>
       </div>
 
@@ -80,11 +78,11 @@ export function TopBar({ snap, link, toast }: { snap: Snapshot | null; link: Lin
           </span>
         )}
         <div className="flex flex-col gap-1 text-[11px] font-semibold text-muted">
-          <span className="flex items-center gap-1.5"><Dot color={link === "live" ? "var(--color-ok)" : "var(--color-err)"} />Pi</span>
-          <span className="flex items-center gap-1.5"><Dot color={c ? linkColor(c.jetson.state) : "var(--color-dim)"} />Jetson</span>
+          <span className="flex items-center gap-1.5"><Dot color={link === "live" ? "var(--color-ok)" : "var(--color-err)"} />Server</span>
+          <span className="flex items-center gap-1.5"><Dot color={c ? linkColor(c.jetson.state) : "var(--color-dim)"} />Robot</span>
         </div>
         <div className="flex flex-col gap-1 text-[11px] font-semibold text-muted">
-          <span className="flex items-center gap-1.5"><Dot color={c ? linkColor(c.telemetry.state) : "var(--color-dim)"} />Telem</span>
+          <span className="flex items-center gap-1.5"><Dot color={c ? linkColor(c.telemetry.state) : "var(--color-dim)"} />Telemetry</span>
           <span className="flex items-center gap-1.5"><Dot color={c ? linkColor(c.ai.state) : "var(--color-dim)"} />AI</span>
         </div>
         <Clock />
@@ -121,20 +119,20 @@ export function SimBanner({ snap }: { snap: Snapshot }) {
   return null;
 }
 
-export function BottomNav({ tab, setTab, badges }: { tab: Tab; setTab: (t: Tab) => void; badges: Partial<Record<Tab, boolean>> }) {
+export function TabNav({ tab, setTab, badges }: { tab: Tab; setTab: (t: Tab) => void; badges: Partial<Record<Tab, boolean>> }) {
   return (
-    <nav className="grid h-[76px] shrink-0 grid-cols-5 border-t border-line bg-panel">
+    <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-line bg-panel px-3">
       {TABS.map(({ id, label, icon: Icon }) => {
         const active = id === tab;
         return (
           <button key={id} onClick={() => setTab(id)}
-            className={`relative flex flex-col items-center justify-center gap-1 text-[12px] font-semibold transition-colors ${
-              active ? "text-ink" : "text-dim active:text-muted"}`}
+            className={`relative flex h-12 shrink-0 items-center gap-2 px-4 text-[14px] font-semibold transition-colors ${
+              active ? "text-ink" : "text-dim hover:text-muted"}`}
             aria-current={active ? "page" : undefined}>
-            {active && <span className="absolute inset-x-6 top-0 h-[3px] rounded-b bg-warn" />}
-            <Icon size={24} aria-hidden />
+            <Icon size={18} aria-hidden />
             {label}
-            {badges[id] && <span className="absolute right-[30%] top-3 h-2.5 w-2.5 rounded-full bg-err ring-2 ring-panel" />}
+            {badges[id] && <span className="h-2 w-2 rounded-full bg-err" aria-label="needs attention" />}
+            {active && <span className="absolute inset-x-2 bottom-0 h-[3px] rounded-t bg-brand" />}
           </button>
         );
       })}

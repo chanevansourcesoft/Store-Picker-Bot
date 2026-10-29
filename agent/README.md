@@ -1,6 +1,6 @@
 # agent
 
-Shared code for the store apps in `../storepilot` (QuickPick and the StorePilot dashboard),
+Shared code for the StorePilot AI dashboard in `../storepilot`,
 and the robot API server that runs on the Jetson.
 
 ```

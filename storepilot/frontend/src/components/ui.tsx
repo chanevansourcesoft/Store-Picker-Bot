@@ -10,7 +10,7 @@ export const STATE_META: Record<RobotState, { label: string; color: string; icon
   idle: { label: "Idle", color: "var(--color-muted)", icon: CircleDot },
   planning: { label: "Planning", color: "var(--color-plan)", icon: Brain, live: true },
   navigating: { label: "Navigating", color: "var(--color-info)", icon: Navigation, live: true },
-  picking: { label: "Picking", color: "var(--color-warn)", icon: Hand, live: true },
+  picking: { label: "Picking", color: "var(--color-pick)", icon: Hand, live: true },
   returning: { label: "Returning", color: "var(--color-teal)", icon: Undo2, live: true },
   completed: { label: "Completed", color: "var(--color-ok)", icon: PackageCheck },
   paused: { label: "Paused", color: "#fb923c", icon: PauseCircle },
@@ -32,7 +32,7 @@ export function LevelIcon({ level, size = 16 }: { level: Level; size?: number })
 
 export const SOURCE_META = {
   robot: { label: "Robot", icon: Bot },
-  ai: { label: "AI", icon: Brain },
+  ai: { label: "Nemotron AI", icon: Brain },
   operator: { label: "Operator", icon: User },
   system: { label: "System", icon: Cog },
 } as const;

@@ -1,5 +1,5 @@
 """
-Named stations (Home, Shelf A, Packing area...) saved per ROS map, on the Pi.
+Named stations (home, shelf_A = the table, customer = the reception...) saved per ROS map, on the Pi.
 Every map has its own coordinates, so stations are always looked up by map name.
 
 data/stations.json:

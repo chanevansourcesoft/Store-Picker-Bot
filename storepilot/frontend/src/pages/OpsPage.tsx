@@ -1,9 +1,8 @@
-import { ArrowRight, BatteryMedium, Brain, Compass, Crosshair, Gauge, Hand, MapPin, Plus, Radio, TriangleAlert } from "lucide-react";
+import { ArrowRight, BatteryMedium, Compass, Crosshair, Gauge, Hand, MapPin, Plus, Radio, TriangleAlert } from "lucide-react";
 import { fmtDuration, missionDuration } from "../api";
-import { EventRow } from "../components/EventRow";
+import { NemotronPanel } from "../components/NemotronPanel";
+import { StoreAnalysisPanel, TodayPanel, useAnalysis } from "../components/StoreAnalysis";
 import type { Tab } from "../components/Shell";
-import { StoreMap } from "../components/StoreMap";
-import { RosMap } from "../components/RosMap";
 import { Button, LevelIcon, MissionStatusTag, Panel, ProgressBar, STATE_META, Stat, StateBadge, Tag } from "../components/ui";
 import type { Snapshot } from "../types";
 
@@ -118,7 +117,7 @@ function LiveRouteSummary({ snap, goto }: { snap: Snapshot; goto: (t: Tab) => vo
       ) : (
         <p className="mt-1 text-[14px] text-muted">Send a goal or a route from the Map page.</p>
       )}
-      <Button tone={busy ? "default" : "primary"} className="mt-3 w-full" onClick={() => goto("map")}>
+      <Button tone={busy ? "default" : "primary"} className="mt-3 w-full" onClick={() => goto("mission")}>
         <MapPin size={18} aria-hidden /> {busy ? "Watch on the map" : "Open map to drive"}
       </Button>
     </>
@@ -127,12 +126,11 @@ function LiveRouteSummary({ snap, goto }: { snap: Snapshot; goto: (t: Tab) => vo
 
 export function Telemetry({ snap }: { snap: Snapshot }) {
   const r = snap.robot;
-  const sim = snap.connections.telemetry.state === "simulated";
-  const hintFor = (field: string) =>
-    sim ? "simulated" : r.unverified.includes(field) ? "not verified yet" : undefined;
+  // simulation is announced once by the banner, not under every value
+  const hintFor = (field: string) => r.unverified.includes(field) ? "not verified yet" : undefined;
   const heading = r.pose ? ((((r.pose.theta * 180) / Math.PI) % 360) + 360) % 360 : null;
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
       {r.battery === null && r.battery_v != null ? (
         <Stat label="Battery" icon={<BatteryMedium size={13} />} value={r.battery_v.toFixed(2)} unit="V"
           hint={r.battery_v < 11.1 ? "low: charge (3S pack)" : "board voltage"} />
@@ -151,56 +149,41 @@ export function Telemetry({ snap }: { snap: Snapshot }) {
   );
 }
 
-export function OpsPage({ snap, goto }: { snap: Snapshot; goto: (t: Tab) => void }) {
-  const ai = snap.connections.ai;
-  const missionEvents = snap.events.slice(0, 7);
+export function OpsPage({ snap, goto, toast }: {
+  snap: Snapshot; goto: (t: Tab) => void; toast: (t: string, tone?: "ok" | "err" | "warn") => void;
+}) {
+  const analysis = useAnalysis(snap);
   return (
-    <div className="flex flex-col gap-3">
-      <MissionHero snap={snap} goto={goto} />
+    <div className="flex flex-col gap-3 lg:gap-4">
+      <div className="grid gap-3 lg:grid-cols-12 lg:gap-4">
+        <div className="flex flex-col gap-3 lg:col-span-7 lg:gap-4">
+          <MissionHero snap={snap} goto={goto} />
 
-      {snap.alerts.length > 0 && (
-        <Panel title="Alerts" icon={<TriangleAlert size={15} />} bodyClass="py-2"
-          right={<Tag tone={snap.alerts.some((a) => a.level === "error") ? "err" : "warn"}>{snap.alerts.length}</Tag>}>
-          <ul className="flex flex-col">
-            {snap.alerts.map((a, i) => (
-              <li key={i} className="flex items-start gap-2.5 border-b border-line/70 py-2 text-[14px] last:border-0">
-                <LevelIcon level={a.level} size={18} />
-                <span className={a.level === "error" ? "text-[#ffb4b2]" : "text-ink"}>{a.text}</span>
-              </li>
-            ))}
-          </ul>
-        </Panel>
-      )}
+          {snap.alerts.length > 0 && (
+            <Panel title="Alerts" icon={<TriangleAlert size={15} />} bodyClass="py-2"
+              right={<Tag tone={snap.alerts.some((a) => a.level === "error") ? "err" : "warn"}>{snap.alerts.length}</Tag>}>
+              <ul className="flex flex-col">
+                {snap.alerts.map((a, i) => (
+                  <li key={i} className="flex items-start gap-2.5 border-b border-line/70 py-2 text-[14px] last:border-0">
+                    <LevelIcon level={a.level} size={18} />
+                    <span className={a.level === "error" ? "text-[#ffb4b2]" : "text-ink"}>{a.text}</span>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          )}
 
-      <div className="grid grid-cols-[1.15fr_1fr] gap-3">
-        <Panel title="Live map" bodyClass="p-2">
-          <button className="block w-full" onClick={() => goto("map")} aria-label="Open the full map">
-            {snap.ros?.map ? <RosMap snap={snap} compact /> : <StoreMap snap={snap} compact />}
-          </button>
-        </Panel>
-        <Panel title="Telemetry" bodyClass="p-2">
-          <Telemetry snap={snap} />
-        </Panel>
+          <Panel title="Telemetry" bodyClass="p-2">
+            <Telemetry snap={snap} />
+          </Panel>
+        </div>
+        <div className="lg:col-span-5">
+          <TodayPanel a={analysis} />
+        </div>
       </div>
 
-      <Panel title="AI planner & mission events" icon={<Brain size={15} />}
-        right={<span className="text-[12px] font-medium text-muted">{ai.planner_model ?? "—"}</span>} bodyClass="py-1">
-        {snap.robot.state === "planning" && (
-          <div className="flex items-center gap-2 border-b border-line/70 py-2.5 text-[15px] font-medium text-plan">
-            <Brain size={17} aria-hidden /> Nemotron is deciding the next step
-            <span className="thinking text-xl leading-none"><span>.</span><span>.</span><span>.</span></span>
-          </div>
-        )}
-        {missionEvents.length ? (
-          <ul>{missionEvents.map((e) => <EventRow key={e.id} e={e} dense />)}</ul>
-        ) : (
-          <p className="py-4 text-center text-sm text-dim">No events yet.</p>
-        )}
-        <button className="flex min-h-11 w-full items-center justify-center gap-1 text-[13px] font-semibold text-muted active:text-ink"
-          onClick={() => goto("activity")}>
-          All events <ArrowRight size={15} aria-hidden />
-        </button>
-      </Panel>
+      <NemotronPanel snap={snap} />
+      <StoreAnalysisPanel snap={snap} a={analysis} toast={toast} />
     </div>
   );
 }

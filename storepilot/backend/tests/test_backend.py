@@ -92,7 +92,7 @@ def test_sim_moves_and_stops():
     assert robot.return_item("chips_packet")["success"]
 
     slow = SimRobot(INVENTORY, time_scale=1.0, nav_fail=0)
-    t = threading.Thread(target=lambda: setattr(slow, "result", slow.navigate("customer")))
+    t = threading.Thread(target=lambda: setattr(slow, "result", slow.navigate("shelf_A")))   # home = reception
     t.start()
     time.sleep(0.3)
     slow.stop()
@@ -132,11 +132,135 @@ def test_offline_mission_runs_after_confirm_only():
         stock = stock_store.get_stock()
         assert (stock["chips_packet"], stock["frooti"]) == (start["chips_packet"] - 2, start["frooti"] - 1), stock
         assert store.get_mission(draft["id"])["stock_reserved"] == 0
+        # each command is credited to the planner that chose it, the robot's answer follows
+        assert any(t.startswith("Autopilot decided: pick ") for t in texts), texts
+        # mission report (rule-based without Nemotron), written right after the mission ends
+        for _ in range(100):
+            if store.get_mission(draft["id"])["summary"]:
+                break
+            time.sleep(0.02)
+        report = store.get_mission(draft["id"])
+        assert report["summary_by"].startswith("rule-based") and "3 of 3 items delivered" in report["summary"], report
+        # the store analysis: exact numbers from the database
+        a = m.analysis()
+        assert a["orders"]["started"] == 1 and a["orders"]["success_rate"] == 100, a["orders"]
+        assert (a["orders"]["items_ordered"], a["orders"]["items_delivered"]) == (3, 3), a["orders"]
+        chips = next(p for p in a["products"] if p["id"] == "chips_packet")
+        assert (chips["ordered_today"], chips["delivered_today"]) == (2, 2), chips
+        assert chips["status"] == "ok" and chips["restock"] == 0, chips   # (test inventory: fixed stock)
+        # the owner's analysis table (rule-based without Nemotron), same shape as Nemotron Ultra's
+        shift = m.shift_report()
+        assert shift["by"].startswith("rule-based") and shift["missions"] == 1, shift
+        assert [r["area"] for r in shift["insights"]][:3] == ["Orders", "Robot", "Stock"], shift
+        assert "No restocking needed." in [r["action"] for r in shift["insights"]], shift
+        assert m.shift is shift
+        # Nemotron's JSON reply is parsed, extra text and <think> are ignored, a bad reply is refused
+        parsed = MissionManager.parse_insights('<think>x</think> Here: {"headline": "Good shift", "insights": '
+                                               '[{"area": "Stock", "finding": "Ink low", "action": "Restock 6 Ink Box"}]}')
+        assert parsed == ("Good shift", [{"area": "Stock", "finding": "Ink low", "action": "Restock 6 Ink Box"}]), parsed
+        assert MissionManager.parse_insights("no json here") is None
+        # the map's front view: products per table and shelf level
+        assert m.layout()["shelf_A"]["upper_shelf"][0]["id"] == "chips_packet", m.layout()
         tel.shutdown()
     finally:
         for p in patches:
             p.stop()
     print("PASS: test_offline_mission_runs_after_confirm_only")
+
+
+def test_mentioned_uses_aliases():
+    """A misspelling listed as a catalog alias ("fevical") names the product: not flagged as inferred."""
+    assert not mentioned("fevicol", "one fevical please")
+    assert mentioned("fevicol", "one fevical please", ["fevicol", "fevical", "glue"])
+    assert mentioned("screen_cleaning_gel", "a screen cleaner", ["screen cleaner"])
+    print("PASS: test_mentioned_uses_aliases")
+
+
+def test_code_retry_is_not_a_planner_decision():
+    """A pick the code retries (same command, no answer to the planner in between) is shown as a robot
+    retry; the next pick after the planner saw the answer is a new planner decision."""
+    patches = offline()
+    for p in patches:
+        p.start()
+    try:
+        store, robot, tel, m = services()
+        pick = {"item": "frooti", "shelf": "shelf_B"}
+        m.before_command("pick_item", dict(pick))
+        m.before_command("pick_item", dict(pick))          # code retry
+        m.on_step(m.store.create_mission(text="t", mode="mock", status="running", items=[], unknown=[], route=[],
+                                         parser="p", total=1, problems=[]),
+                  {"tool": "pick_item", "input": pick, "result": {"success": True, "target": "basket", "item": "frooti"}})
+        m.before_command("pick_item", dict(pick))          # a new decision
+        texts = [e["text"] for e in reversed(store.recent_events(20))]
+        assert sum(t.startswith("Autopilot decided: pick Frooti") for t in texts) == 2, texts
+        assert any("retrying the Frooti pick automatically (try 2)" in t for t in texts), texts
+        tel.shutdown()
+    finally:
+        for p in patches:
+            p.stop()
+    print("PASS: test_code_retry_is_not_a_planner_decision")
+
+
+def test_restock_rule():
+    """Low = 30 % of the starting stock (at least 3) or less; restock back to the starting stock."""
+    store, robot, tel, m = services()
+    stock = {"ink_box": {"shelf": "shelf_A", "level": "upper_shelf", "stock": 2, "initial_stock": 10},
+             "frooti": {"shelf": "shelf_A", "level": "lower_shelf", "stock": 0, "initial_stock": 12},
+             "biscuit": {"shelf": "shelf_A", "level": "lower_shelf", "stock": 9, "initial_stock": 15}}
+    with patch("storepilot.missions.load_inventory", return_value=stock):
+        rows = {p["id"]: (p["status"], p["restock"]) for p in m.analysis()["products"]}
+        assert rows == {"ink_box": ("low", 8), "frooti": ("out", 12), "biscuit": ("ok", 0)}, rows
+        insights = MissionManager.rule_insights(m.analysis())[1]
+        stock_row = next(r for r in insights if r["area"] == "Stock")
+        assert "8" in stock_row["action"] and "12" in stock_row["action"], stock_row
+    tel.shutdown()
+    print("PASS: test_restock_rule")
+
+
+def test_videos():
+    """Everyone can list videos; adding and deleting need the team password; only YouTube links."""
+    import asyncio
+    from storepilot.videos import VideoError, VideoStore, youtube_id
+
+    assert youtube_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=3") == "dQw4w9WgXcQ"
+    assert youtube_id("https://youtu.be/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+    assert youtube_id("https://youtube.com/shorts/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+    assert youtube_id("https://evil.example/watch?v=dQw4w9WgXcQ") is None
+
+    videos = VideoStore(Path(tempfile.mkdtemp()))
+
+    def refused(fn, *args):
+        try:
+            fn(*args)
+        except VideoError as e:
+            return str(e)
+        raise AssertionError("should be refused")
+
+    with patch.object(config, "UPLOAD_PASSWORD", ""):
+        assert not videos.upload_enabled and "switched off" in refused(videos.check_password, "x")
+    with patch.object(config, "UPLOAD_PASSWORD", "team"):
+        assert "Wrong" in refused(videos.check_password, "nope")
+        videos.check_password("team")
+        assert "YouTube" in refused(videos.add_link, "Demo", "https://example.com/v.mp4")
+        link_id = videos.add_link("Robot demo", "https://youtu.be/dQw4w9WgXcQ")
+
+        async def chunks():
+            yield b"\x00\x00\x00\x18ftypmp42"
+        file_id = asyncio.run(videos.add_file("Real pick", "video/mp4", chunks()))
+        try:
+            asyncio.run(videos.add_file("Bad", "text/html", chunks()))
+            raise AssertionError("only video types")
+        except VideoError:
+            pass
+        listed = videos.list()
+        assert [v["id"] for v in listed] == [file_id, link_id], "newest first"
+        assert listed[0]["url"].startswith("/api/videos/file/") and videos.featured()["id"] == file_id
+        assert listed[1]["url"] == "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+        name = listed[0]["url"].rsplit("/", 1)[1]
+        assert videos.path_of(name) and videos.path_of("../videos.json") is None
+        videos.delete(file_id)
+        assert videos.path_of(name) is None and [v["id"] for v in videos.list()] == [link_id]
+    print("PASS: test_videos")
 
 
 def test_rejected_and_discarded():
@@ -493,6 +617,10 @@ def test_mentioned():
 
 def run_all():
     test_mentioned()
+    test_mentioned_uses_aliases()
+    test_code_retry_is_not_a_planner_decision()
+    test_restock_rule()
+    test_videos()
     test_sim_moves_and_stops()
     test_offline_mission_runs_after_confirm_only()
     test_rejected_and_discarded()

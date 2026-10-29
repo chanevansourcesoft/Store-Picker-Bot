@@ -2,12 +2,12 @@
 Step 2.2: Turn a customer order (normal language) into a clean item list.
 
 Example:
-    "2 chips and one hide and seek"  ->  {"items": [{"item": "chips_packet", "qty": 2},
-                                                    {"item": "hide_and_seek", "qty": 1}],
+    "2 biscuits and one fevicol"  ->  {"items": [{"item": "biscuit", "qty": 2},
+                                                  {"item": "fevicol", "qty": 1}],
                                           "unknown": []}
 
 Run a quick test:
-    python -m store_agent.order_parser "2 chips and one hide and seek"
+    python -m store_agent.order_parser "2 biscuits and one fevicol"
 """
 
 import json
@@ -26,7 +26,7 @@ Turn the customer's order into JSON with this exact shape:
 
 Rules:
 - Only use product names from the list above.
-- Match loose words to the right product (for example "chips" -> "chips_packet", "biscuits" -> "hide_and_seek").
+- Match loose words to the right product (for example "glue" -> "fevicol", "screen cleaner" -> "screen_cleaning_gel").
 - If the customer asks for something we do not sell, put their words in "unknown".
 - If no number is given, qty is 1.
 - Reply with JSON only. No other text."""
@@ -85,8 +85,8 @@ def product_words(inventory):
 def parse_order_offline(order_text, inventory):
     """Keyword parser for when Nemotron is not available (no API key).
 
-    "2 chips, a frooti and pizza" -> chips_packet x2, frooti x1, unknown ["pizza"].
-    Names of more than one word ("hide and seek", "mango drink") are matched first,
+    "2 biscuits, a frooti and pizza" -> biscuit x2, frooti x1, unknown ["pizza"].
+    Names of more than one word ("screen cleaning gel", "mango drink") are matched first,
     so the "and" inside them does not split the order. Plurals match too ("biscuits").
     """
     words = product_words(inventory)
@@ -137,6 +137,6 @@ def parse_order(order_text):
 
 
 if __name__ == "__main__":
-    text = " ".join(sys.argv[1:]) or "2 chips and one hide and seek please"
+    text = " ".join(sys.argv[1:]) or "2 biscuits and one fevicol please"
     print("Order :", text)
     print("Result:", json.dumps(parse_order(text), indent=2))

@@ -14,6 +14,11 @@ REST:
     POST /api/robot/stop                  stop mission + robot (says what the robot answered)
     POST /api/robot/resume                clear the robot stop state (never restarts a mission)
     GET  /api/health                      liveness for systemd / kiosk launcher
+    GET  /api/videos                      real robot videos (anyone can watch)
+    POST /api/videos/upload?title=        raw video body, header X-Upload-Password (team only)
+    POST /api/videos/link {title, url, password}        add a YouTube link (team only)
+    POST /api/videos/{id}/delete {password}             (team only)
+    GET  /api/videos/file/{name}          an uploaded video (supports seeking)
 WebSocket:
     /ws  pushes {"type": "state", "data": snapshot} 4 times a second
 """
@@ -25,7 +30,7 @@ import json
 import logging
 import time
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -38,6 +43,7 @@ from .jetson_ctl import JetsonControl
 from .missions import MissionError, MissionManager
 from .stations import StationStore
 from .telemetry import Telemetry
+from .videos import VideoError, VideoStore
 
 from store_agent.inventory import load_inventory  # catalog (agent/store_agent/catalog.json) + live stock
 
@@ -91,6 +97,7 @@ class Services:
         self.ai = AIStatus(add)
         self.telemetry = Telemetry(self.adapter, add)
         self.missions = MissionManager(self.store, self.adapter, self.telemetry, self.ai)
+        self.videos = VideoStore()
         self.store.add_event("system", "info", f"Dashboard started in {config.MODE.upper()} mode", simulated=simulated)
 
     def start(self):
@@ -229,6 +236,7 @@ def build_snapshot():
         "busy": value("busy"),
         "last_error": value("last_error"),
         "target": s.missions.target(),
+        "picking_item": s.missions.picking(),
         "stop_pending": s.missions.stop_pending,
         "unverified": unverified,
         "battery_v": status.get("battery_v") if tel["connected"] else None,
@@ -279,7 +287,7 @@ def build_snapshot():
             "jetson": {
                 "state": "simulated" if s.adapter.source == "simulated" else
                          ("not_configured" if not robot_url() else ("connected" if tel["connected"] else "disconnected")),
-                "url": robot_url() or None,
+                "url": (robot_url() or None) if s.adapter.source != "simulated" else None,
                 "link": getattr(s.adapter, "link_kind", "http") if s.adapter.source != "simulated" else "simulator",
                 "latency_ms": getattr(s.adapter, "last_latency_ms", None),
                 "ros_available": health.get("ros_available"),
@@ -311,6 +319,14 @@ def build_snapshot():
             "motion_enabled": config.ENABLE_MOTION,
             "stop_verified": stop_verified(),
             "stop_verified_at": s.drive.settings.get("stop_verified_at") if s.drive else None,
+        },
+        "store": s.missions.layout(),           # products on each table, by shelf level (map front view)
+        "shift_report": s.missions.shift,
+        "media": {
+            # live camera only when a real robot is connected; otherwise the newest real robot video
+            "camera_url": config.CAMERA_URL if config.MODE == "live" and config.CAMERA_URL else None,
+            "featured_video": s.videos.featured(),
+            "upload_enabled": s.videos.upload_enabled,
         },
         "alerts": alerts(tel, robot, ai),
         "events": s.store.recent_events(limit=60),
@@ -414,6 +430,76 @@ def api_resume():
         return services.missions.resume()
     except MissionError as e:
         _error(e)
+
+
+@app.get("/api/analysis")
+def api_analysis():
+    """Today's store numbers: orders, robot performance, stock and restock (exact, from the database)."""
+    return services.missions.analysis()
+
+
+@app.post("/api/shift-report")
+def api_shift_report():
+    """Nemotron Ultra's findings and actions for the owner, as a table (a few seconds)."""
+    return services.missions.shift_report()
+
+
+# ---------- real robot videos ----------
+
+class VideoLinkIn(BaseModel):
+    title: str
+    url: str
+    password: str = ""
+
+
+class PasswordIn(BaseModel):
+    password: str = ""
+
+
+@app.get("/api/videos")
+def api_videos():
+    return {"videos": services.videos.list(), "upload_enabled": services.videos.upload_enabled,
+            "max_mb": config.MAX_VIDEO_MB}
+
+
+@app.post("/api/videos/upload")
+async def api_video_upload(request: Request, title: str = Query("", max_length=200)):
+    try:
+        services.videos.check_password(request.headers.get("x-upload-password", ""))
+        if int(request.headers.get("content-length") or 0) > config.MAX_VIDEO_MB * 1024 * 1024:
+            raise VideoError(f"The video is larger than {config.MAX_VIDEO_MB} MB.")
+        video_id = await services.videos.add_file(title, request.headers.get("content-type"), request.stream())
+    except VideoError as e:
+        _error(e)
+    services.store.add_event("operator", "info", f"Real robot video uploaded: {title.strip()}")
+    return {"id": video_id}
+
+
+@app.post("/api/videos/link")
+def api_video_link(body: VideoLinkIn):
+    try:
+        services.videos.check_password(body.password)
+        return {"id": services.videos.add_link(body.title, body.url)}
+    except VideoError as e:
+        _error(e)
+
+
+@app.post("/api/videos/{video_id}/delete")
+def api_video_delete(video_id: str, body: PasswordIn):
+    try:
+        services.videos.check_password(body.password)
+        services.videos.delete(video_id)
+        return {"ok": True}
+    except VideoError as e:
+        _error(e)
+
+
+@app.get("/api/videos/file/{name}")
+def api_video_file(name: str):
+    path = services.videos.path_of(name)
+    if not path:
+        raise HTTPException(status_code=404, detail="Video not found")
+    return FileResponse(path)
 
 
 # ---------- live driving over rosbridge (Nav2 goals only, never wheel speeds) ----------

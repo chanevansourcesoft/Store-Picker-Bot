@@ -1,4 +1,4 @@
-# StorePilot AI dashboard backend (Raspberry Pi). Versions match the tested QuickPick venv.
+# StorePilot AI dashboard backend.
 fastapi==0.142.2
 uvicorn==0.54.0
 websockets==16.1.1
@@ -8,4 +8,5 @@ requests==2.34.2
 openai==3.26.0
 python-dotenv==1.2.4
 # Localization assist (scan-to-map matching on the Pi)
-numpy==2.3.3
+numpy==2.3.3; python_version >= "3.11"
+numpy==2.2.6; python_version < "3.11"   # 2.3 needs Python 3.11+

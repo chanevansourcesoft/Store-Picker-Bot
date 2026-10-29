@@ -1,21 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Brain, CheckSquare, Minus, Play, Plus, Send, Square, Trash2, X } from "lucide-react";
-import { api, fmtDuration } from "../api";
+import { AlertTriangle, Brain, CheckSquare, Info, Minus, Play, Plus, Send, Square, Trash2, X } from "lucide-react";
+import { api, fmtDuration, modelName, niceModels } from "../api";
 import { Button, MissionStatusTag, Panel, Tag } from "../components/ui";
 import type { CatalogItem, Mission, Snapshot } from "../types";
+import type { Tab } from "../components/Shell";
 import { label } from "./OpsPage";
 
 const EXAMPLES = [
-  "2 chips packets and 1 Frooti to the packing area",
-  "Pick 3 classic chips",
-  "Pick 2 packets of Maggi and 1 Coke bottle",
+  "2 biscuits and 1 Fevicol to the reception",
+  "An ink box and a screen cleaning gel please",
+  "1 Frooti, 2 biscuits and a pizza",
 ];
 
 function ConfirmDialog({ mission, snap, onCancel, onStart, busy }: {
   mission: Mission; snap: Snapshot; onCancel: () => void; onStart: () => void; busy: boolean;
 }) {
   const [clear, setClear] = useState(false);
-  const stops = [...mission.route, "customer", "home"].map((s) => label(snap, s)).join(" → ");
+  const stops = [...mission.route, "customer"].map((s) => label(snap, s)).join(" → ");
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-5" role="dialog" aria-modal="true">
       <div className="w-full max-w-[640px] rounded-2xl border-2 border-warn/60 bg-panel p-6 shadow-2xl">
@@ -43,7 +44,9 @@ function ConfirmDialog({ mission, snap, onCancel, onStart, busy }: {
   );
 }
 
-function Review({ m, snap, toast }: { m: Mission; snap: Snapshot; toast: (t: string, tone?: "ok" | "err" | "warn") => void }) {
+function Review({ m, snap, toast, goto }: {
+  m: Mission; snap: Snapshot; toast: (t: string, tone?: "ok" | "err" | "warn") => void; goto: (t: Tab) => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState(false);
   const waiting = m.status === "awaiting_confirmation";
@@ -54,6 +57,7 @@ function Review({ m, snap, toast }: { m: Mission; snap: Snapshot; toast: (t: str
       await api(`/api/missions/${m.id}/confirm`, { area_clear: snap.safety.needs_area_confirmation });
       toast(`Mission M${m.id} started`, "ok");
       setDialog(false);
+      goto("mission");   // watch it run: map and Nemotron activity
     } catch (e) {
       toast((e as Error).message, "err");
     } finally {
@@ -116,9 +120,9 @@ function Review({ m, snap, toast }: { m: Mission; snap: Snapshot; toast: (t: str
 
       <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[14px]">
         <dt className="text-dim">Route</dt>
-        <dd className="font-medium">{[...m.route, "customer", "home"].map((s) => label(snap, s)).join(" → ")}</dd>
+        <dd className="font-medium">{[...m.route, "customer"].map((s) => label(snap, s)).join(" → ")}</dd>
         <dt className="text-dim">Parsed by</dt>
-        <dd className="flex items-center gap-1.5 text-muted"><Brain size={14} aria-hidden />{m.parser ?? "—"}</dd>
+        <dd className="flex items-center gap-1.5 text-muted"><Brain size={14} aria-hidden />{m.parser ? niceModels(m.parser) : "—"}</dd>
         <dt className="text-dim">Estimate</dt>
         <dd className="text-muted">{m.eta ? `≈ ${fmtDuration(m.eta.total_sec)} (from ${m.eta.samples} past missions)` : "Not enough history for a reliable estimate"}</dd>
       </dl>
@@ -146,7 +150,9 @@ function Review({ m, snap, toast }: { m: Mission; snap: Snapshot; toast: (t: str
 
 let catalogCache: CatalogItem[] = [];  // keeps the product cards instant when the page is reopened
 
-export function OrderPage({ snap, toast }: { snap: Snapshot; toast: (t: string, tone?: "ok" | "err" | "warn") => void }) {
+export function OrderPage({ snap, toast, goto }: {
+  snap: Snapshot; toast: (t: string, tone?: "ok" | "err" | "warn") => void; goto: (t: Tab) => void;
+}) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [catalog, setCatalog] = useState<CatalogItem[]>(catalogCache);
@@ -162,7 +168,7 @@ export function OrderPage({ snap, toast }: { snap: Snapshot; toast: (t: string, 
     const parts = catalog.filter((c) => qty[c.id]).map((c) => `${qty[c.id]} ${c.name}`);
     if (!parts.length) return "";
     const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];
-    return `Pick ${list} and bring them to the packing area`;
+    return `Pick ${list} and bring them to the reception`;
   }, [qty, catalog]);
 
   useEffect(() => { if (built) setText(built); }, [built]);
@@ -184,19 +190,36 @@ export function OrderPage({ snap, toast }: { snap: Snapshot; toast: (t: string, 
 
   const showReview = m && ["awaiting_confirmation", "rejected"].includes(m.status);
 
+  const ai = snap.connections.ai;
   return (
-    <div className="flex flex-col gap-3">
-      {showReview && <Review m={m} snap={snap} toast={toast} />}
-      {running && (
-        <Panel>
-          <p className="text-[15px]"><span className="font-semibold">Mission M{m.id} is running</span>
-            <span className="text-muted"> — {m.packed} of {m.total} items picked. New orders can be planned when it finishes.</span></p>
-        </Panel>
-      )}
+    <div className="grid items-start gap-3 lg:grid-cols-2 lg:gap-4">
+      <div className="flex flex-col gap-3 lg:order-2 lg:gap-4">
+        {showReview && <Review m={m} snap={snap} toast={toast} goto={goto} />}
+        {running && (
+          <Panel>
+            <p className="text-[15px]"><span className="font-semibold">Mission M{m.id} is running</span>
+              <span className="text-muted"> — {m.packed} of {m.total} items picked. New orders can be planned when it finishes.</span></p>
+            <Button className="mt-3 w-full" onClick={() => goto("mission")}>Watch the live mission</Button>
+          </Panel>
+        )}
+        {!showReview && !running && (
+          <Panel title="How an order works" icon={<Info size={15} />}>
+            <ol className="flex list-decimal flex-col gap-2 pl-5 text-[14px] text-muted">
+              <li>Type the order in plain language, or build it with the product buttons.</li>
+              <li><span className="text-ink">{ai.parser_model ? `NVIDIA ${modelName(ai.parser_model)}` : "The offline keyword parser"}</span> reads
+                it and finds the products, quantities and anything this store does not sell.</li>
+              <li>You check the plan here and start the mission.</li>
+              <li><span className="text-ink">{ai.planner_model && ai.provider ? `NVIDIA ${modelName(ai.planner_model)}` : "The offline autopilot"}</span> then
+                drives the robot step by step, and GR00T picks each item into the basket.</li>
+            </ol>
+          </Panel>
+        )}
+      </div>
 
+      <div className="flex flex-col gap-3 lg:order-1 lg:gap-4">
       <Panel title="New order">
         <textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} maxLength={500}
-          placeholder="e.g. Pick 2 chips packets and 1 Frooti and bring them to the packing area"
+          placeholder="e.g. Pick 2 biscuits and 1 Fevicol and bring them to the reception"
           className="w-full resize-none rounded-lg border border-line-strong bg-raised px-3.5 py-3 text-[17px] leading-snug text-ink placeholder:text-dim focus:border-info focus:outline-none" />
         <div className="mt-2 flex flex-wrap gap-2">
           {EXAMPLES.map((ex) => (
@@ -211,10 +234,7 @@ export function OrderPage({ snap, toast }: { snap: Snapshot; toast: (t: string, 
         {m?.status === "awaiting_confirmation" && (
           <p className="mt-2 text-center text-[13px] text-dim">Start or discard mission M{m.id} first.</p>
         )}
-        <p className="mt-2 text-center text-[12px] text-dim">
-          Parsed on the server by {snap.connections.ai.parser_model ?? "the offline keyword parser"}.
-          Nothing moves until you confirm.
-        </p>
+        <p className="mt-2 text-center text-[12px] text-dim">Nothing moves until you confirm.</p>
       </Panel>
 
       <Panel title="Build by touch" right={<span className="text-[12px] text-dim">Products this robot can pick</span>}>
@@ -225,7 +245,9 @@ export function OrderPage({ snap, toast }: { snap: Snapshot; toast: (t: string, 
             return (
               <div key={c.id} className={`rounded-lg border p-3 ${n ? "border-info/60 bg-info/5" : "border-line bg-raised/50"}`}>
                 <div className="text-[15px] font-semibold leading-tight">{c.name}</div>
-                <div className="mt-0.5 text-[12px] text-dim">{label(snap, c.shelf)} · {c.stock} in stock</div>
+                <div className="mt-0.5 text-[12px] text-dim">
+                  {label(snap, c.shelf)}{c.level ? ` · ${c.level === "upper_shelf" ? "upper" : c.level === "lower_shelf" ? "lower" : c.level} shelf` : ""} · {c.stock} in stock
+                </div>
                 <div className="mt-2.5 flex items-center justify-between">
                   <button onClick={() => set(n - 1)} disabled={!n} aria-label={`Fewer ${c.name}`}
                     className="flex h-11 w-11 items-center justify-center rounded-lg border border-line-strong active:bg-line disabled:opacity-30">
@@ -240,6 +262,7 @@ export function OrderPage({ snap, toast }: { snap: Snapshot; toast: (t: string, 
           })}
         </div>
       </Panel>
+      </div>
     </div>
   );
 }

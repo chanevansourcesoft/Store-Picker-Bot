@@ -2,12 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, WifiOff } from "lucide-react";
 import { useSnapshot } from "./api";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { BottomNav, SimBanner, TopBar, type Tab } from "./components/Shell";
+import { SimBanner, TabNav, TopBar, type Tab } from "./components/Shell";
 import { OpsPage } from "./pages/OpsPage";
 import { OrderPage } from "./pages/OrderPage";
-import { MapPage } from "./pages/MapPage";
-import { ActivityPage } from "./pages/ActivityPage";
+import { MissionPage } from "./pages/MissionPage";
 import { SystemPage } from "./pages/SystemPage";
+import { VideosPage } from "./pages/VideosPage";
 
 type Toast = { id: number; text: string; tone: "ok" | "err" | "warn" };
 
@@ -36,6 +36,9 @@ export default function App() {
   return (
     <div className="flex h-full flex-col">
       <TopBar snap={snap} link={link} toast={toast} />
+      <TabNav tab={tab} setTab={setTab} badges={{ ops: hasError && tab !== "ops",
+        order: snap?.mission?.status === "awaiting_confirmation" && tab !== "order",
+        mission: snap?.mission?.status === "running" && tab !== "mission" }} />
       {snap && <SimBanner snap={snap} />}
       {link === "lost" && (
         <div className="flex shrink-0 items-center justify-center gap-2 bg-err py-1.5 text-[13px] font-semibold text-white">
@@ -44,7 +47,8 @@ export default function App() {
         </div>
       )}
 
-      <main ref={main} className={`scroll-y min-h-0 flex-1 p-3 transition-opacity ${link === "lost" ? "opacity-50" : ""}`}>
+      <main ref={main} className={`scroll-y min-h-0 flex-1 p-3 transition-opacity lg:p-5 ${link === "lost" ? "opacity-50" : ""}`}>
+        <div className="mx-auto h-full max-w-[1500px]">
         <ErrorBoundary resetKey={tab}>
         {!snap ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-muted">
@@ -52,23 +56,21 @@ export default function App() {
             Connecting to the StorePilot backend…
           </div>
         ) : tab === "ops" ? (
-          <OpsPage snap={snap} goto={setTab} />
+          <OpsPage snap={snap} goto={setTab} toast={toast} />
         ) : tab === "order" ? (
-          <OrderPage snap={snap} toast={toast} />
-        ) : tab === "map" ? (
-          <MapPage snap={snap} toast={toast} />
-        ) : tab === "activity" ? (
-          <ActivityPage snap={snap} />
+          <OrderPage snap={snap} toast={toast} goto={setTab} />
+        ) : tab === "mission" ? (
+          <MissionPage snap={snap} toast={toast} />
+        ) : tab === "videos" ? (
+          <VideosPage snap={snap} toast={toast} />
         ) : (
           <SystemPage snap={snap} toast={toast} />
         )}
         </ErrorBoundary>
+        </div>
       </main>
 
-      <BottomNav tab={tab} setTab={setTab} badges={{ ops: hasError && tab !== "ops",
-        order: snap?.mission?.status === "awaiting_confirmation" && tab !== "order" }} />
-
-      <div className="pointer-events-none fixed inset-x-3 top-[76px] z-50 flex flex-col gap-2">
+      <div className="pointer-events-none fixed right-4 top-[124px] z-50 flex w-[min(440px,calc(100%-2rem))] flex-col gap-2">
         {toasts.map((t) => (
           <div key={t.id} role="status"
             className={`pointer-events-auto rounded-lg border px-4 py-3 text-[14px] font-medium shadow-2xl shadow-black/60 ${
