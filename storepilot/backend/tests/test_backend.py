@@ -217,6 +217,51 @@ def test_restock_rule():
     print("PASS: test_restock_rule")
 
 
+def test_restock():
+    """Restock adds stock (all or nothing, logged); "all low" refills low products to their starting stock;
+    team actions need the team password."""
+    from storepilot import team
+    store, robot, tel, m = services()
+    start = stock_store.get_stock()["chips_packet"]
+    assert stock_store.take_stock("chips_packet", start - 1)              # 1 left: low
+    for bad in ([{"item": "pizza", "qty": 3}], [{"item": "chips_packet", "qty": 0}],
+                [{"item": "chips_packet", "qty": 9999}], []):
+        try:
+            m.restock(bad)
+            raise AssertionError(f"should be refused: {bad}")
+        except MissionError:
+            pass
+    assert stock_store.get_stock()["chips_packet"] == 1, "a refused restock changes nothing"
+    a = m.restock([{"item": "chips_packet", "qty": 2}])
+    assert stock_store.get_stock()["chips_packet"] == 3
+    assert next(p for p in a["products"] if p["id"] == "chips_packet")["restock"] == start - 3, a
+    m.restock_low()
+    assert stock_store.get_stock()["chips_packet"] == start, "refilled to the starting stock"
+    try:
+        m.restock_low()
+        raise AssertionError("nothing is low any more")
+    except MissionError:
+        pass
+    texts = [e["text"] for e in store.recent_events(10)]
+    assert any(t.startswith("Restocked: 2× Chips Packet") for t in texts), texts
+
+    with patch.object(config, "UPLOAD_PASSWORD", ""):
+        try:
+            team.check("x")
+            raise AssertionError("switched off without a password")
+        except team.TeamError as e:
+            assert "switched off" in str(e)
+    with patch.object(config, "UPLOAD_PASSWORD", "team"):
+        team.check("team")
+        try:
+            team.check("nope")
+            raise AssertionError("wrong password")
+        except team.TeamError:
+            pass
+    tel.shutdown()
+    print("PASS: test_restock")
+
+
 def test_videos():
     """Everyone can list videos; adding and deleting need the team password; only YouTube links."""
     import asyncio
@@ -620,6 +665,7 @@ def run_all():
     test_mentioned_uses_aliases()
     test_code_retry_is_not_a_planner_decision()
     test_restock_rule()
+    test_restock()
     test_videos()
     test_sim_moves_and_stops()
     test_offline_mission_runs_after_confirm_only()

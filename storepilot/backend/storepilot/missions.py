@@ -27,7 +27,7 @@ import store_agent.agent as shared_agent
 import store_agent.tools as shared_tools
 from store_agent.agent import group_items_by_shelf, plan_shelf_route, run_agent, strip_think
 from store_agent.config import MODEL_AGENT, MODEL_FAST, MODEL_ULTRA, get_client, has_llm
-from store_agent.inventory import load_inventory, release, reserve
+from store_agent.inventory import add_stock, load_inventory, release, reserve
 from store_agent.order_parser import parse_order, parse_order_offline
 from store_agent.order_tracker import basket_item, unpacked_units
 
@@ -660,6 +660,38 @@ class MissionManager:
             "problems": sorted({p for m in missions for p in (m.get("problems") or [])})[:8],
             "robot_kind": "simulated robot" if self.simulated else "real robot",
         }
+
+    MAX_RESTOCK = 500   # units per product in one restock (sanity limit)
+
+    def restock(self, items):
+        """Add stock: [{"item", "qty"}]. All or nothing; logged as an operator event. Returns the new analysis."""
+        inventory = load_inventory()
+        counts = {}
+        for entry in items or []:
+            item = str(entry.get("item", ""))
+            try:
+                qty = int(entry.get("qty", 0))
+            except (TypeError, ValueError):
+                qty = 0
+            if item not in inventory:
+                raise MissionError(f"Unknown product: {item or '(none)'}.")
+            if not 1 <= qty <= self.MAX_RESTOCK:
+                raise MissionError(f"Restock between 1 and {self.MAX_RESTOCK} units of {config.product_label(item)}.")
+            counts[item] = counts.get(item, 0) + qty
+        if not counts:
+            raise MissionError("Nothing to restock.")
+        for item, qty in counts.items():
+            add_stock(item, qty)
+        self.event("operator", "success", "Restocked: " + ", ".join(
+            f"{qty}× {config.product_label(item)}" for item, qty in counts.items()))
+        return self.analysis()
+
+    def restock_low(self):
+        """Refill every low or out-of-stock product back to its starting stock."""
+        rows = [{"item": p["id"], "qty": p["restock"]} for p in self.analysis()["products"] if p["restock"]]
+        if not rows:
+            raise MissionError("No product is low on stock.")
+        return self.restock(rows)
 
     @staticmethod
     def rule_insights(a):

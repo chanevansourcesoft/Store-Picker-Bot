@@ -8,7 +8,6 @@ without it the page only plays the videos already there.
     VIDEOS_DIR/<id>.<ext>    the uploaded file
 """
 
-import hmac
 import json
 import re
 import threading
@@ -16,7 +15,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import config
+from . import config, team
 from .db import now_iso
 
 EXTENSIONS = {"video/mp4": "mp4", "video/webm": "webm", "video/quicktime": "mov", "video/ogg": "ogv"}
@@ -53,13 +52,13 @@ class VideoStore:
 
     @property
     def upload_enabled(self):
-        return bool(config.UPLOAD_PASSWORD)
+        return team.enabled()
 
     def check_password(self, password):
-        if not config.UPLOAD_PASSWORD:
-            raise VideoError("Uploads are switched off on this server (no STOREPILOT_UPLOAD_PASSWORD).")
-        if not hmac.compare_digest((password or "").encode(), config.UPLOAD_PASSWORD.encode()):
-            raise VideoError("Wrong team password.")
+        try:
+            team.check(password)
+        except team.TeamError as e:
+            raise VideoError(str(e)) from None
 
     def _read(self):
         try:

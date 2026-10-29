@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Clapperboard, Link2, Lock, Trash2, Upload, Video as VideoIcon } from "lucide-react";
-import { api } from "../api";
+import { api, useTeamPassword } from "../api";
 import { VideoPlayer } from "../components/RobotCamera";
 import { Button, Panel } from "../components/ui";
 import type { Snapshot, Video } from "../types";
@@ -108,13 +108,7 @@ function TeamTools({ maxMb, password, setPassword, reload, toast }: {
 export function VideosPage({ snap, toast }: { snap: Snapshot; toast: Toast }) {
   const [videos, setVideos] = useState<Video[] | null>(null);
   const [maxMb, setMaxMb] = useState(500);
-  const [password, setPasswordState] = useState(() => {
-    try { return sessionStorage.getItem("storepilot-team-password") ?? ""; } catch { return ""; }
-  });
-  const setPassword = (p: string) => {
-    setPasswordState(p);
-    try { sessionStorage.setItem("storepilot-team-password", p); } catch { /* storage blocked */ }
-  };
+  const [password, setPassword] = useTeamPassword();
 
   const reload = useCallback(() => {
     api<{ videos: Video[]; max_mb: number }>("/api/videos")

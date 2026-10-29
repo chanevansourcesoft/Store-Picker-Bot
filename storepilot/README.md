@@ -23,10 +23,10 @@ guards) and one `.env`. Start it without a robot or API key: `./run_local.sh` (a
 
 | Tab | Contents |
 |---|---|
-| **Operations** | Robot state and mission progress, alerts, telemetry, **Today** (order success, items delivered, arm pick success, mission time, order and robot breakdown), **Nemotron at work** (Nano reads the order → Super plans → GR00T picks → Ultra reports), **Store analysis** (stock and restock table, Nemotron Ultra findings and actions) |
+| **Operations** | Robot state and mission progress, alerts, telemetry, **Today** (order success, items delivered, arm pick success, mission time, order and robot breakdown), **Nemotron at work** (Nano reads the order → Super plans → GR00T picks → Ultra reports), **Store analysis** (stock and restock table with Restock buttons for the team, Nemotron Ultra findings and actions) |
 | **Order** | Natural-language order box, tap-to-build product cards (with shelf level), parsed items, items the AI *inferred* (flagged), route, Start / Discard. Start opens Live mission |
 | **Live mission** | The whole store map in one view with the table's front view (upper and lower shelf, ordered and picked products), route progress, and the mission activity: every Nemotron decision with the robot's result under it (filters: All · Nemotron · Robot). Live mode: the robot's real map and driving tools |
-| **Real robot** | Videos of the real robot (uploads and YouTube links need `STOREPILOT_UPLOAD_PASSWORD`); live robot camera when `STOREPILOT_CAMERA_URL` is set |
+| **Real robot** | Videos of the real robot (uploads and YouTube links need the team password, `STOREPILOT_UPLOAD_PASSWORD`, which also guards restocking); live robot camera when `STOREPILOT_CAMERA_URL` is set |
 | **System** | Dashboard server, robot link, telemetry, AI backend (the three Nemotron models), mission history with each mission's report |
 
 **Honest data rule:** a value that is not known is shown as *Unavailable*, never as a number.

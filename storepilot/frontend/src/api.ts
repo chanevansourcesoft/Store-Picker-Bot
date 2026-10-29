@@ -113,3 +113,15 @@ export function modelName(id: string | null | undefined) {
 export function niceModels(text: string | null | undefined) {
   return (text ?? "").replace(/(NVIDIA-)?Nemotron-3-[A-Za-z]+-\d+b-a\d+b/gi, (id) => modelName(id));
 }
+
+/** The team password (videos, restock), remembered for this browser tab session only. */
+export function useTeamPassword(): [string, (p: string) => void] {
+  const [password, setState] = useState(() => {
+    try { return sessionStorage.getItem("storepilot-team-password") ?? ""; } catch { return ""; }
+  });
+  const set = (p: string) => {
+    setState(p);
+    try { sessionStorage.setItem("storepilot-team-password", p); } catch { /* storage blocked */ }
+  };
+  return [password, set];
+}

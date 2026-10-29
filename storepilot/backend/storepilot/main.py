@@ -14,6 +14,7 @@ REST:
     POST /api/robot/stop                  stop mission + robot (says what the robot answered)
     POST /api/robot/resume                clear the robot stop state (never restarts a mission)
     GET  /api/health                      liveness for systemd / kiosk launcher
+    POST /api/stock/restock {password, items:[{item, qty}] | all_low}   add stock (team only)
     GET  /api/videos                      real robot videos (anyone can watch)
     POST /api/videos/upload?title=        raw video body, header X-Upload-Password (team only)
     POST /api/videos/link {title, url, password}        add a YouTube link (team only)
@@ -43,6 +44,7 @@ from .jetson_ctl import JetsonControl
 from .missions import MissionError, MissionManager
 from .stations import StationStore
 from .telemetry import Telemetry
+from . import team
 from .videos import VideoError, VideoStore
 
 from store_agent.inventory import load_inventory  # catalog (agent/store_agent/catalog.json) + live stock
@@ -436,6 +438,25 @@ def api_resume():
 def api_analysis():
     """Today's store numbers: orders, robot performance, stock and restock (exact, from the database)."""
     return services.missions.analysis()
+
+
+class RestockIn(BaseModel):
+    password: str = ""
+    items: list[dict] = []      # [{"item", "qty"}]
+    all_low: bool = False       # refill every low / out-of-stock product to its starting stock
+
+
+@app.post("/api/stock/restock")
+def api_restock(body: RestockIn):
+    """Team action: add stock (needs the team password). Returns the new analysis."""
+    try:
+        team.check(body.password)
+    except team.TeamError as e:
+        _error(e)
+    try:
+        return services.missions.restock_low() if body.all_low else services.missions.restock(body.items)
+    except MissionError as e:
+        _error(e)
 
 
 @app.post("/api/shift-report")

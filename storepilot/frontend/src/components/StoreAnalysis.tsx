@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { BarChart3, Brain, PackageSearch } from "lucide-react";
-import { api, fmtDuration, fmtTime, niceModels } from "../api";
+import { BarChart3, Brain, Lock, PackagePlus, PackageSearch } from "lucide-react";
+import { api, fmtDuration, fmtTime, niceModels, useTeamPassword } from "../api";
 import type { Analysis, Snapshot } from "../types";
 import { Button, Panel, Stat } from "./ui";
 
@@ -80,9 +80,26 @@ const th = "px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.
 /** Full width on Operations: stock and restock (exact numbers) and Nemotron Ultra's findings and actions. */
 export function StoreAnalysisPanel({ snap, a, toast }: { snap: Snapshot; a: Analysis | null; toast: Toast }) {
   const [busy, setBusy] = useState(false);
+  const [restocking, setRestocking] = useState<string | null>(null);   // product id, "all", or null
+  const [password, setPassword] = useTeamPassword();
+  const team = snap.media.upload_enabled;
   const report = snap.shift_report;
   const ultra = !!snap.connections.ai.summary_model;
   const toRestock = a?.products.filter((p) => p.restock > 0) ?? [];
+
+  async function restock(which: { id: string; name: string; qty: number } | "all") {
+    if (!password) return toast("Enter the team password first.", "warn");
+    setRestocking(which === "all" ? "all" : which.id);
+    try {
+      await api("/api/stock/restock", which === "all" ? { password, all_low: true }
+        : { password, items: [{ item: which.id, qty: which.qty }] });
+      toast(which === "all" ? "All low products restocked" : `Restocked ${which.qty} ${which.name}`, "ok");
+    } catch (e) {
+      toast((e as Error).message, "err");
+    } finally {
+      setRestocking(null);
+    }
+  }
 
   async function analyse() {
     setBusy(true);
@@ -99,6 +116,26 @@ export function StoreAnalysisPanel({ snap, a, toast }: { snap: Snapshot; a: Anal
     <Panel title="Store analysis" icon={<PackageSearch size={15} />} bodyClass="p-0"
       right={<span className="text-[12px] text-muted">
         {toRestock.length ? `${toRestock.length} product${toRestock.length > 1 ? "s" : ""} to restock` : "Stock OK"}</span>}>
+      {/* team: restock (needs the team password) */}
+      {team ? (
+        <div className="flex flex-wrap items-center gap-2 border-b border-line bg-raised/30 px-3 py-2">
+          <span className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-[0.08em] text-muted">
+            <Lock size={13} aria-hidden />Team
+          </span>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+            placeholder="Team password" autoComplete="current-password" aria-label="Team password"
+            className="h-9 w-48 rounded-md border border-line-strong bg-raised px-2.5 text-[14px] text-ink placeholder:text-dim focus:border-info focus:outline-none" />
+          <Button className="ml-auto min-h-9 px-3 text-[13px]" busy={restocking === "all"}
+            disabled={!toRestock.length || !password || !!restocking} onClick={() => restock("all")}>
+            <PackagePlus size={15} aria-hidden />Restock all low items{toRestock.length ? ` (${toRestock.length})` : ""}
+          </Button>
+        </div>
+      ) : (
+        <p className="border-b border-line px-3 py-2 text-[12px] text-dim">
+          Restocking is switched off on this server: set <span className="num text-muted">STOREPILOT_UPLOAD_PASSWORD</span> (the team password).
+        </p>
+      )}
+
       {/* stock and restock */}
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px]">
@@ -123,8 +160,16 @@ export function StoreAnalysisPanel({ snap, a, toast }: { snap: Snapshot; a: Anal
                   <td className="num px-3 py-2 text-right text-[14px] text-ink">{p.ordered_today}</td>
                   <td className="num px-3 py-2 text-right text-[14px] text-ink">{p.delivered_today}</td>
                   <td className="px-3 py-2"><span className={`rounded-md border px-2 py-0.5 text-[12px] font-semibold ${cls}`}>{text}</span></td>
-                  <td className={`num px-3 py-2 text-right text-[14px] font-bold ${p.restock ? "text-warn" : "text-dim"}`}>
-                    {p.restock ? `+${p.restock}` : "—"}
+                  <td className="px-3 py-2 text-right">
+                    {p.restock && team ? (
+                      <button onClick={() => restock({ id: p.id, name: p.name, qty: p.restock })}
+                        disabled={!password || !!restocking} title={password ? `Add ${p.restock} ${p.name}` : "Enter the team password first"}
+                        className="num inline-flex items-center gap-1 rounded-md border border-warn/60 bg-warn/10 px-2 py-1 text-[13px] font-bold text-warn hover:bg-warn/20 disabled:cursor-not-allowed disabled:opacity-40">
+                        <PackagePlus size={13} aria-hidden />{restocking === p.id ? "…" : `Restock +${p.restock}`}
+                      </button>
+                    ) : (
+                      <span className={`num text-[14px] font-bold ${p.restock ? "text-warn" : "text-dim"}`}>{p.restock ? `+${p.restock}` : "—"}</span>
+                    )}
                   </td>
                 </tr>
               );
@@ -134,7 +179,7 @@ export function StoreAnalysisPanel({ snap, a, toast }: { snap: Snapshot; a: Anal
         </table>
       </div>
       <p className="border-t border-line/70 px-3 py-2 text-[12px] text-dim">
-        Low = 30 % of the starting stock or less (at least 3). Restock brings a product back to its starting stock.
+        Low = 30 % of the starting stock or less (at least 3). Restock brings a product back to its starting stock; every restock is logged.
       </p>
 
       {/* Nemotron Ultra's analysis */}
