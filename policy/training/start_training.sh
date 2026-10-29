@@ -7,8 +7,9 @@
 # Usage:
 #   ./start_training.sh <dataset folder>
 #   GPU=1 STEPS=50000 CONDA_ENV=lerobot_env ./start_training.sh dataset_v1_21102026_183539
+#   FROM_MODEL=<run>_060000 STEPS=20000 CONDA_ENV=lerobot_env ./start_training.sh <dataset folder>
 #   CONDA_ENV=lerobot_env ./start_training.sh --resume <run name>
-# Settings: the same variables as train_groot.sh (GPU, STEPS, BATCH_SIZE, SAVE_FREQ, MEMORY_MODE ...),
+# Settings: the same variables as train_groot.sh (GPU, STEPS, BATCH_SIZE, SAVE_FREQ, MEMORY_MODE, FROM_MODEL ...),
 # plus CONDA_ENV (conda env to activate; default: none, use the environment train_groot.sh finds),
 # KEEP_LAST (newest checkpoints kept complete, default 2) and KEEP_MODEL_EVERY (older checkpoints at a
 # multiple of this many steps keep their model, default 10000).
@@ -87,7 +88,8 @@ import json, sys, time
 json.dump({"run": "$RUN_NAME", "dataset": "$DATASET_NAME", "started": time.time(),
            "gpu": "$GPU", "steps": int("${STEPS:-30000}"), "batch_size": int("${BATCH_SIZE:-64}"),
            "save_freq": int("${SAVE_FREQ:-5000}"), "memory_mode": "${MEMORY_MODE:-low}",
-           "keep_last": $KEEP_LAST, "keep_model_every": $KEEP_MODEL_EVERY, "log_freq": 10},
+           "keep_last": $KEEP_LAST, "keep_model_every": $KEEP_MODEL_EVERY, "log_freq": 10,
+           "from_model": "${FROM_MODEL:-}" or None},
           open(sys.argv[1], "w"), indent=1)
 EOF
   TRAIN=("$SCRIPT_DIR/train_groot.sh" "$DATASET_NAME")

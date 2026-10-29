@@ -7,7 +7,16 @@
 # Usage:
 #   ./train_groot.sh <dataset folder>             # a folder in policy/data_collection/dataset/
 #   NUM_GPUS=1 STEPS=10000 ./train_groot.sh dataset_v1_12102026_153045
+#   FROM_MODEL=<run>_060000 STEPS=20000 ./train_groot.sh <dataset folder>   # go on from a trained model
 # Settings come from env vars; extra args are passed to lerobot-train.
+#
+# FROM_MODEL starts from one of our trained models instead of NVIDIA's base model, with a new
+# learning-rate schedule (a new run, not a resume): for example to train an existing model further
+# on a dataset with more episodes. It is a run in training/outputs/ (its newest checkpoint),
+# <run>_<step> (e.g. <run>_060000), or a path to a checkpoint or pretrained_model folder. The model's
+# own settings are used (memory mode, chunk, relative actions; MEMORY_MODE is ignored), and so is its
+# action scaling (from the dataset it was trained on). Train on the whole dataset (old and new
+# episodes), not on the new episodes alone, or the model forgets what it knew.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -62,6 +71,24 @@ if [[ -f "$SCRIPT_DIR/../../.env" ]]; then
   set -a; source "$SCRIPT_DIR/../../.env"; set +a
 fi
 
+# FROM_MODEL: the pretrained_model folder of the model to start from.
+FROM_DIR=""
+if [[ -n "${FROM_MODEL:-}" ]]; then
+  if [[ -e "$FROM_MODEL" ]]; then
+    FROM_DIR="$FROM_MODEL"
+  elif [[ -d "$SCRIPT_DIR/outputs/$FROM_MODEL" ]]; then
+    FROM_DIR="$SCRIPT_DIR/outputs/$FROM_MODEL/checkpoints/last"
+  elif [[ "$FROM_MODEL" =~ ^(.+)_([0-9]{6})$ ]]; then
+    FROM_DIR="$SCRIPT_DIR/outputs/${BASH_REMATCH[1]}/checkpoints/${BASH_REMATCH[2]}"
+  fi
+  [[ -d "$FROM_DIR/pretrained_model" ]] && FROM_DIR="$FROM_DIR/pretrained_model"
+  if [[ ! -f "$FROM_DIR/model.safetensors" || ! -f "$FROM_DIR/config.json" ]]; then
+    echo "FROM_MODEL: no model found for '$FROM_MODEL' (a run in $SCRIPT_DIR/outputs, <run>_<step>, or a path)" >&2
+    exit 1
+  fi
+  FROM_DIR="$(readlink -f "$FROM_DIR")"
+fi
+
 case "$MEMORY_MODE" in
   full) MEMORY_ARGS=() ;;
   # LeRobot >= 0.6.2 ignores model_params_fp32; dtype is the flag that works.
@@ -76,32 +103,43 @@ OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/outputs/$RUN_NAME}"
 export CUDA_VISIBLE_DEVICES="$GPU"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
-LAUNCHER=(lerobot-train)
+# lerobot_train_groot.py: lerobot-train, with GR00T's image augmentation also for FROM_MODEL and resumes.
+PYTHON="$(dirname "$(command -v lerobot-train)")/python"
+LAUNCHER=("$PYTHON" "$SCRIPT_DIR/lerobot_train_groot.py")
 if [[ "$NUM_GPUS" -gt 1 ]]; then
-  LAUNCHER=(accelerate launch --multi_gpu --num_processes="$NUM_GPUS" "$(command -v lerobot-train)")
+  LAUNCHER=(accelerate launch --multi_gpu --num_processes="$NUM_GPUS" "$SCRIPT_DIR/lerobot_train_groot.py")
 fi
 
 echo "Dataset: $DATASET_ROOT"
 echo "Output:  $OUTPUT_DIR"
-echo "GPUs: $GPU, batch $BATCH_SIZE per GPU, $STEPS steps, memory mode $MEMORY_MODE"
+if [[ -n "$FROM_DIR" ]]; then
+  echo "GPUs: $GPU, batch $BATCH_SIZE per GPU, $STEPS steps, from $FROM_DIR (its own settings)"
+  # Weights, settings and action scaling from that model; a new learning-rate schedule.
+  POLICY_ARGS=(--policy.path="$FROM_DIR" --policy.device=cuda --policy.push_to_hub=false)
+else
+  echo "GPUs: $GPU, batch $BATCH_SIZE per GPU, $STEPS steps, memory mode $MEMORY_MODE"
+  # chunk 16 and relative actions with an absolute gripper: same as the sim project.
+  # The joint names (shoulder_pan.pos ... gripper.pos) are written by LeRobot when recording.
+  POLICY_ARGS=(
+    --policy.type=groot
+    --policy.device=cuda
+    --policy.base_model_path=nvidia/GR00T-N1.7-3B
+    --policy.embodiment_tag=new_embodiment
+    --policy.chunk_size=16
+    --policy.n_action_steps=16
+    --policy.use_relative_actions=true
+    --policy.relative_exclude_joints='["gripper"]'
+    --policy.use_bf16=true
+    "${MEMORY_ARGS[@]}"
+    --policy.push_to_hub=false
+  )
+fi
 
-# chunk 16 and relative actions with an absolute gripper: same as the sim project.
-# The joint names (shoulder_pan.pos ... gripper.pos) are written by LeRobot when recording.
 "${LAUNCHER[@]}" \
   --dataset.repo_id="local/$DATASET_NAME" \
   --dataset.root="$DATASET_ROOT" \
   --dataset.image_transforms.enable=true \
-  --policy.type=groot \
-  --policy.device=cuda \
-  --policy.base_model_path=nvidia/GR00T-N1.7-3B \
-  --policy.embodiment_tag=new_embodiment \
-  --policy.chunk_size=16 \
-  --policy.n_action_steps=16 \
-  --policy.use_relative_actions=true \
-  --policy.relative_exclude_joints='["gripper"]' \
-  --policy.use_bf16=true \
-  "${MEMORY_ARGS[@]}" \
-  --policy.push_to_hub=false \
+  "${POLICY_ARGS[@]}" \
   --batch_size="$BATCH_SIZE" \
   --steps="$STEPS" \
   --save_freq="$SAVE_FREQ" \

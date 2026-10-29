@@ -46,9 +46,11 @@ fi
 export CUDA_VISIBLE_DEVICES="$GPU"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
-LAUNCHER=(lerobot-train)
+# lerobot_train_groot.py: lerobot-train, with GR00T's image augmentation kept on after the resume.
+PYTHON="$(dirname "$(command -v lerobot-train)")/python"
+LAUNCHER=("$PYTHON" "$SCRIPT_DIR/lerobot_train_groot.py")
 if [[ "$NUM_GPUS" -gt 1 ]]; then
-  LAUNCHER=(accelerate launch --multi_gpu --num_processes="$NUM_GPUS" "$(command -v lerobot-train)")
+  LAUNCHER=(accelerate launch --multi_gpu --num_processes="$NUM_GPUS" "$SCRIPT_DIR/lerobot_train_groot.py")
 fi
 
 echo "Resuming $RUN_DIR on GPUs $GPU"

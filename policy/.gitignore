@@ -8,6 +8,9 @@ training/logs/
 # Trained models copied here for inference
 inference/models/
 
+# Run settings saved as default for this arm (Run step, Save as default)
+inference/run_settings.json
+
 # Products of this setup (start from instructions.example.json)
 instructions.json
 

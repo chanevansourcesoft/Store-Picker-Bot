@@ -4,12 +4,14 @@ cameras as run_policy.py (it uses its code), with the app's buttons instead of k
 
 Commands come as lines on stdin:
 
-    start                      start an episode (the arm must be in its rest pose)
+    start                      start an episode (the arm must be in its rest pose); it ends by itself after
+                               the drop in the basket (--drop_wait), and the arm goes back to rest
     stop                       stop the arm where it is (during an episode)
     back                       move the arm slowly back to where the episode started
     quit                       the arm first goes back to where the episode started, then its motors switch off
     product <id>               between episodes: another product (instruction), without reloading the model
-    set speed=0.8 smooth=0.3   between episodes: change speed, smooth, blend_steps, substeps, accel or max_s
+    set speed=0.8 smooth=0.3   between episodes: change speed, smooth, blend_steps, substeps, accel, wait_act, drop_wait
+                               or max_s
 
 Events go to stdout as "[STUDIO] {json}" lines (state, ready, episode, task, settings, error), and
 --preview_dir gets small camera snapshots for the app's live view. Started by studio.py; it takes
@@ -23,11 +25,9 @@ import time
 from collections import deque
 
 import run_policy
+import run_settings
 from run_policy import record
-
-# Settings the app may change between episodes, with their limits (as studio.py checks them).
-SETTINGS = {"speed": (float, 0.3, 1.5), "smooth": (float, 0.0, 0.9), "blend_steps": (int, 0, 16),
-            "substeps": (int, 1, 5), "accel": (int, 0, 253), "max_s": (float, 5, 300)}
+from run_settings import LIMITS as SETTINGS  # settings the app may change between episodes, with their limits
 
 
 def emit(event, **fields):
@@ -77,19 +77,14 @@ def change(runner, line):
         emit("task", product=rest, instruction=runner.task)
         return None
     if word == "set":
-        values = {}
-        for pair in rest.split():
-            name, _, text = pair.partition("=")
-            if name not in SETTINGS:
-                return f"Unknown setting '{name}'."
-            kind, low, high = SETTINGS[name]
-            try:
-                value = kind(text)
-            except ValueError:
-                return f"{name} must be a number."
-            if not low <= value <= high:
-                return f"{name} must be {low:g} to {high:g}."
-            values[name] = value
+        pairs = dict(pair.partition("=")[::2] for pair in rest.split())
+        unknown = [name for name in pairs if name not in SETTINGS]
+        if unknown:
+            return f"Unknown setting '{unknown[0]}'."
+        try:
+            values = run_settings.check(pairs)
+        except ValueError as e:
+            return str(e)
         for name, value in values.items():
             setattr(runner.args, name, value)
         if "accel" in values:
@@ -119,8 +114,14 @@ def run(args):
             key = commands.wait()
             if key == " ":
                 at_start = False
-                if runner.episode(commands) == "q":
+                stopped_by = runner.episode(commands)
+                if stopped_by == "q":
                     break
+                if stopped_by in ("dropped", "model did not start"):  # back to rest at once, so the arm
+                    # does not wobble after the drop
+                    runner.back_to_start()
+                    commands.forget()
+                    at_start = True
             elif key == "r":
                 runner.back_to_start()
                 commands.forget()

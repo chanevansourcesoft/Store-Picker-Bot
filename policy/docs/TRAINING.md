@@ -176,6 +176,39 @@ Use the same `NUM_GPUS` as the original run (default 1). It stops when the termi
 with `start_training.sh` (or the app), use `./start_training.sh --resume <run name>` instead: it runs in the
 background, like the original run ("In the background" above), and the app's **Resume** button does the same.
 
+## 7. Train a model further on more data (`FROM_MODEL`)
+
+When a dataset gets more episodes (for example to fix one situation), you can go on from a trained model instead of
+starting again from NVIDIA's base model: the model already knows the task, so far fewer steps are needed.
+
+```bash
+# in the background, like a normal run (the run name is printed)
+FROM_MODEL=27102026_121427_dataset_v3_26102026_191752_060000 STEPS=20000 CONDA_ENV=lerobot_env \
+  ./start_training.sh dataset_v3_26102026_191752
+
+# or in the terminal
+FROM_MODEL=27102026_121427_dataset_v3_26102026_191752_060000 STEPS=20000 ./train_groot.sh dataset_v3_26102026_191752
+```
+
+- `FROM_MODEL` is `<run>_<step>` (a checkpoint of a run in `outputs/`), a run name (its newest checkpoint), or a path
+  to a checkpoint or `pretrained_model` folder.
+- It is a **new run** with a new learning-rate schedule over `STEPS` steps, not a resume.
+- The model's own settings are used: memory mode, chunk size, relative actions (`MEMORY_MODE` is ignored), and its
+  action scaling from the dataset it was trained on (same robot and task, so it still fits).
+- **Train on the whole dataset** (old and new episodes), not on the new episodes alone: otherwise the model slowly
+  forgets the situations that are only in the old ones.
+- About 20,000 steps (about 5.5 h) is a good start; compare its checkpoints on the arm with the model it started from.
+  If it does not get better, train from the base model as usual.
+
+Checked on 2026-10-29 with a 3-step run on dataset_v3 from the 60k model: the model loads (the loss starts at
+0.006–0.03, like at the end of its training, instead of about 1.1 for a new run) and keeps its settings.
+
+**Image augmentation:** `train_groot.sh` and `resume_groot.sh` start `lerobot_train_groot.py` instead of
+`lerobot-train`. It is the same program, except that GR00T's random image crop (a training augmentation) stays on when
+a run starts from a saved model. LeRobot loads a saved model's processors in evaluation mode, so without it a
+`FROM_MODEL` run, **and every resumed run**, would train without the crop. Runs resumed before 2026-10-29 (for example
+`27102026_121427_dataset_v3_26102026_191752` from step 20,000) trained without it after the resume.
+
 ## LeRobot versions
 
 The training PC uses LeRobot **0.6.2** from `~/lerobot` (`lerobot_env`). This version is not released yet;

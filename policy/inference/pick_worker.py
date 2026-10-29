@@ -10,16 +10,18 @@ arm and cameras open, and runs one pick when asked. It answers on a small local 
 
 A pick: the item's instruction comes from policy/instructions.json (the caller sends only the item
 id). The arm starts in its rest pose, the model picks the item and puts it in the basket, and the
-episode ends by itself when the arm is back near its rest pose with the gripper closed and still.
-Then the arm moves exactly back to its rest pose, as R does in run_policy.py. The answer says
-whether it worked: ok only if the episode ended by itself and a grasp was seen (the jaw stayed
-steady part-way open while the model pressed it closed). The episode also ends at --max_s (not ok).
+episode ends by itself --drop_wait seconds after the drop (the jaw opens over the basket after a
+grasp), or when the arm is back near its rest pose with the gripper closed and still. Then the arm
+moves exactly back to its rest pose, as R does in run_policy.py. The answer says whether it worked:
+ok only if the episode ended by itself and a grasp was seen (the jaw stayed steady part-way open
+while the model pressed it closed). The episode also ends at --max_s (not ok).
 The arm never moves without a /pick or /home.
 
 "reason" is a fixed code for programs (the message is for people and may be reworded):
     placed        ok: the item is in the basket, the arm at rest
     no_grasp      the episode ended at rest without a grasp: nothing picked
     time_limit    --max_s reached (after a grasp or not); the arm went back to rest
+    no_start      --wait_act: the model did not want to act (it may think the task is done); arm back at rest
     holding       the gripper still holds something at rest: a person should look
     stopped       /stop during the pick: the arm holds where it is
     unknown_item  the item is not in instructions.json: the arm did not move
@@ -39,61 +41,15 @@ import json
 import signal
 import threading
 import time
-from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-import numpy as np
-
 import run_policy
-from run_policy import record
-
-# Grasp and end of episode, in joint units (checked on dataset_v3: the grasp is seen in all 240
-# recorded episodes, the end in 94%; the others were saved before the arm settled).
-HOLD_OPEN = (6, 45)      # the gripper holds an item somewhere in this range (closed on nothing: about 1)
-HOLD_STEADY = 2          # ... and moves less than this for half a second
-HOLD_PRESS = 2.5         # ... while the model commands it this much more closed (it is blocked by the item)
-AWAY = 40                # the arm went at least this far from its rest pose (the episode really started)
-NEAR_REST = 20           # end: the arm joints are back within this of the rest pose,
-STILL = 8                # moved less than this over the last half second,
-CLOSED = 6               # and the gripper is closed (under this)
+from run_policy import CLOSED, record
 
 
 def log(text):
     print(time.strftime("%H:%M:%S"), text, flush=True)
-
-
-class PickCheck:
-    """The runner's watch hook for one pick: sees the grasp, and ends the episode when the arm is back at rest."""
-
-    def __init__(self, runner):
-        self.runner = runner
-        self.gripper = runner.joints.index("gripper.pos")
-        self.arm = np.arange(len(runner.joints)) != self.gripper
-        n = max(2, round(runner.args.fps / 2))  # half a second
-        self.grip = deque(maxlen=n)
-        self.press = deque(maxlen=n)
-        self.recent = deque(maxlen=n)
-        self.away = False
-        self.grasped = False
-
-    def __call__(self, seconds, state, target):
-        rest = self.runner.start_pose[self.arm]
-        arm, grip = state[self.arm], float(state[self.gripper])
-        self.grip.append(grip)
-        self.press.append(grip - float(target[self.gripper]) if target is not None else 0.0)
-        self.recent.append(arm)
-        distance = float(np.abs(arm - rest).max())
-        self.away = self.away or distance > AWAY
-        full = len(self.grip) == self.grip.maxlen
-        if (not self.grasped and full and HOLD_OPEN[0] <= min(self.grip) and max(self.grip) <= HOLD_OPEN[1]
-                and max(self.grip) - min(self.grip) < HOLD_STEADY and np.mean(self.press) >= HOLD_PRESS):
-            self.grasped = True
-            log(f"Grasp seen at {seconds:.1f} s (gripper at {grip:.0f}).")
-        if (self.away and full and distance < NEAR_REST and grip < CLOSED
-                and float(np.abs(np.array(self.recent) - arm).max()) < STILL):
-            return "back at rest"
-        return None
 
 
 class Worker:
@@ -115,6 +71,7 @@ class Worker:
         """Load the model, connect the arm and cameras, warm up. Then the worker is ready."""
         self.runner, self.robot = run_policy.load(self.args)
         self.runner.show = lambda text: None  # no progress line: this is a log
+        self.runner.end_at_rest = True
         self.state = "connecting"
         self.robot.connect()
         self.runner.set_accel(self.args.accel)
@@ -150,12 +107,11 @@ class Worker:
             if not self.at_rest:
                 self._home()
             self.runner.task = items[item]["instruction"]
-            check = PickCheck(self.runner)
-            self.runner.watch = check
             self.item, self.state, self.at_rest = item, "picking", False
             log(f"Pick {item}: {self.runner.task}")
             start = time.monotonic()
             stopped_by = self.runner.episode(self)
+            check = self.runner.check
             seconds = round(time.monotonic() - start, 1)
             if stopped_by == " ":
                 result = {"ok": False, "reason": "stopped", "message": f"stopped: the arm holds where it is ({item})"}
@@ -163,10 +119,13 @@ class Worker:
             else:
                 self._home()
                 holding = self._holding()
-                if stopped_by == "back at rest" and check.grasped and not holding:
+                if stopped_by in ("dropped", "back at rest") and check.grasped and not holding:
                     result = {"ok": True, "reason": "placed", "message": f"placed {item} in basket"}
                 elif stopped_by == "back at rest":
                     result = {"ok": False, "reason": "no_grasp", "message": f"no grasp seen: {item} was not picked"}
+                elif stopped_by == "model did not start":
+                    result = {"ok": False, "reason": "no_start",
+                              "message": f"the model did not start within {self.args.wait_act:g} s: {item} was not picked"}
                 else:
                     result = {"ok": False, "reason": "time_limit", "message": f"time limit ({self.args.max_s:g} s), "
                               + ("after a grasp" if check.grasped else "no grasp seen")}
@@ -182,7 +141,6 @@ class Worker:
             result = {"ok": False, "reason": "policy_error", "message": f"policy error: {self.error}", "item": item}
             log(f"Pick {item}: ERROR {self.error}")
         finally:
-            self.runner.watch = None
             self.item = None
             self.lock.release()
         self.last = result

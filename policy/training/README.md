@@ -5,7 +5,8 @@ GR00T N1.7 training on the training PC (2× RTX 5090). Guide: [TRAINING.md](../d
 | File | What it does |
 |---|---|
 | `setup.sh` | One-time setup of the PC: driver check, Python environment, Hugging Face login, model download |
-| `train_groot.sh` | Trains GR00T on one dataset from `../data_collection/dataset/` |
+| `train_groot.sh` | Trains GR00T on one dataset from `../data_collection/dataset/`; `FROM_MODEL` goes on from a trained model |
+| `lerobot_train_groot.py` | `lerobot-train`, keeping GR00T's image augmentation on for `FROM_MODEL` and resumed runs (started by the scripts) |
 | `start_training.sh` | Starts `train_groot.sh` in the background (keeps running after the terminal closes) and thins out old checkpoints; `--resume <run>` continues a stopped run the same way |
 | `stop_training.sh` | Stops a run started with `start_training.sh` |
 | `prune_checkpoints.py` | Deletes older checkpoints of a run, keeping the newest ones and some models (run by `start_training.sh`) |

@@ -103,14 +103,18 @@ steps; a step unlocks when the one before it is done.
    first (Train step, **Copy to this PC**).
    - Choose the **model**, the **product**, and the settings: **speed** (1 = as trained; 0.8 plays the
      movements slower), **smoothing** (0.3), **blend steps** (8), **commands per target** (3), **acceleration
-     limit** (0 = off) and the **time limit** per episode. They are
+     limit** (0 = off), **wait for the model to act** (0 = off), **end after the drop** (0.5 s) and the **time limit** per
+     episode. They are
      explained in [INFERENCE.md](INFERENCE.md). Tick **Dry run** the first time with a new model: the model
      runs, the arm does not move.
    - **Load the model** (about a minute). The live view shows both cameras.
    - Put the arm in its rest pose and the product on the shelf, then **Start** (`Space`). **Stop** (`Space`)
      stops the arm where it is; **Back to start** (`R`) moves it slowly back to where the episode started.
+     After the drop in the basket the episode ends by itself and the arm goes back to rest.
    - Between episodes, change the product or the settings and press **Use these for the next episode**:
      the model stays loaded. **Last episode** shows how long it took and how smooth it was.
+   - When the settings work well, press **Save as default**: they are filled in next time, and `run.sh` and the
+     policy worker (the robot's picks) use them too ([INFERENCE.md](INFERENCE.md#options)).
    - **Quit** moves the arm back to where the episode started, then switches its motors off.
    While a model runs, recording is not possible (the arm is in use).
 

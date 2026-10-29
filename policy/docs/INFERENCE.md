@@ -150,8 +150,10 @@ Keys (press them in the terminal running the program):
 | Q | quit: the arm first moves back to where the episode started, then its motors switch off |
 | Ctrl+C | like Q. A second Ctrl+C while the arm moves back stops at once: the motors stay on and hold the arm |
 
-An episode also stops after 40 seconds (`--max_s`). After it stops, the arm holds its position. Press **R** to bring it
-back, put the product back on the shelf, and press **Space** for the next try.
+**The episode ends by itself after the drop:** half a second after the gripper opens over the basket (`--drop_wait`), the
+arm moves back to its rest pose on its own, so it does not wobble over the basket. `Grasp seen` and `Drop seen` are printed
+when they happen. An episode also stops after 40 seconds (`--max_s`). After a stop, the arm holds its position. Press **R**
+to bring it back, put the product back on the shelf, and press **Space** for the next try.
 
 **Safety limit:** each command may move a joint at most 30 units from where it is (`--max_step`). The recordings stay
 below this, so a normal movement is not slowed, but a wrong prediction cannot make the arm jump. Do not raise it.
@@ -180,15 +182,17 @@ A pick, for example "ink_box":
 1. The instruction is looked up in `instructions.json` (the caller sends only the item id; an unknown id is refused and the
    arm does not move).
 2. The arm starts in its rest pose (if a stop left it elsewhere, it first goes back to rest).
-3. The model picks the item and puts it in the basket. The episode **ends by itself** when the arm is back near its rest
-   pose, with the gripper closed and still for half a second, or after `--max_s` seconds.
+3. The model picks the item and puts it in the basket. The episode **ends by itself** half a second after the drop (the
+   gripper opens over the basket after a grasp, `--drop_wait`), or when the arm is back near its rest pose with the gripper
+   closed and still for half a second, or after `--max_s` seconds.
 4. The arm moves exactly back to its rest pose (like **R**).
 5. The answer is **ok** only if the episode ended by itself, a **grasp was seen** (the gripper stayed steady part-way open
    while the model pressed it closed: it was blocked by the item) and the gripper is empty at the end. Otherwise it says why:
    no grasp seen, time limit, or "the gripper still holds something".
 
-These rules were checked on the 240 recorded episodes of dataset_v3: the grasp is seen in all of them, and the end in 94% (the
-others were saved before the arm settled; with the model, the time limit and the move back to rest cover them).
+These rules were checked on the 240 recorded episodes of dataset_v3: the grasp is seen in all of them, the drop in 218 (always
+at the real drop, never earlier), and the drop or the end at rest in 239 (the last one was saved before the arm settled;
+with the model, the time limit and the move back to rest cover it).
 
 The worker answers on a small local web port (`--host`, `--port`, default `127.0.0.1:8790`):
 
@@ -206,6 +210,7 @@ The worker answers on a small local web port (`--host`, `--port`, default `127.0
 | `placed` | ok: the item is in the basket, the arm at rest |
 | `no_grasp` | the episode ended at rest without a grasp: nothing picked |
 | `time_limit` | `--max_s` reached (after a grasp or not); the arm went back to rest |
+| `no_start` | with `--wait_act`: the model did not want to act (it may think the task is done); the arm went back to rest |
 | `holding` | the gripper still holds something at rest: a person should look |
 | `stopped` | stopped during the pick: the arm holds where it is |
 | `unknown_item` | not in `instructions.json`: the arm did not move |
@@ -229,6 +234,12 @@ With `--dry_run`, the model runs but the arm does not move, so each pick ends at
 
 ## Options
 
+**Saved defaults:** when a set of settings works well, press **Save as default** in the app's Run step. Speed,
+smoothing, blend steps, commands per target, acceleration limit, wait for the model to act, end after the drop and the
+time limit are saved in `inference/run_settings.json` (not in Git: it belongs to this arm). They are then filled in by
+the Run step and are the defaults of `run.sh` and the policy worker, instead of the defaults below. An option given on
+the command line still wins. `--help` shows the defaults in use. To go back to the defaults below, delete the file.
+
 | Option | Default | Meaning |
 |---|---|---|
 | `--dry_run` | off | run the model, do not move the arm |
@@ -239,6 +250,8 @@ With `--dry_run`, the model runs but the arm does not move, so each pick ends at
 | `--speed` | 1.0 | play the movements at this speed: below 1 is slower, for example `0.8` when the arm rushes |
 | `--substeps` | 3 | commands per target: the arm is moved part of the way between two targets (90 commands a second instead of 30), so it moves smoothly instead of in small jumps (1 = off) |
 | `--accel` | 0 (off) | acceleration limit of the arm servos, 1 (very gentle) to 253: they ramp their speed up and down instead of starting and stopping hard. Try 50–150; too low makes the arm lag behind the model. The gripper is not limited |
+| `--wait_act` | 0 (off) | the model only gets the arm once its predictions move a reaching joint (pan, shoulder, elbow, wrist roll) or open the gripper (it wants to act; the wrist flex alone does not count); until then the arm holds still. If it does not want to act within this many seconds, the episode ends ("the model did not start") and the arm goes back to rest by itself. A reaching joint must move more than 20 units (a plan to go back to rest moves less). In all 240 recorded demos this starts within 3.2 s, so 5 is a good value. |
+| `--drop_wait` | 0.5 | end the episode this many seconds after the drop (the gripper opens over the basket after a grasp), then move the arm back to rest by itself, so it does not wobble there. 0 = off: the model keeps the arm until Stop or the time limit |
 | `--max_step` | 30 | safety limit per command, see above |
 | `--task` | | an instruction text instead of `--product` (not for the policy worker) |
 | `--host`, `--port` | 127.0.0.1, 8790 | policy worker only: where it answers |

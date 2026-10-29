@@ -22,6 +22,9 @@ and --accel makes the servos ramp their speed up and down gently. Keys (read fro
 An episode also stops after --max_s seconds. --dry_run runs the model but never moves the arm:
 use it first with every new model.
 
+With --wait_act, the model only gets the arm once its predictions move a reaching joint or open the
+gripper; if it does not want to act within that many seconds, the episode ends.
+
 The Store Picker Bot app runs the same model and arm code with buttons instead of keys:
 run_policy_studio.py (Run step).
 
@@ -50,6 +53,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "data_collection"))
 import record  # noqa: E402  (same arm and camera setup as the recordings)
+import run_settings  # noqa: E402  (saved defaults)
 
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
@@ -65,6 +69,24 @@ from lerobot.utils.robot_utils import precise_sleep  # noqa: E402
 MODELS_DIR = HERE / "models"
 TRAINING_OUTPUTS = HERE.parent / "training" / "outputs"
 RETURN_SPEED = 30.0  # joint units per second when moving back to the start pose
+# --wait_act: the model "wants to act" when its chunk moves a reaching joint (pan, shoulder, elbow, wrist
+# roll) this much from where it is, or opens the gripper by ACT_MARGIN (joint units). In all 240 demos of
+# dataset_v3 this happens within 3.2 s of the start (median 0.8 s). Small moves while the model holds the
+# arm at rest (up to 12 seen) do not count.
+REACH_MARGIN = 20.0
+ACT_MARGIN = 8.0
+# Grasp, drop and end of episode, in joint units (checked on dataset_v3: the grasp is seen in all 240
+# recorded episodes, the end in 94%; the others were saved before the arm settled).
+HOLD_OPEN = (6, 45)      # the gripper holds an item somewhere in this range (closed on nothing: about 1)
+HOLD_STEADY = 2          # ... and moves less than this for half a second
+HOLD_PRESS = 2.5         # ... while the model commands it this much more closed (it is blocked by the item)
+DROP_OPEN = 5            # the drop: after a grasp, the gripper opens this much wider than it held the item,
+DROP_NEAR = 88           # with the arm this close to its rest pose (over the basket). In dataset_v3 the grasp is
+                         # always 97 or more from rest, the drop 79 or less; 219 of 240 demos open this wide
+AWAY = 40                # the arm went at least this far from its rest pose (the episode really started)
+NEAR_REST = 20           # end: the arm joints are back within this of the rest pose,
+STILL = 8                # moved less than this over the last half second,
+CLOSED = 6               # and the gripper is closed (under this)
 
 
 def make_parser(product_required=True):
@@ -95,6 +117,14 @@ def make_parser(product_required=True):
     parser.add_argument("--accel", type=int, default=0,
                         help="Acceleration limit of the arm servos, 1 (very gentle) to 253; 0 = off (LeRobot's 254, "
                              "the fastest). The servos ramp their speed up and down; the gripper keeps its own")
+    parser.add_argument("--wait_act", type=float, default=0.0,
+                        help="The model only gets the arm once its predictions move a reaching joint or open the "
+                             "gripper (it wants to act); until then the arm holds still. If it does not want to act within this many "
+                             "seconds, the episode ends ('model did not start'). 0 = off (the model drives at once)")
+    parser.add_argument("--drop_wait", type=float, default=0.5,
+                        help="End the episode this many seconds after the item is dropped over the basket (the jaw "
+                             "opens after a grasp), then move the arm back to rest, so it does not wobble there. "
+                             "0 = off (the model keeps the arm until Stop or the time limit)")
     parser.add_argument("--max_step", type=float, default=30.0,
                         help="Largest move per command, in joint units from where the joint is "
                              "(recordings stay under 30; 0 = no limit)")
@@ -108,6 +138,8 @@ def make_parser(product_required=True):
     parser.add_argument("--width", type=int, default=640)
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--fourcc", default=None, help="Camera format, e.g. MJPG (same as when recording)")
+    # Saved defaults (the app's "Save as default"); options on the command line still win.
+    parser.set_defaults(**run_settings.load())
     return parser
 
 
@@ -125,6 +157,10 @@ def parse_args(parser=None):
         parser.error("--substeps must be 1 to 5")
     if not 0 <= args.accel <= 253:
         parser.error("--accel must be 0 (off) to 253")
+    if not 0 <= args.wait_act <= 30:
+        parser.error("--wait_act must be 0 (off) to 30")
+    if not 0 <= args.drop_wait <= 5:
+        parser.error("--drop_wait must be 0 (off) to 5")
     missing = [flag for flag in ("follower_port", "gripper_cam", "scene_cam") if not getattr(args, flag)]
     if missing:
         parser.error("missing " + ", ".join(f"--{m}" for m in missing)
@@ -213,6 +249,53 @@ def status(text):
     sys.stdout.flush()
 
 
+class PickCheck:
+    """Watches one episode: sees the grasp and the drop over the basket, and ends the episode --drop_wait
+    seconds after the drop ("dropped"), or when the arm is back at rest if runner.end_at_rest ("back at rest")."""
+
+    def __init__(self, runner):
+        self.runner = runner
+        self.gripper = runner.joints.index("gripper.pos")
+        self.arm = np.arange(len(runner.joints)) != self.gripper
+        n = max(2, round(runner.args.fps / 2))  # half a second
+        self.grip = deque(maxlen=n)
+        self.press = deque(maxlen=n)
+        self.recent = deque(maxlen=n)
+        self.away = False
+        self.held = None  # where the gripper held the item (the last grasp seen)
+        self.dropped_at = None
+
+    @property
+    def grasped(self):
+        return self.held is not None
+
+    def __call__(self, seconds, state, target):
+        rest = self.runner.start_pose[self.arm]
+        arm, grip = state[self.arm], float(state[self.gripper])
+        self.grip.append(grip)
+        self.press.append(grip - float(target[self.gripper]) if target is not None else 0.0)
+        self.recent.append(arm)
+        distance = float(np.abs(arm - rest).max())
+        self.away = self.away or distance > AWAY
+        full = len(self.grip) == self.grip.maxlen
+        if (full and HOLD_OPEN[0] <= min(self.grip) and max(self.grip) <= HOLD_OPEN[1]
+                and max(self.grip) - min(self.grip) < HOLD_STEADY and np.mean(self.press) >= HOLD_PRESS):
+            if self.held is None:
+                print(f"\nGrasp seen at {seconds:.1f} s (gripper at {grip:.0f}).", flush=True)
+            self.held = float(np.mean(self.grip))
+        if (self.dropped_at is None and self.held is not None and grip > self.held + DROP_OPEN
+                and distance < DROP_NEAR):
+            self.dropped_at = seconds
+            print(f"\nDrop seen at {seconds:.1f} s.", flush=True)
+        wait = self.runner.args.drop_wait
+        if self.dropped_at is not None and wait and seconds - self.dropped_at >= wait:
+            return "dropped"
+        if (self.runner.end_at_rest and self.away and full and distance < NEAR_REST and grip < CLOSED
+                and float(np.abs(np.array(self.recent) - arm).max()) < STILL):
+            return "back at rest"
+        return None
+
+
 class Runner:
     def __init__(self, args, robot, policy, preprocessor, postprocessor, task):
         self.args = args
@@ -231,9 +314,10 @@ class Runner:
         # Hooks for run_policy_studio.py: events for the app, and the one-line status (the terminal's).
         self.notify = lambda event, **fields: None
         self.show = status
-        # Hook for pick_worker.py: called every step with (seconds, arm position, last target sent);
-        # returning a reason (text) ends the episode.
-        self.watch = None
+        # The last episode's PickCheck (grasp, drop); pick_worker.py also ends episodes back at rest.
+        self.check = None
+        self.end_at_rest = False
+        self.plan_shown = 0.0  # when wants_to_act last printed the model's plan
 
     def state(self, obs):
         return np.array([obs[joint] for joint in self.joints], dtype=np.float32)
@@ -297,8 +381,8 @@ class Runner:
         return deque(new)
 
     def episode(self, keys):
-        """Run the model until Space, Q, Ctrl+C, the time limit or the watch hook. Returns the key that stopped
-        it ("time" for the time limit, the hook's reason for the hook).
+        """Run the model until Space, Q, Ctrl+C, the time limit or the PickCheck. Returns the key that stopped
+        it ("time" for the time limit, the PickCheck's reason for it).
 
         The model predicts the next chunk in the background while the arm plays the current one, so
         the arm does not stop to wait. When the new chunk arrives, its actions for the steps that went
@@ -306,7 +390,10 @@ class Runner:
         targets are smoothed (--smooth); the gripper's are not, so it still closes at once.
         """
         self.reset()
+        obs = self.robot.get_observation()
+        self.start_pose = self.state(obs)  # the rest pose: the arm comes back here (R)
         self.notify("state", state="running")
+        self.check = PickCheck(self)
         queue = deque()
         pending = None  # the chunk being predicted, and the step its observation was taken at
         period = 1 / self.args.fps
@@ -318,8 +405,7 @@ class Runner:
         jumps = []  # largest arm-joint change between two targets in a row, per step: how smooth it was
         target = None  # the last target sent
         arm = np.arange(len(self.joints)) != self.joints.index("gripper.pos")
-        obs = self.robot.get_observation()
-        self.start_pose = self.state(obs)
+        acting = not self.args.wait_act  # --wait_act: the model drives only once it wants to act
         while True:
             tick = time.monotonic()
             elapsed = tick - start
@@ -330,16 +416,23 @@ class Runner:
             if elapsed > self.args.max_s:
                 stopped_by = "time"
                 break
+            if not acting and elapsed > self.args.wait_act:
+                stopped_by = "model did not start"
+                break
             obs = self.robot.get_observation()
-            if self.watch is not None:
-                stopped_by = self.watch(elapsed, self.state(obs), target)
-                if stopped_by:
-                    break
+            stopped_by = self.check(elapsed, self.state(obs), target)
+            if stopped_by:
+                break
             if pending is None and len(queue) <= self.lead_steps:
                 pending = (self.worker.submit(self.predict_chunk, obs), step)
             if pending is not None and pending[0].done():
                 chunk, seconds = pending[0].result()
                 stale = step - pending[1]
+                if not acting and self.wants_to_act(chunk, self.state(obs)):
+                    acting = True
+                    print(f"\nThe model starts after {elapsed:.1f} s.")
+                if not acting:
+                    chunk = chunk[:0]  # not played: the arm keeps holding still, the model looks again
                 queue = self.blend(list(queue), chunk[min(stale, len(chunk) - 1):])
                 pending = None
                 infer_ms.append(seconds * 1000)
@@ -358,17 +451,19 @@ class Runner:
                         if i > 1:
                             precise_sleep(max(0.0, tick + (i - 1) * period / k - time.monotonic()))
                         self.send(action if i == k else previous + (action - previous) * i / k)
-            else:
+            elif acting:
                 waited += 1  # the arm holds its last target
             step += 1
             model = f"model {infer_ms[-1]:4.0f} ms" if infer_ms else "model starting"
-            self.show(f"{'DRY RUN' if self.args.dry_run else 'RUNNING'} {elapsed:5.1f} s | {model} | "
-                   "Space = stop, Q = quit")
+            what = ("DRY RUN" if self.args.dry_run else "RUNNING") if acting else "WAITING FOR THE MODEL TO ACT"
+            self.show(f"{what} {elapsed:5.1f} s | {model} | Space = stop, Q = quit")
             precise_sleep(max(0.0, period - (time.monotonic() - tick)))
         if pending is not None:
             pending[0].result()  # let the model finish before it is used again
         print()
-        reason = {"time": f"time limit ({self.args.max_s:g} s)", " ": "Space", "q": "Q"}.get(stopped_by, stopped_by)
+        reason = {"time": f"time limit ({self.args.max_s:g} s)", " ": "Space", "q": "Q",
+                  "model did not start": f"the model did not want to act within {self.args.wait_act:g} s",
+                  "dropped": f"the drop in the basket ({self.args.drop_wait:g} s after it)"}.get(stopped_by, stopped_by)
         print(f"Stopped by {reason} after {time.monotonic() - start:.1f} s. Model: {len(infer_ms)} chunks, "
               f"{np.median(infer_ms or [0]):.0f} ms median, {max(infer_ms or [0]):.0f} ms slowest; "
               f"waited for it {waited} of {step} steps. Largest target away from the arm: {biggest:.1f} joint units.")
@@ -383,20 +478,41 @@ class Runner:
                   f"95% under {np.percentile(jumps, 95):.2f}, largest {max(jumps):.2f} joint units.")
         return stopped_by
 
+    def wants_to_act(self, chunk, state):
+        """True if the chunk moves a reaching joint (pan, shoulder, elbow, wrist roll) or opens the gripper: the
+        model starts the task. Holding still means it thinks there is nothing to do. The wrist flex alone does
+        not count: bending it at rest is not the start of the task."""
+        reach = [self.joints.index(j) for j in ("shoulder_pan.pos", "shoulder_lift.pos", "elbow_flex.pos",
+                                                "wrist_roll.pos")]
+        gripper = self.joints.index("gripper.pos")
+        moves = chunk[-1] - state
+        if time.monotonic() - self.plan_shown >= 1:
+            # What the model plans while the arm waits (once a second), to see why it holds still.
+            self.plan_shown = time.monotonic()
+            print("\nWaiting, the model plans (end of chunk minus now): "
+                  + ", ".join(f"{j.removesuffix('.pos')} {m:+.0f}" for j, m in zip(self.joints, moves)), flush=True)
+        return (float(np.abs(moves[reach]).max()) > REACH_MARGIN
+                or float(chunk[:, gripper].max()) > float(state[gripper]) + ACT_MARGIN)
+
     def back_to_start(self):
         """Move the arm smoothly to where the last episode started."""
         if self.start_pose is None or self.args.dry_run:
             return
-        here = self.state(self.robot.get_observation())
-        distance = float(np.abs(self.start_pose - here).max())
-        steps = max(1, int(distance / RETURN_SPEED * self.args.fps))
-        print(f"Moving back to the start pose ({steps / self.args.fps:.1f} s)...")
         self.notify("state", state="returning")
+        seconds = self.move_to(self.start_pose)
+        print(f"Moved back to the start pose ({seconds:.1f} s).")
+
+    def move_to(self, target):
+        """Move the arm smoothly to target, at RETURN_SPEED. Returns the time it took (s)."""
+        here = self.state(self.robot.get_observation())
+        distance = float(np.abs(target - here).max())
+        steps = max(1, int(distance / RETURN_SPEED * self.args.fps))
         for i in range(1, steps + 1):
             tick = time.monotonic()
-            self.send(here + (self.start_pose - here) * i / steps)
+            self.send(here + (target - here) * i / steps)
             precise_sleep(max(0.0, 1 / self.args.fps - (time.monotonic() - tick)))
         time.sleep(0.5)
+        return steps / self.args.fps
 
 
 def load(args, notify=lambda event, **fields: None):
@@ -472,6 +588,11 @@ def main():
                     at_start = False
                     if stopped_by == "q":
                         break
+                    if stopped_by in ("dropped", "model did not start"):  # back to rest at once, so the arm
+                        # does not wobble after the drop
+                        runner.back_to_start()
+                        keys.forget()
+                        at_start = True
                 elif key == "r":
                     print()
                     runner.back_to_start()

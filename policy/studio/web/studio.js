@@ -885,9 +885,17 @@ let runLiveOn = false;
 const runForm = () => ({ model: $("runModel").value, product: $("runProduct").value, speed: Number($("runSpeed").value),
   smooth: Number($("runSmooth").value), blend_steps: Number($("runBlend").value), max_s: Number($("runMaxS").value),
   substeps: Number($("runSubsteps").value), accel: Number($("runAccel").value),
+  wait_act: Number($("runWaitAct").value), drop_wait: Number($("runDropWait").value),
   dry_run: $("runDry").checked });
+// The settings fields; filled from the saved defaults (Save as default) when the page opens.
+const RUN_FIELDS = { speed: "runSpeed", smooth: "runSmooth", blend_steps: "runBlend", substeps: "runSubsteps",
+  accel: "runAccel", wait_act: "runWaitAct", drop_wait: "runDropWait", max_s: "runMaxS" };
 function renderRun() {
   if (!S) return;
+  if (!renderRun.filled) {
+    for (const [name, id] of Object.entries(RUN_FIELDS)) if (S.run_defaults && S.run_defaults[name] != null) $(id).value = S.run_defaults[name];
+    renderRun.filled = true;
+  }
   const models = S.models || [];
   const fill = (sel, values, label) => {
     const key = values.join("|");
@@ -960,8 +968,17 @@ $("runQuitBtn").onclick = () => runCommand({ cmd: "quit" });
 $("runApplyBtn").onclick = async () => {
   const f = runForm();
   await runCommand({ cmd: "change", product: f.product, speed: f.speed, smooth: f.smooth, blend_steps: f.blend_steps, max_s: f.max_s,
-    substeps: f.substeps, accel: f.accel });
+    substeps: f.substeps, accel: f.accel, wait_act: f.wait_act,
+    drop_wait: f.drop_wait });
   toast("Used from the next episode.");
+};
+$("runSaveBtn").onclick = async () => {
+  const f = runForm();
+  try {
+    await api("/api/run/defaults", Object.fromEntries(Object.keys(RUN_FIELDS).map((name) => [name, f[name]])));
+    S = await api("/api/studio");
+    toast("Saved as default: filled in next time, and used by run.sh and the policy worker.", 5000);
+  } catch (e) { toast(e.message, 6000); }
 };
 
 // ---------- keys ----------

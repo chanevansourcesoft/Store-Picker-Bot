@@ -44,6 +44,8 @@ MODELS_DIR = POLICY_DIR / "inference" / "models"  # trained models copied here t
 # Importing it also points HF_LEROBOT_CALIBRATION at policy/calibration/.
 sys.path.insert(0, str(DATA_COLLECTION_DIR))
 import record  # noqa: E402
+sys.path.insert(0, str(POLICY_DIR / "inference"))
+import run_settings  # noqa: E402  (limits and saved defaults of a model run's settings)
 from dataset_view import DatasetView  # noqa: E402  (studio/dataset_view.py)
 from training_link import DISK_MARGIN_GB, GPU_BUSY_MB, MAX_STEPS, MIN_STEPS, TrainingLink  # noqa: E402
 
@@ -83,11 +85,6 @@ def write_json(path, data):
 
 
 # ---------------------------------------------------------------------------
-# Settings of a model run the app may change (run_policy_studio.py checks the same limits).
-RUN_SETTINGS = {"speed": (float, 0.3, 1.5), "smooth": (float, 0.0, 0.9), "blend_steps": (int, 0, 16),
-                "substeps": (int, 1, 5), "accel": (int, 0, 253), "max_s": (float, 5, 300)}
-
-
 def list_models():
     """Models copied to this PC (inference/models/), newest first. Not a copy still going on or cut off
     (<name>.part: its files may be incomplete)."""
@@ -637,6 +634,7 @@ class Studio:
             "send": self.jobs["send"].public() if "send" in self.jobs else None,
             "run": self.jobs["run"].public() if "run" in self.jobs else None,
             "models": list_models(),
+            "run_defaults": run_settings.load(),
             "training_configured": self.link is not None,
             "arm_test_passed": self.arm_test_passed,
             "camera_test": self.camera_result,
@@ -806,18 +804,12 @@ class Studio:
     @staticmethod
     def _run_settings(body):
         """--speed ... options from the app's form, checked like run_policy.py checks them."""
-        out = []
-        for name, (kind, low, high) in RUN_SETTINGS.items():
-            if body.get(name) is None:
-                continue
-            try:
-                value = kind(body[name])
-            except (TypeError, ValueError):
-                raise ValueError(f"{name} must be a number.") from None
-            if not low <= value <= high:
-                raise ValueError(f"{name} must be {low:g} to {high:g}.")
-            out += [f"--{name}", str(value)]
-        return out
+        return [part for name, value in run_settings.check(body).items() for part in (f"--{name}", str(value))]
+
+    @staticmethod
+    def save_run_defaults(body):
+        """The form's settings become the defaults of the Run form, run.sh and the policy worker."""
+        return run_settings.save(body)
 
     def run_command(self, body):
         job = self.jobs.get("run")
@@ -1257,6 +1249,8 @@ class Handler(BaseHTTPRequestHandler):
                     STUDIO.start_run(body)
                 elif path == "api/run/cmd":
                     STUDIO.run_command(body)
+                elif path == "api/run/defaults":
+                    STUDIO.save_run_defaults(body)
                 elif path == "api/record/stop":
                     STUDIO.stop_round()
                 elif path == "api/review":

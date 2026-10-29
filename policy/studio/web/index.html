@@ -288,11 +288,14 @@
             <label>Blend steps <input id="runBlend" type="number" min="0" max="16" step="1" value="8"></label>
             <label>Commands per target <input id="runSubsteps" type="number" min="1" max="5" step="1" value="3"></label>
             <label>Acceleration limit (0 = off) <input id="runAccel" type="number" min="0" max="253" step="10" value="0"></label>
+            <label>Wait for the model to act (s, 0 = off) <input id="runWaitAct" type="number" min="0" max="30" step="1" value="0"></label>
+            <label>End after the drop (s, 0 = off) <input id="runDropWait" type="number" min="0" max="5" step="0.5" value="0.5"></label>
             <label>Time limit (s) <input id="runMaxS" type="number" min="5" max="300" step="5" value="40"></label>
           </div>
           <label class="tick"><input id="runDry" type="checkbox"> Dry run: the model runs, the arm does not move</label>
           <p class="muted small" id="runHelp"></p>
           <button id="runApplyBtn" hidden>Use these for the next episode</button>
+          <button id="runSaveBtn" title="These settings are filled in next time, and used by run.sh and the policy worker">Save as default</button>
         </div>
         <div class="card">
           <h2>Last episode</h2>
