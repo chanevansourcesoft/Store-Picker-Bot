@@ -20,9 +20,11 @@ RUN pip install --no-cache-dir -r storepilot/backend/requirements.txt -e agent
 COPY --from=web /web/dist storepilot/frontend/dist
 # The products GR00T picks (policy/instructions.json is not in Git; the demo uses this copy)
 COPY storepilot/deploy/demo_instructions.json policy/instructions.json
-# Missions, stock and videos are written here. Hosts like Hugging Face run the container as user 1000.
-RUN mkdir -p /app/storepilot/data /app/data && chmod -R a+rwX /app/storepilot/data /app/data
-ENV STOREPILOT_MODE=mock STOREPILOT_HOST=0.0.0.0 PYTHONUNBUFFERED=1
+# All runtime data (missions, stock, videos) lives in /app/storepilot/data: mount ONE volume there.
+# Some hosts (e.g. Hugging Face) run the container as user 1000, so the folder is writable for all.
+RUN mkdir -p /app/storepilot/data && chmod -R a+rwX /app/storepilot/data
+ENV STOREPILOT_MODE=mock STOREPILOT_HOST=0.0.0.0 PYTHONUNBUFFERED=1 \
+    STOCK_FILE=/app/storepilot/data/stock.json
 EXPOSE 8080
 WORKDIR /app/storepilot/backend
 # Hosting platforms pass the port in $PORT
