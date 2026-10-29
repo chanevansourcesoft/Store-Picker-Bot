@@ -210,7 +210,7 @@ The worker answers on a small local web port (`--host`, `--port`, default `127.0
 | `placed` | ok: the item is in the basket, the arm at rest |
 | `no_grasp` | the episode ended at rest without a grasp: nothing picked |
 | `time_limit` | `--max_s` reached (after a grasp or not); the arm went back to rest |
-| `no_start` | with `--wait_act`: the model did not want to act (it may think the task is done); the arm went back to rest |
+| `no_start` | with `--wait_act`: the model did not want to act (it may think the task is done); the arm went back to rest. The message starts with "no grasp seen", like `no_grasp`, so the robot server retries it |
 | `holding` | the gripper still holds something at rest: a person should look |
 | `stopped` | stopped during the pick: the arm holds where it is |
 | `unknown_item` | not in `instructions.json`: the arm did not move |

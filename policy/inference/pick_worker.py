@@ -22,6 +22,7 @@ The arm never moves without a /pick or /home.
     no_grasp      the episode ended at rest without a grasp: nothing picked
     time_limit    --max_s reached (after a grasp or not); the arm went back to rest
     no_start      --wait_act: the model did not want to act (it may think the task is done); arm back at rest
+                  (the message starts with "no grasp seen", so callers that read it retry, as for no_grasp)
     holding       the gripper still holds something at rest: a person should look
     stopped       /stop during the pick: the arm holds where it is
     unknown_item  the item is not in instructions.json: the arm did not move
@@ -124,8 +125,9 @@ class Worker:
                 elif stopped_by == "back at rest":
                     result = {"ok": False, "reason": "no_grasp", "message": f"no grasp seen: {item} was not picked"}
                 elif stopped_by == "model did not start":
-                    result = {"ok": False, "reason": "no_start",
-                              "message": f"the model did not start within {self.args.wait_act:g} s: {item} was not picked"}
+                    # Starts like no_grasp, so callers that read the message retry it (the arm is at rest).
+                    result = {"ok": False, "reason": "no_start", "message": f"no grasp seen: the model did not start "
+                              f"within {self.args.wait_act:g} s, {item} was not picked"}
                 else:
                     result = {"ok": False, "reason": "time_limit", "message": f"time limit ({self.args.max_s:g} s), "
                               + ("after a grasp" if check.grasped else "no grasp seen")}
