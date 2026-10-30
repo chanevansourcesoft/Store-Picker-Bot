@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 440" width="1200" height="440" role="img" aria-label="Architecture: Nebius Token Factory serves Nemotron to the StorePilot dashboard on a Raspberry Pi, which talks to the Jetson over rosbridge and the robot server; the Jetson runs Nav2 and the GR00T policy worker that drive the mecanum base and the SO-100 arm">
+  <title>System architecture</title>
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .h { font-size: 16px; font-weight: 800; fill: #f8fafc; }
+    .t { font-size: 13px; fill: #cbd5e1; }
+    .s { font-size: 11px; fill: #94a3b8; }
+    .port { font-size: 11px; font-weight: 700; fill: #0b1220; }
+    .box { fill: #111c33; stroke: #24324f; stroke-width: 2; }
+    .inner { fill: #0f172a; stroke: #2b3a5c; stroke-width: 1.5; }
+    .wire { fill: none; stroke: #2b3a5c; stroke-width: 3; }
+    .flow { fill: none; stroke-width: 2; stroke-dasharray: 6 8; animation: flow 0.9s linear infinite; }
+    @keyframes flow { to { stroke-dashoffset: -14; } }
+    .beat { animation: beat 2s ease-in-out infinite; }
+    @keyframes beat { 50% { opacity: 0.35; } }
+    @media (prefers-reduced-motion: reduce) { .flow, .beat { animation: none; } }
+  </style>
+  <rect width="1200" height="440" rx="20" fill="#0b1220"/>
+
+  <!-- links (drawn first, under the boxes) -->
+  <path id="w-ai" d="M190 150 V200" class="wire"/>
+  <path d="M190 150 V200" class="flow" stroke="#38bdf8"/>
+  <path id="w-rb" d="M340 270 C390 270 390 98 440 98" class="wire"/>
+  <path d="M340 270 C390 270 390 98 440 98" class="flow" stroke="#fbbf24"/>
+  <path id="w-rs" d="M340 300 C390 300 390 238 440 238" class="wire"/>
+  <path d="M340 300 C390 300 390 238 440 238" class="flow" stroke="#76b900"/>
+  <path id="w-base" d="M840 168 C890 168 890 120 940 120" class="wire"/>
+  <path d="M840 168 C890 168 890 120 940 120" class="flow" stroke="#fbbf24"/>
+  <path id="w-arm" d="M840 308 C890 308 890 290 940 290" class="wire"/>
+  <path d="M840 308 C890 308 890 290 940 290" class="flow" stroke="#76b900"/>
+  <path d="M640 126 V140" class="wire"/>
+  <path d="M640 266 V280" class="wire"/>
+
+  <circle r="6" fill="#38bdf8"><animateMotion dur="1.6s" repeatCount="indefinite"><mpath href="#w-ai"/></animateMotion></circle>
+  <circle r="6" fill="#fbbf24"><animateMotion dur="2.2s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#w-rb"/></animateMotion></circle>
+  <circle r="6" fill="#76b900"><animateMotion dur="2.6s" repeatCount="indefinite"><mpath href="#w-rs"/></animateMotion></circle>
+  <circle r="6" fill="#fbbf24"><animateMotion dur="1.8s" repeatCount="indefinite"><mpath href="#w-base"/></animateMotion></circle>
+  <circle r="6" fill="#76b900"><animateMotion dur="2.4s" repeatCount="indefinite"><mpath href="#w-arm"/></animateMotion></circle>
+
+  <!-- cloud -->
+  <g transform="translate(40,40)">
+    <rect class="box" width="300" height="110" rx="16" stroke="#38bdf8"/>
+    <text x="20" y="32" class="h">Nebius Token Factory</text>
+    <text x="20" y="58" class="t">Nemotron Nano · reads orders</text>
+    <text x="20" y="78" class="t">Nemotron Super · plans picks</text>
+    <text x="20" y="98" class="t">Nemotron Ultra · store reports</text>
+  </g>
+
+  <!-- Pi -->
+  <g transform="translate(40,200)">
+    <rect class="box" width="300" height="200" rx="16"/>
+    <text x="20" y="32" class="h">Raspberry Pi 5 · StorePilot AI</text>
+    <text x="20" y="60" class="t">Touchscreen dashboard</text>
+    <text x="20" y="80" class="s">FastAPI + React, port 8080</text>
+    <text x="20" y="108" class="t">Nemotron agent + OrderTracker</text>
+    <text x="20" y="128" class="s">code guards every robot command</text>
+    <text x="20" y="156" class="t">Missions, stock, events</text>
+    <text x="20" y="176" class="s">SQLite, survives disconnects</text>
+  </g>
+
+  <!-- Jetson -->
+  <g transform="translate(420,40)">
+    <rect class="box" width="440" height="360" rx="16" stroke="#76b900"/>
+    <text x="20" y="22" class="h" dy="2">Jetson AGX Orin 64GB</text>
+    <circle cx="418" cy="20" r="6" fill="#76b900" class="beat"/>
+  </g>
+  <g transform="translate(440,70)">
+    <rect class="inner" width="400" height="56" rx="10"/>
+    <rect x="300" y="16" width="84" height="22" rx="11" fill="#fbbf24"/><text x="342" y="31" text-anchor="middle" class="port">:9090</text>
+    <text x="16" y="24" class="t" font-weight="700">rosbridge</text>
+    <text x="16" y="43" class="s">allow-list only · never /cmd_vel</text>
+  </g>
+  <g transform="translate(440,140)">
+    <rect class="inner" width="400" height="56" rx="10"/>
+    <text x="16" y="24" class="t" font-weight="700">ROS 2 Humble · Nav2</text>
+    <text x="16" y="43" class="s">AMCL on a saved map · slam_toolbox for new maps</text>
+  </g>
+  <g transform="translate(440,210)">
+    <rect class="inner" width="400" height="56" rx="10"/>
+    <rect x="300" y="16" width="84" height="22" rx="11" fill="#76b900"/><text x="342" y="31" text-anchor="middle" class="port">:8000</text>
+    <text x="16" y="24" class="t" font-weight="700">robot_server</text>
+    <text x="16" y="43" class="s">/navigate /pick /stop /health · tight rack parking</text>
+  </g>
+  <g transform="translate(440,280)">
+    <rect class="inner" width="400" height="56" rx="10"/>
+    <rect x="300" y="16" width="84" height="22" rx="11" fill="#76b900"/><text x="342" y="31" text-anchor="middle" class="port">:8790</text>
+    <text x="16" y="24" class="t" font-weight="700">GR00T policy worker</text>
+    <text x="16" y="43" class="s">model always loaded · one pick per request</text>
+  </g>
+  <text x="640" y="384" text-anchor="middle" class="s">The arm moves only when a pick or home is asked for.</text>
+
+  <!-- hardware -->
+  <g transform="translate(940,40)">
+    <rect class="box" width="220" height="360" rx="16"/>
+    <text x="20" y="32" class="h">Hardware</text>
+    <text x="20" y="72" class="t">Mecanum base</text>
+    <text x="20" y="90" class="s">motor board, wheel odometry</text>
+    <text x="20" y="128" class="t">2D LiDAR</text>
+    <text x="20" y="146" class="s">localization + obstacles</text>
+    <text x="20" y="240" class="t">SO-100 arm</text>
+    <text x="20" y="258" class="s">Feetech STS3215 servos</text>
+    <text x="20" y="296" class="t">Wrist + scene camera</text>
+    <text x="20" y="314" class="s">what GR00T sees</text>
+  </g>
+</svg>
