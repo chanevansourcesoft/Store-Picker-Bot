@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 240" width="1200" height="240" role="img" aria-label="Order pipeline: a typed order is read by Nemotron Nano, planned by Nemotron Super, driven by Nav2, picked by GR00T into the basket, and reported by Nemotron Ultra">
+  <title>From a typed order to a packed basket</title>
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .step { font-size: 12px; font-weight: 700; fill: #94a3b8; letter-spacing: 1px; }
+    .name { font-size: 17px; font-weight: 700; fill: #f8fafc; }
+    .what { font-size: 13px; fill: #cbd5e1; }
+    .card { fill: #111c33; stroke: #24324f; stroke-width: 2; }
+    .glow { fill: none; stroke-width: 3; opacity: 0; animation: glow 7.2s infinite; }
+    @keyframes glow { 0% { opacity: 0; } 3%, 15% { opacity: 1; } 19%, 100% { opacity: 0; } }
+    .flow { stroke-dasharray: 6 8; animation: flow 1s linear infinite; }
+    @keyframes flow { to { stroke-dashoffset: -14; } }
+    @media (prefers-reduced-motion: reduce) { .glow, .flow { animation: none; } .glow { opacity: 0; } }
+  </style>
+  <rect width="1200" height="240" rx="20" fill="#0b1220"/>
+
+  <!-- track under the cards with a travelling packet -->
+  <line x1="120" y1="200" x2="1080" y2="200" stroke="#24324f" stroke-width="4" stroke-linecap="round"/>
+  <line x1="120" y1="200" x2="1080" y2="200" stroke="#38bdf8" stroke-width="2" class="flow"/>
+  <circle r="8" fill="#76b900">
+    <animateMotion dur="7.2s" repeatCount="indefinite" path="M120 200 H1080" keyPoints="0;1;1" keyTimes="0;0.92;1" calcMode="linear"/>
+  </circle>
+
+  <!-- six stages: x = 35 + i*192 -->
+  <g transform="translate(35,40)">
+    <rect class="card" width="170" height="130" rx="14"/>
+    <rect class="glow" width="170" height="130" rx="14" stroke="#e2e8f0" style="animation-delay:0s"/>
+    <text x="16" y="28" class="step">1 · ORDER</text>
+    <text x="16" y="62" class="name">Customer</text>
+    <text x="16" y="86" class="what">types the order in</text>
+    <text x="16" y="104" class="what">plain words</text>
+  </g>
+  <g transform="translate(227,40)">
+    <rect class="card" width="170" height="130" rx="14"/>
+    <rect class="glow" width="170" height="130" rx="14" stroke="#38bdf8" style="animation-delay:1.2s"/>
+    <text x="16" y="28" class="step">2 · READ</text>
+    <text x="16" y="62" class="name">Nemotron Nano</text>
+    <text x="16" y="86" class="what">turns text into</text>
+    <text x="16" y="104" class="what">product ids + qty</text>
+  </g>
+  <g transform="translate(419,40)">
+    <rect class="card" width="170" height="130" rx="14"/>
+    <rect class="glow" width="170" height="130" rx="14" stroke="#38bdf8" style="animation-delay:2.4s"/>
+    <text x="16" y="28" class="step">3 · PLAN</text>
+    <text x="16" y="62" class="name">Nemotron Super</text>
+    <text x="16" y="86" class="what">route by shelf, calls</text>
+    <text x="16" y="104" class="what">robot tools (guarded)</text>
+  </g>
+  <g transform="translate(611,40)">
+    <rect class="card" width="170" height="130" rx="14"/>
+    <rect class="glow" width="170" height="130" rx="14" stroke="#fbbf24" style="animation-delay:3.6s"/>
+    <text x="16" y="28" class="step">4 · DRIVE</text>
+    <text x="16" y="62" class="name">ROS 2 Nav2</text>
+    <text x="16" y="86" class="what">AMCL + LiDAR, parks</text>
+    <text x="16" y="104" class="what">within cm of the rack</text>
+  </g>
+  <g transform="translate(803,40)">
+    <rect class="card" width="170" height="130" rx="14"/>
+    <rect class="glow" width="170" height="130" rx="14" stroke="#76b900" style="animation-delay:4.8s"/>
+    <text x="16" y="28" class="step">5 · PICK</text>
+    <text x="16" y="62" class="name">GR00T N1.7</text>
+    <text x="16" y="86" class="what">SO-100 arm: one unit</text>
+    <text x="16" y="104" class="what">into the basket</text>
+  </g>
+  <g transform="translate(995,40)">
+    <rect class="card" width="170" height="130" rx="14"/>
+    <rect class="glow" width="170" height="130" rx="14" stroke="#a78bfa" style="animation-delay:6s"/>
+    <text x="16" y="28" class="step">6 · REPORT</text>
+    <text x="16" y="62" class="name">Nemotron Ultra</text>
+    <text x="16" y="86" class="what">shift report and</text>
+    <text x="16" y="104" class="what">store analysis</text>
+  </g>
+</svg>
