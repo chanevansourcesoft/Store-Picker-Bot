@@ -21,9 +21,9 @@
 </p>
 
 > [!NOTE]
-> Work in progress. Navigation, the dashboard and the planner run on the real robot. The GR00T pick is
-> connected to the robot server and is being tested on the arm; the dashboard keeps picking switched
-> off (`STOREPILOT_MANIPULATION_VERIFIED=0`) until real picks are verified end to end.
+> Runs on the real robot: navigation, the dashboard, the Nemotron planner and **GR00T pick and place
+> on the SO-100 arm**. On a fresh install the arm stays still until you set
+> `STOREPILOT_MANIPULATION_VERIFIED=1`, so it never moves before someone has checked it.
 
 ---
 
