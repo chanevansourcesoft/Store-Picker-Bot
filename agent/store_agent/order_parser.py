@@ -115,11 +115,15 @@ def parse_order_offline(order_text, inventory):
     return clean_order(data, inventory)
 
 
-def parse_order(order_text):
+def parse_order(order_text, timeout=None):
+    """timeout: seconds to wait for Nemotron, with no retries (None = the client's defaults).
+    A timeout raises, so the caller can fall back to parse_order_offline."""
     inventory = load_inventory()
     if not has_llm():
         return parse_order_offline(order_text, inventory)
     client = get_client()
+    if timeout:
+        client = client.with_options(timeout=timeout, max_retries=0)
 
     response = client.chat.completions.create(
         model=MODEL_FAST,

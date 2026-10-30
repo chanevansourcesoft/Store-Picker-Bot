@@ -2,18 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import type { Snapshot } from "./types";
 
 /** POST/GET helper. Throws Error(detail) when the backend refuses. */
-export async function api<T = unknown>(path: string, body?: unknown): Promise<T> {
+export async function api<T = unknown>(path: string, body?: unknown, timeoutMs = 30000): Promise<T> {
   let res: Response;
   try {
     res = await fetch(path, {
       method: body === undefined ? "GET" : "POST",
       headers: body === undefined ? undefined : { "content-type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (e) {
     const timeout = (e as Error).name === "TimeoutError";
-    throw new Error(timeout ? `No answer from the dashboard backend in 30 s (${path})`
+    throw new Error(timeout ? `No answer from the dashboard backend in ${Math.round(timeoutMs / 1000)} s (${path})`
       : "Dashboard backend not reachable. It may be restarting: try again in a few seconds.");
   }
   const text = await res.text();

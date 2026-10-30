@@ -176,7 +176,8 @@ export function OrderPage({ snap, toast, goto }: {
   async function submit() {
     setBusy(true);
     try {
-      const mission = await api<Mission>("/api/orders", { text });
+      // Nemotron gets 20 s on the server, then the offline parser answers; 60 s covers that with room to spare
+      const mission = await api<Mission>("/api/orders", { text }, 60000);
       toast(mission.status === "rejected" ? `Order checked: cannot be done (M${mission.id})` : `Order parsed: mission M${mission.id} ready for review`,
         mission.status === "rejected" ? "err" : "ok");
       setQty({});
@@ -231,6 +232,9 @@ export function OrderPage({ snap, toast, goto }: {
           onClick={submit}>
           <Send size={18} aria-hidden />Submit order
         </Button>
+        {busy && (
+          <p className="mt-2 text-center text-[13px] font-medium text-plan">Nemotron Nano is reading the order…</p>
+        )}
         {m?.status === "awaiting_confirmation" && (
           <p className="mt-2 text-center text-[13px] text-dim">Start or discard mission M{m.id} first.</p>
         )}

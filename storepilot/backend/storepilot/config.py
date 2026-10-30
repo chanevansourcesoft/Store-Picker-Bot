@@ -96,6 +96,9 @@ STATION_LABELS = {
 }
 
 MAX_UNITS_PER_MISSION = 10   # sanity limit for one order
+# Nemotron Nano gets this long to read an order; slower (Nebius busy) = the offline keyword parser answers,
+# so the operator never waits for long. The dashboard itself waits up to 60 s for the answer.
+PARSE_TIMEOUT_SEC = float(os.environ.get("STOREPILOT_PARSE_TIMEOUT_SEC", "20"))
 
 
 def station_label(station):

@@ -151,15 +151,20 @@ class MissionManager:
         inventory = load_inventory()
         if has_llm():
             try:
-                parsed = parse_order(text)
+                parsed = parse_order(text, timeout=config.PARSE_TIMEOUT_SEC)
                 parser = f"NVIDIA Nemotron ({model_name(MODEL_FAST)})"
                 self.ai.record(True)
             except Exception as e:
-                self.ai.record(False, str(e))
                 parsed = parse_order_offline(text, inventory)
-                parser = "offline keyword parser (Nemotron unavailable)"
-                self.event("ai", "warning", f"Nemotron could not parse the order ({e.__class__.__name__}). "
-                           "Used the offline keyword parser instead.")
+                if "Timeout" in e.__class__.__name__:   # Nebius busy: slow, not broken
+                    parser = "offline keyword parser (Nemotron too slow)"
+                    self.event("ai", "warning", f"Nemotron took longer than {config.PARSE_TIMEOUT_SEC:.0f} s to read "
+                               "the order (Nebius busy). Used the offline keyword parser for this order.")
+                else:
+                    self.ai.record(False, str(e))
+                    parser = "offline keyword parser (Nemotron unavailable)"
+                    self.event("ai", "warning", f"Nemotron could not parse the order ({e.__class__.__name__}). "
+                               "Used the offline keyword parser instead.")
         else:
             parsed = parse_order_offline(text, inventory)
             parser = "offline keyword parser (no API key)"

@@ -262,6 +262,28 @@ def test_restock():
     print("PASS: test_restock")
 
 
+def test_slow_nemotron_falls_back():
+    """Nemotron slower than PARSE_TIMEOUT_SEC: the offline parser answers at once; the AI is not marked broken."""
+    class APITimeoutError(Exception):
+        pass
+
+    def slow(text, timeout=None):
+        assert timeout == config.PARSE_TIMEOUT_SEC, timeout
+        raise APITimeoutError("timed out")
+
+    store, robot, tel, m = services()
+    with patch("storepilot.missions.has_llm", return_value=True), patch("storepilot.missions.parse_order", slow), \
+            patch("storepilot.missions.load_inventory", INVENTORY):
+        draft = m.submit_order("2 chips please")
+    assert draft["status"] == "awaiting_confirmation" and draft["parser"] == "offline keyword parser (Nemotron too slow)"
+    assert [(i["item"], i["qty"]) for i in draft["items"]] == [("chips_packet", 2)], draft
+    texts = [e["text"] for e in store.recent_events(10)]
+    assert any("took longer than" in t for t in texts), texts
+    assert m.ai.snapshot()["state"] != "error", "slow is not broken"
+    tel.shutdown()
+    print("PASS: test_slow_nemotron_falls_back")
+
+
 def test_videos():
     """Everyone can list videos; adding and deleting need the team password; only YouTube links."""
     import asyncio
@@ -666,6 +688,7 @@ def run_all():
     test_code_retry_is_not_a_planner_decision()
     test_restock_rule()
     test_restock()
+    test_slow_nemotron_falls_back()
     test_videos()
     test_sim_moves_and_stops()
     test_offline_mission_runs_after_confirm_only()
