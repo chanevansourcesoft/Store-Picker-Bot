@@ -20,6 +20,10 @@
   Built for the <b>Nebius × NVIDIA Global AI Hackathon</b>, Physical AI track.
 </p>
 
+<p align="center">
+  <a href="https://huggingface.co/datasets/evanch317/store-picker-bot-dataset"><img alt="Dataset on Hugging Face" src="https://img.shields.io/badge/%F0%9F%A4%97%20Dataset-280%20real%20robot%20episodes-ffd21e?style=for-the-badge"></a>
+</p>
+
 > [!NOTE]
 > Runs on the real robot: navigation, the dashboard, the Nemotron planner and **GR00T pick and place
 > on the SO-100 arm**. On a fresh install the arm stays still until you set
@@ -99,7 +103,8 @@ teleoperated demos (SO-100 leader → follower, LeRobot)  →  GR00T N1.7 fine-t
         →  policy worker on the Jetson
 ```
 
-No simulation: all training data comes from the real robot.
+No simulation: all training data comes from the real robot. The dataset is public:
+**[evanch317/store-picker-bot-dataset](https://huggingface.co/datasets/evanch317/store-picker-bot-dataset)** (280 episodes, LeRobot format).
 
 ## 🏪 The store today
 
@@ -163,6 +168,7 @@ docs/         Architecture notes, tool feedback and the images in this README
 | Agent and tests | [agent/README.md](agent/README.md) |
 | Robot API, parking, the arm | [agent/robot_server/README.md](agent/robot_server/README.md) |
 | Recording, training, the policy | [policy/README.md](policy/README.md) |
+| Training dataset | [Hugging Face](https://huggingface.co/datasets/evanch317/store-picker-bot-dataset) |
 | Running a model on the arm, the policy worker | [policy/docs/INFERENCE.md](policy/docs/INFERENCE.md) |
 | Base, LiDAR, maps and Nav2 | [ros2_ws/README.md](ros2_ws/README.md) |
 | Our feedback on Nebius and NVIDIA tools | [docs/FEEDBACK.md](docs/FEEDBACK.md) |
