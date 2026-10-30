@@ -128,4 +128,11 @@ setsid nohup bash -c '
 ' _ "$SCRIPT_DIR" "$OUTPUT_DIR" "$KEEP_LAST" "$KEEP_MODEL_EVERY" "$LOG_DIR/$RUN_NAME" "${TRAIN[@]}" \
   >> "$LOG_DIR/$RUN_NAME.log" 2>&1 < /dev/null &
 echo $! > "$LOG_DIR/$RUN_NAME.pid"
+
+# On the PC's own screen, a window that says a training is running, so nobody reboots it.
+if [[ -S "/run/user/$UID/bus" ]] && command -v gnome-terminal >/dev/null && ! pgrep -f show_training.sh >/dev/null; then
+  DISPLAY="${DISPLAY:-:0}" XAUTHORITY="${XAUTHORITY:-/run/user/$UID/gdm/Xauthority}" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$UID/bus" \
+    gnome-terminal --title="TRAINING RUNNING" --geometry=80x24 -- "$SCRIPT_DIR/show_training.sh" >/dev/null 2>&1 || true
+fi
 echo "$RUN_NAME"

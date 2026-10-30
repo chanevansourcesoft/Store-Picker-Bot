@@ -128,6 +128,9 @@ python3 training_status.py             # every run, with its step, loss and chec
 CONDA_ENV=lerobot_env ./start_training.sh --resume <run name>   # continue it from its newest complete checkpoint
 ```
 
+On the training PC's own screen, a window opens that says a training is running, with its progress, so nobody reboots
+the PC (`show_training.sh`). Closing it does not stop the training. It needs someone logged in to the PC's desktop.
+
 `--resume` continues a stopped or failed run in the background, with the run's own steps, settings and
 learning-rate schedule. Its log goes on in the same file.
 
