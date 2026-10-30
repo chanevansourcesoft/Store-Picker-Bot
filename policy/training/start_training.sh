@@ -50,6 +50,7 @@ import json, shlex, sys
 m = json.load(open(sys.argv[1]))
 for key, var in (("gpu", "GPU"), ("keep_last", "KEEP_LAST"), ("keep_model_every", "KEEP_MODEL_EVERY")):
     print(f"{var}={shlex.quote(str(m[key]))}")
+print(f"export SPLIT_BACKBONE={shlex.quote(str(m.get('split_backbone') or ''))}")
 EOF
 )"
 elif [[ $# -eq 1 && "$1" != -* ]]; then
@@ -89,6 +90,7 @@ json.dump({"run": "$RUN_NAME", "dataset": "$DATASET_NAME", "started": time.time(
            "gpu": "$GPU", "steps": int("${STEPS:-30000}"), "batch_size": int("${BATCH_SIZE:-64}"),
            "save_freq": int("${SAVE_FREQ:-5000}"), "memory_mode": "${MEMORY_MODE:-low}",
            "keep_last": $KEEP_LAST, "keep_model_every": $KEEP_MODEL_EVERY, "log_freq": 10,
+           "split_backbone": "${SPLIT_BACKBONE:-}",
            "from_model": "${FROM_MODEL:-}" or None},
           open(sys.argv[1], "w"), indent=1)
 EOF

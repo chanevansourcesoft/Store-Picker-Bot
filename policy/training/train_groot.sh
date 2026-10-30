@@ -54,14 +54,15 @@ if [[ "$NUM_GPUS" -gt 1 ]]; then
 else
   GPU="${GPU:-1}"   # GPU 0 also drives the display
 fi
-BATCH_SIZE="${BATCH_SIZE:-64}"   # ~20 GB of 32 GB in low mode
+BATCH_SIZE="${BATCH_SIZE:-64}"   # ~25 GB of 32 GB in low mode
 STEPS="${STEPS:-30000}"
 SAVE_FREQ="${SAVE_FREQ:-5000}"
 # Video frames are decoded on the CPU, so the GPU needs enough loader workers.
 NUM_WORKERS="${NUM_WORKERS:-16}"
 # How much of the model fits in GPU memory:
 #   full : NVIDIA's recipe, fp32 weights, diffusion model trained. Needs ~40 GB or more per GPU.
-#   bf16 : bf16 weights, diffusion model trained. Meant for 32 GB GPUs. Not tested yet.
+#   bf16 : bf16 weights, diffusion model trained. Runs out of memory on one 32 GB GPU (tested at batch 64 and
+#          32). With two: GPU=1,0 SPLIT_BACKBONE=1 BATCH_SIZE=32 (the backbone runs on the second GPU).
 #   low  : bf16 weights, diffusion model frozen. Same as the sim project's training
 #          (batch 64 on one RTX 5090). Trains less of the model than bf16.
 MEMORY_MODE="${MEMORY_MODE:-low}"

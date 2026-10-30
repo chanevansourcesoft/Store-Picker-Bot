@@ -159,10 +159,26 @@ GR00T N1.7 has about 3.5 billion parameters.
 | `MEMORY_MODE` | What it does | GPU memory |
 |---|---|---|
 | `full` | NVIDIA's recipe: fp32 weights, everything trainable is trained | more than 32 GB: runs out of memory on the training PC, even at batch 8 |
-| `bf16` | bf16 weights, diffusion model trained (about 1.6 billion trainable parameters) | not tested yet |
-| `low` (default) | bf16 weights, diffusion model frozen (529 million trainable parameters) | about 20 GB at batch 64 |
+| `bf16` | bf16 base weights, diffusion model trained (about 1.6 billion trainable parameters) | more than one 32 GB GPU: runs out of memory at batch 64 and 32. Fits at batch 32 with the backbone on the second GPU, see below |
+| `low` (default) | bf16 base weights, diffusion model frozen (529 million trainable parameters) | about 25 GB at batch 64 |
 
 `low` is what the sim project used for its final training (batch 64, one RTX 5090).
+
+In every mode, `lerobot_train_groot.py` keeps the weights being trained in fp32, while the frozen weights stay as
+they are. Runs before 2026-10-30 trained them in bf16, where an optimizer step rounds away to nothing on any weight
+above about 0.03: in 20,000 steps, only 33% of the trained weights changed, and almost none of the large ones. Those
+models learned less than they could have.
+
+**Diffusion model on the training PC:** with `SPLIT_BACKBONE=1`, the frozen backbone runs on the second GPU and everything
+else on the first (one process, one model, unlike "Two GPUs" above), so the diffusion model can be trained in fp32:
+
+```bash
+GPU=1,0 SPLIT_BACKBONE=1 MEMORY_MODE=bf16 BATCH_SIZE=32 STEPS=100000 CONDA_ENV=lerobot_env \
+  ./start_training.sh <dataset folder>
+```
+
+Measured over 30 steps: 31 GB on GPU 1 (of 32), 10 GB on GPU 0, about 0.6 s per step, 12 GB per model. Start this kind
+of run from a terminal, not the app (the app uses one GPU). `--resume` keeps the setting.
 If a mode stops with `CUDA out of memory`, lower `BATCH_SIZE`.
 
 ## 6. Resume an interrupted run
