@@ -21,9 +21,9 @@
 </p>
 
 > [!NOTE]
-> Work in progress. Navigation, the dashboard and the planner run on the real robot. The GR00T pick is
-> connected to the robot server and is being tested on the arm; the dashboard keeps picking switched
-> off (`STOREPILOT_MANIPULATION_VERIFIED=0`) until real picks are verified end to end.
+> Runs on the real robot: navigation, the dashboard, the Nemotron planner and **GR00T pick and place
+> on the SO-100 arm**. On a fresh install the arm stays still until you set
+> `STOREPILOT_MANIPULATION_VERIFIED=1`, so it never moves before someone has checked it.
 
 ---
 
@@ -75,16 +75,28 @@ The model plans; the **code** decides what reaches the robot.
 |---|---|
 | **NVIDIA GR00T N1.7** (via LeRobot) | Vision-language-action policy for the arm, running on the Jetson |
 | **NVIDIA Nemotron** (Nano · Super · Ultra) | Reading orders, planning the picks, store reports |
-| **NVIDIA Cosmos** | Augmenting real demonstrations with lighting and background variations |
+| **NVIDIA Cosmos-Reason2-2B** | The vision-language backbone inside GR00T N1.7 |
 | **NVIDIA Jetson AGX Orin 64GB** | All on-robot compute |
-| **Nebius AI Cloud** | GR00T fine-tuning |
-| **Nebius Token Factory** | Serving Nemotron |
+| **Nebius Token Factory** | Serving Nemotron at runtime |
+
+### Where Token Factory helps
+
+Every order makes live calls to Token Factory, through one OpenAI-compatible API and one key. That lets each
+job use the right model size:
+
+| Model | Job | Why this size |
+|---|---|---|
+| `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B` | Read the typed order | Fast and cheap, runs on every order |
+| `nvidia/nemotron-3-super-120b-a12b` | Plan the picks with tool calls | Reliable tool calling over a whole order |
+| `nvidia/Nemotron-3-Ultra-550b-a55b` | Shift report and store analysis | Deep reasoning, called rarely |
+
+No model runs on the Pi, so the dashboard stays responsive, and the Jetson's GPU is left free for GR00T.
 
 ### Policy pipeline
 
 ```
-teleoperated demos (SO-100 leader → follower, LeRobot)  →  Cosmos augmentation
-        →  GR00T fine-tuning  →  policy worker on the same Jetson
+teleoperated demos (SO-100 leader → follower, LeRobot)  →  GR00T N1.7 fine-tuning (2× RTX 5090)
+        →  policy worker on the Jetson
 ```
 
 No simulation: all training data comes from the real robot.
@@ -153,6 +165,7 @@ docs/         Architecture notes, tool feedback and the images in this README
 | Recording, training, the policy | [policy/README.md](policy/README.md) |
 | Running a model on the arm, the policy worker | [policy/docs/INFERENCE.md](policy/docs/INFERENCE.md) |
 | Base, LiDAR, maps and Nav2 | [ros2_ws/README.md](ros2_ws/README.md) |
+| Our feedback on Nebius and NVIDIA tools | [docs/FEEDBACK.md](docs/FEEDBACK.md) |
 
 ## ⚙️ Setup
 
