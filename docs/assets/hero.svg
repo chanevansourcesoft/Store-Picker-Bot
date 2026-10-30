@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" width="1200" height="360" role="img" aria-label="Store Picker Bot: a mobile robot drives to a shelf, its arm picks a product into the basket, and it delivers the order">
+  <title>Store Picker Bot</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#14213d"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#76b900"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#1e2b47" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .title { font-size: 54px; font-weight: 800; fill: #f8fafc; letter-spacing: -1px; }
+    .sub { font-size: 20px; fill: #cbd5e1; }
+    .chip { font-size: 14px; font-weight: 600; fill: #0b1220; }
+    .status { font-size: 15px; font-weight: 600; fill: #e2e8f0; opacity: 0; }
+    .label { font-size: 11px; fill: #94a3b8; }
+
+    .robot { animation: drive 9s ease-in-out infinite; }
+    @keyframes drive {
+      0%, 6%   { transform: translateX(0); }
+      34%, 64% { transform: translateX(165px); }
+      90%, 100% { transform: translateX(0); }
+    }
+    .arm { transform-box: fill-box; transform-origin: 0% 100%; animation: reach 9s ease-in-out infinite; }
+    @keyframes reach {
+      0%, 36%  { transform: rotate(0deg); }
+      44%, 50% { transform: rotate(10deg); }
+      58%, 100% { transform: rotate(0deg); }
+    }
+    .item { animation: carry 9s ease-in-out infinite; }
+    @keyframes carry {
+      0%, 48%  { transform: translate(0, 0); opacity: 1; }
+      58%, 64% { transform: translate(-158px, 2px); opacity: 1; }
+      90%      { transform: translate(-323px, 2px); opacity: 1; }
+      95%      { transform: translate(-323px, 2px); opacity: 0; }
+      96%      { transform: translate(0, 0); opacity: 0; }
+      100%     { transform: translate(0, 0); opacity: 1; }
+    }
+    .ping { transform-box: fill-box; transform-origin: center; animation: ping 1.6s ease-out infinite; }
+    @keyframes ping { 0% { transform: scale(0.2); opacity: 0.9; } 100% { transform: scale(4); opacity: 0; } }
+    .wheel { transform-box: fill-box; transform-origin: center; animation: spin 0.9s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .s1 { animation: s1 9s infinite; } .s2 { animation: s2 9s infinite; } .s3 { animation: s3 9s infinite; }
+    .s4 { animation: s4 9s infinite; } .s5 { animation: s5 9s infinite; }
+    @keyframes s1 { 0%, 5% { opacity: 1; } 7%, 100% { opacity: 0; } }
+    @keyframes s2 { 0%, 6% { opacity: 0; } 8%, 34% { opacity: 1; } 36%, 100% { opacity: 0; } }
+    @keyframes s3 { 0%, 35% { opacity: 0; } 37%, 56% { opacity: 1; } 58%, 100% { opacity: 0; } }
+    @keyframes s4 { 0%, 57% { opacity: 0; } 59%, 66% { opacity: 1; } 68%, 100% { opacity: 0; } }
+    @keyframes s5 { 0%, 67% { opacity: 0; } 69%, 98% { opacity: 1; } 100% { opacity: 0; } }
+    .dot { animation: blink 1.2s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    @media (prefers-reduced-motion: reduce) {
+      .robot, .arm, .item, .ping, .wheel, .dot { animation: none; }
+      .s1, .s2, .s4, .s5 { animation: none; opacity: 0; }
+      .s3 { animation: none; opacity: 1; }
+    }
+  </style>
+
+  <rect width="1200" height="360" rx="20" fill="url(#bg)"/>
+  <rect width="1200" height="360" rx="20" fill="url(#grid)" opacity="0.6"/>
+
+  <!-- left: title -->
+  <text x="56" y="118" class="title">Store Picker Bot</text>
+  <rect x="58" y="136" width="300" height="5" rx="2.5" fill="url(#accent)"/>
+  <text x="56" y="182" class="sub">A physical-AI dark-store picker.</text>
+  <text x="56" y="210" class="sub">Nemotron plans the order · Nav2 drives · GR00T picks.</text>
+
+  <g transform="translate(56,240)">
+    <rect width="132" height="30" rx="15" fill="#76b900"/>
+    <text x="66" y="20" text-anchor="middle" class="chip">GR00T N1.7</text>
+    <rect x="144" width="126" height="30" rx="15" fill="#38bdf8"/>
+    <text x="207" y="20" text-anchor="middle" class="chip">Nemotron</text>
+    <rect x="282" width="104" height="30" rx="15" fill="#fbbf24"/>
+    <text x="334" y="20" text-anchor="middle" class="chip">ROS 2 Nav2</text>
+    <rect x="398" width="94" height="30" rx="15" fill="#e2e8f0"/>
+    <text x="445" y="20" text-anchor="middle" class="chip">Jetson</text>
+  </g>
+
+  <!-- status line -->
+  <g transform="translate(56,312)">
+    <circle cx="6" cy="-5" r="5" fill="#76b900" class="dot"/>
+    <text x="20" y="0" class="status s1">Order in: "2 ink boxes and a biscuit"</text>
+    <text x="20" y="0" class="status s2">Nemotron planned the route: drive to shelf_A</text>
+    <text x="20" y="0" class="status s3">GR00T: picking the biscuit from the lower shelf</text>
+    <text x="20" y="0" class="status s4">Placed in the basket ✓</text>
+    <text x="20" y="0" class="status s5">Delivering to the customer</text>
+  </g>
+
+  <!-- right: the store scene -->
+  <g>
+    <rect x="620" y="40" width="548" height="290" rx="16" fill="#0f172a" stroke="#1e2b47"/>
+    <line x1="640" y1="300" x2="1150" y2="300" stroke="#334155" stroke-width="2"/>
+    <text x="1080" y="320" class="label">shelf_A</text>
+    <text x="650" y="320" class="label">home</text>
+
+    <!-- rack: upper and lower shelf levels -->
+    <rect x="1000" y="80" width="8" height="220" fill="#475569"/>
+    <rect x="1140" y="80" width="8" height="220" fill="#475569"/>
+    <rect x="1000" y="150" width="148" height="6" fill="#64748b"/>
+    <rect x="1000" y="228" width="148" height="6" fill="#64748b"/>
+    <text x="1074" y="100" text-anchor="middle" class="label">upper_shelf</text>
+    <text x="1074" y="176" text-anchor="middle" class="label">lower_shelf</text>
+    <!-- upper: ink box, fevicol -->
+    <rect x="1020" y="118" width="34" height="32" rx="3" fill="#6366f1"/>
+    <rect x="1070" y="112" width="18" height="38" rx="5" fill="#f97316"/>
+    <rect x="1100" y="122" width="30" height="28" rx="3" fill="#6366f1"/>
+    <!-- lower: frooti (biscuit is the animated item) -->
+    <rect x="1090" y="196" width="22" height="32" rx="3" fill="#facc15"/>
+    <rect x="1118" y="196" width="22" height="32" rx="3" fill="#facc15"/>
+
+    <!-- the biscuit that gets picked -->
+    <g class="item">
+      <rect x="1018" y="206" width="40" height="22" rx="4" fill="#d97706"/>
+      <rect x="1023" y="211" width="30" height="4" rx="2" fill="#fde68a"/>
+    </g>
+
+    <!-- robot -->
+    <g class="robot">
+      <g transform="translate(680,250)">
+        <!-- lidar + scan ping -->
+        <circle cx="60" cy="-6" r="6" fill="#38bdf8"/>
+        <circle cx="60" cy="-6" r="6" fill="none" stroke="#38bdf8" stroke-width="2" class="ping"/>
+        <!-- basket -->
+        <path d="M8 -20 H62 L56 0 H14 Z" fill="none" stroke="#94a3b8" stroke-width="3"/>
+        <!-- body -->
+        <rect x="0" y="0" width="140" height="36" rx="8" fill="#1d4ed8"/>
+        <rect x="10" y="10" width="60" height="6" rx="3" fill="#93c5fd"/>
+        <circle cx="122" cy="18" r="5" fill="#76b900"/>
+        <!-- mecanum wheels -->
+        <g class="wheel"><circle cx="28" cy="42" r="12" fill="#0b1220" stroke="#94a3b8" stroke-width="3"/><line x1="20" y1="42" x2="36" y2="42" stroke="#94a3b8" stroke-width="2"/></g>
+        <g class="wheel"><circle cx="112" cy="42" r="12" fill="#0b1220" stroke="#94a3b8" stroke-width="3"/><line x1="104" y1="42" x2="120" y2="42" stroke="#94a3b8" stroke-width="2"/></g>
+        <!-- SO-100 arm: pivot at the bottom-left of its box -->
+        <g class="arm">
+          <path d="M100 -2 V-70 H150 V-52" fill="none" stroke="#e2e8f0" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="100" cy="-70" r="6" fill="#76b900"/>
+          <path d="M143 -52 h14" stroke="#76b900" stroke-width="5" stroke-linecap="round"/>
+        </g>
+      </g>
+    </g>
+  </g>
+</svg>
